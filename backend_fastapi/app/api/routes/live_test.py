@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
+from app.core.throttling import throttle_live_test_anon
 from app.models.content import CourseSyllabus
 from app.models.live_test import LiveTestDraft, LiveTestSession, LiveTestSubmission
 from app.schemas.live_test import (
@@ -135,7 +136,11 @@ def my_submissions(
 
 
 @router.get("/live-tests/{session_key}/", response_model=LiveTestPublicOut)
-def get_public_live_test(session_key: str, db: Session = Depends(get_db)) -> LiveTestPublicOut:
+def get_public_live_test(
+    session_key: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(throttle_live_test_anon),
+) -> LiveTestPublicOut:
     obj = _get_session(db, session_key)
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
@@ -178,6 +183,7 @@ def submit_answer(
     payload: LiveTestSubmissionCreateRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("student")),
+    _: None = Depends(throttle_live_test_anon),
 ) -> dict:
     obj = _get_session(db, session_key)
     if obj is None:
@@ -229,6 +235,7 @@ def upsert_draft(
     payload: LiveTestDraftUpsertRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("student")),
+    _: None = Depends(throttle_live_test_anon),
 ) -> dict:
     obj = _get_session(db, session_key)
     if obj is None:

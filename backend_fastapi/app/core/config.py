@@ -43,8 +43,16 @@ class Settings(BaseSettings):
 
     django_cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    django_allow_open_registration: bool = True
-    django_allow_legacy_prepared_content_api: bool = True
+    # Prod xavfsiz default: ochiq ro'yxatdan o'tish va legacy API o'chirilgan.
+    # Dev compose bu qiymatlarni aniq `True` qilib beradi.
+    django_allow_open_registration: bool = False
+    django_allow_legacy_prepared_content_api: bool = False
+
+    django_ai_education_rate: str = "60/hour"
+    django_ai_startup_rate: str = "40/hour"
+    django_login_rate: str = "20/minute"
+    django_live_test_anon_rate: str = "120/minute"
+    django_staff_ping_rate: str = "2/minute"
 
     @property
     def database_url(self) -> str:

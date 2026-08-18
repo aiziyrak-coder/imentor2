@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, require_roles
 from app.core.config import get_settings
 from app.core.db import get_db
+from app.core.throttling import throttle_education_ai
 from app.schemas.education_ai import (
     EducationAiBookReferencesRequest,
     EducationAiBookReferencesResponse,
@@ -48,6 +49,7 @@ def education_ai_completion(
     payload: EducationAiCompletionRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_education_ai),
 ) -> EducationAiCompletionResponse:
     settings = get_settings()
     api_key = settings.openai_api_key.strip()
@@ -95,6 +97,7 @@ def education_ai_completion_stream(
     payload: EducationAiCompletionRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_education_ai),
 ) -> StreamingResponse:
     """`/education-ai/completion/` bilan bir xil, lekin javobni SSE orqali
     oqim (stream) sifatida qaytaradi — frontend matnni generatsiya bo'lgan
@@ -160,6 +163,7 @@ def education_ai_book_references(
     payload: EducationAiBookReferencesRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_education_ai),
 ) -> EducationAiBookReferencesResponse:
     subject_code = payload.subject_code.strip()
     queries = [str(q or "") for q in payload.queries][:40]
@@ -205,6 +209,7 @@ def education_ai_case_context(
     payload: EducationAiCaseContextRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_education_ai),
 ) -> EducationAiCaseContextResponse:
     """Klinik keys generatsiyasi uchun RAG kontekst: kitob chunk'lari
     (mavjud bo'lsa) + PubMed/Semantic Scholar'dan REAL maqolalar — barchasi

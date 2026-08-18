@@ -8,6 +8,7 @@ from app.api.deps import AuthContext, require_roles
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import create_access_token, create_refresh_token, decode_token, verify_password
+from app.core.throttling import throttle_login
 from app.models.user import User
 from app.schemas.auth import LocalLoginRequest, LoginResponse, TokenRefreshRequest, TokenRefreshResponse
 from app.schemas.auth_extra import OnlineTestStudentLoginRequest
@@ -48,7 +49,11 @@ def _login_response(
 
 
 @router.post("/auth/local-login/", response_model=LoginResponse)
-def local_login(payload: LocalLoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def local_login(
+    payload: LocalLoginRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(throttle_login),
+) -> LoginResponse:
     username = payload.phone_digits
     user = auth_service.get_user_by_username(db, username)
 
@@ -95,11 +100,14 @@ def token_refresh(payload: TokenRefreshRequest, db: Session = Depends(get_db)) -
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Foydalanuvchi topilmadi.")
 
-    extra: dict = {}
-    if claims.get("role"):
-        extra["role"] = claims["role"]
-    if claims.get("student_id"):
-        extra["student_id"] = claims["student_id"]
+    role = auth_service.resolve_user_role_from_db(db, user)
+    jwt_role = str(claims.get("role") or "").strip().lower()
+    if jwt_role not in ("admin", "klinika_admin", "hodim", "student"):
+        jwt_role = ""
+    extra: dict = {"role": role or jwt_role or "hodim"}
+    student_id = auth_service.resolve_student_id(user, claims.get("student_id"))
+    if student_id:
+        extra["student_id"] = student_id
 
     return TokenRefreshResponse(
         access=create_access_token(user.id, extra),
@@ -108,7 +116,11 @@ def token_refresh(payload: TokenRefreshRequest, db: Session = Depends(get_db)) -
 
 
 @router.post("/auth/online-test-login/", response_model=LoginResponse)
-def online_test_student_login(payload: OnlineTestStudentLoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def online_test_student_login(
+    payload: OnlineTestStudentLoginRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(throttle_login),
+) -> LoginResponse:
     student_id = (payload.id or payload.student_id or payload.username or "").strip()
     password = (payload.password or "").strip()
     if not student_id or not password:

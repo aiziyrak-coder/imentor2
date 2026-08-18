@@ -67,18 +67,30 @@ def ensure_admin_group(db: Session, user: User) -> None:
         user.groups.append(group)
 
 
+def resolve_student_id(user: User, jwt_claim: str | None = None) -> str | None:
+    """OnlineTest talaba ID — JWT claim yoki shadow username `ot_<id>`."""
+    claim = str(jwt_claim or "").strip()
+    if claim:
+        return claim
+    uname = str(user.username or "")
+    if uname.startswith("ot_"):
+        sid = uname[3:].strip()
+        return sid or None
+    return None
+
+
 def resolve_login_role(db: Session, user: User, requested_role: str | None) -> str:
-    requested = (requested_role or "hodim").strip().lower()
+    """Login paytida rol — Django LocalLoginView bilan bir xil: DB guruhlari asosiy manba.
+
+    Guruhni `hodim`ga o'zgartirmaydi. Aks holda admin/klinika_admin har kirishda
+    (frontend role yubormaganda default `hodim`) huquqini yo'qotardi.
+    """
     if user.is_superuser:
         return "admin"
+    requested = (requested_role or "").strip().lower()
     if requested == "admin" and user.username in demo_admin_phone_allowlist():
         ensure_admin_group(db, user)
         return "admin"
-    if requested == "admin":
-        return resolve_user_role_from_db(db, user) or "hodim"
-    if requested == "hodim":
-        set_user_role_group(db, user, requested)
-        return requested
     return resolve_user_role_from_db(db, user) or "hodim"
 
 

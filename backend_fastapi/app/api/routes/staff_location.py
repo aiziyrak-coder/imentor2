@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
+from app.core.throttling import throttle_staff_ping
 from app.models.staff_location import CampusBuilding, StaffLocationAlert, StaffLocationPing, StaffScheduleSlot
 from app.schemas.staff_location import (
     CampusBuildingIn,
@@ -63,6 +64,7 @@ def staff_location_ping(
     payload: LocationPingRequest,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("hodim")),
+    _: None = Depends(throttle_staff_ping),
 ) -> dict:
     if payload.client_kind and payload.client_kind.strip().lower() != "mobile":
         raise HTTPException(status_code=400, detail="Joylashuv faqat telefon (mobil) qurilmadan qabul qilinadi.")

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
+from app.core.throttling import throttle_login
 from app.core.security import create_access_token, create_refresh_token
 from app.models.device_pairing import DevicePairingSession
 from app.schemas.device_pairing import DevicePairConfirmRequest, DevicePairCreateOut, DevicePairStatusOut
@@ -53,7 +54,10 @@ def _expire_stale(db: Session) -> None:
 
 
 @router.post("/device-pair/create/", response_model=DevicePairCreateOut, status_code=201)
-def device_pair_create(db: Session = Depends(get_db)) -> DevicePairCreateOut:
+def device_pair_create(
+    db: Session = Depends(get_db),
+    _: None = Depends(throttle_login),
+) -> DevicePairCreateOut:
     _expire_stale(db)
     token = secrets.token_urlsafe(24)
     desktop_secret = secrets.token_urlsafe(32)

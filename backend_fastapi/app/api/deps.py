@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import decode_token
 from app.models.user import User
+from app.services import auth_service
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -42,10 +43,16 @@ def get_current_auth(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Foydalanuvchi topilmadi.")
 
-    role = str(payload.get("role") or "").strip().lower()
-    if role not in ALLOWED_ROLES:
-        role = "hodim"
-    return AuthContext(user=user, role=role, student_id=payload.get("student_id"))
+    # Django kabi: DB guruhlari asosiy manba, JWT `role` faqat fallback.
+    # Aks holda o'chirilgan/tushirilgan admin token muddati tugaguncha (12 soat)
+    # admin endpointlariga kiraveradi.
+    db_role = auth_service.resolve_user_role_from_db(db, user)
+    jwt_role = str(payload.get("role") or "").strip().lower()
+    if jwt_role not in ALLOWED_ROLES:
+        jwt_role = ""
+    role = db_role or jwt_role or "hodim"
+    student_id = auth_service.resolve_student_id(user, payload.get("student_id"))
+    return AuthContext(user=user, role=role, student_id=student_id)
 
 
 def require_roles(*roles: str):

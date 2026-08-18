@@ -44,7 +44,21 @@ class AdminAuth(AuthenticationBackend):
         return True
 
     async def authenticate(self, request: Request) -> bool:
-        return bool(request.session.get("admin_user"))
+        username = request.session.get("admin_user")
+        if not username:
+            return False
+        from sqlalchemy.orm import Session
+
+        with Session(engine) as db:
+            user = get_user_by_username(db, str(username))
+            if user is None or not user.is_active:
+                request.session.clear()
+                return False
+            role = resolve_user_role_from_db(db, user)
+            if not (user.is_superuser or role == "admin"):
+                request.session.clear()
+                return False
+        return True
 
 
 class UserAdmin(ModelView, model=User):
