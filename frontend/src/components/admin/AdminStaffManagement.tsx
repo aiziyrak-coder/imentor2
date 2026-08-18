@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { normalizeStaffLogin, type UserRole } from '../../utils/localStaffAuth';
+import { isValidStaffLogin, normalizeStaffLogin, type UserRole } from '../../utils/localStaffAuth';
 import {
   fetchStaffDirectory,
   removeStaffMember,
@@ -57,6 +57,17 @@ function loadErrorMessage(err: unknown, t: ReturnType<typeof useUiText>['t']): s
   return t('admin.error.loadFailed');
 }
 
+function httpDetail(err: HttpError): string {
+  const body = err.body;
+  if (!body || typeof body !== 'object') return typeof err.body === 'string' ? err.body : '';
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object' && detail[0] && 'msg' in (detail[0] as object)) {
+    return String((detail[0] as { msg: unknown }).msg);
+  }
+  return '';
+}
+
 export default function AdminStaffManagement() {
   const { t, language } = useUiText();
   const [rows, setRows] = useState<StaffDirectoryEntry[]>([]);
@@ -68,6 +79,7 @@ export default function AdminStaffManagement() {
   const [editing, setEditing] = useState<StaffDirectoryEntry | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [showAdd, setShowAdd] = useState(false);
+  const [query, setQuery] = useState('');
   const [departments, setDepartments] = useState<DeptOption[]>([]);
 
   const load = useCallback(async () => {
@@ -138,6 +150,13 @@ export default function AdminStaffManagement() {
     setShowAdd(false);
   };
 
+  const closeForm = () => {
+    setEditing(null);
+    setShowAdd(false);
+    setForm(emptyForm);
+    setError(null);
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -145,6 +164,10 @@ export default function AdminStaffManagement() {
     try {
       if (form.password.length < 6) {
         setError(t('admin.error.passwordMin'));
+        return;
+      }
+      if (!isValidStaffLogin(form.phoneDisplay.trim())) {
+        setError(t('admin.error.invalidPhone'));
         return;
       }
       // Telefon raqami yoki Xodim ID — ikkalasi ham username sifatida saqlanadi.
@@ -170,6 +193,8 @@ export default function AdminStaffManagement() {
         setError(t('admin.error.forbidden'));
       } else if (err instanceof Error && err.message === 'no-admin-token') {
         setError(t('admin.error.noAdminToken'));
+      } else if (err instanceof HttpError) {
+        setError(httpDetail(err) || t('admin.error.createFailed'));
       } else {
         setError(t('admin.error.createFailed'));
       }
@@ -203,12 +228,8 @@ export default function AdminStaffManagement() {
         setError(t('admin.error.forbidden'));
       } else if (err instanceof Error && err.message === 'no-admin-token') {
         setError(t('admin.error.noAdminToken'));
-      } else if (err instanceof HttpError && err.status === 400) {
-        const detail =
-          err.body && typeof err.body === 'object' && 'detail' in err.body
-            ? String((err.body as { detail: unknown }).detail)
-            : '';
-        setError(detail || t('admin.error.updateFailed'));
+      } else if (err instanceof HttpError) {
+        setError(httpDetail(err) || t('admin.error.updateFailed'));
       } else {
         setError(t('admin.error.updateFailed'));
       }
@@ -283,6 +304,17 @@ export default function AdminStaffManagement() {
     return list;
   }, [rows, sortDirection, sortKey]);
 
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase();
+    if (!q) return sortedRows;
+    return sortedRows.filter((u) => {
+      const hay = [u.display_name, u.phone_display, u.phone_digits, u.role, u.department]
+        .join(' ')
+        .toLocaleLowerCase();
+      return hay.includes(q);
+    });
+  }, [query, sortedRows]);
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -291,6 +323,15 @@ export default function AdminStaffManagement() {
     setSortKey(key);
     setSortDirection('asc');
   };
+
+  useEffect(() => {
+    if (!(showAdd || editing)) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showAdd, editing]);
 
   const sortLabel = (key: SortKey, label: string) => (
     <button
@@ -332,12 +373,22 @@ export default function AdminStaffManagement() {
         </button>
       </div>
 
-      {error && (
+      {error && !(showAdd || editing) && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-800">
           <AlertCircle size={18} className="shrink-0 mt-0.5" />
           {error}
         </div>
       )}
+
+      <label className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 py-2">
+        <Search size={16} className="text-black/40 shrink-0" />
+        <input
+          className="w-full bg-transparent text-[14px] outline-none"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('admin.searchPlaceholder')}
+        />
+      </label>
 
       <div className="ios-glass rounded-2xl border border-white/60 overflow-hidden">
         <div className="overflow-x-auto">
@@ -360,8 +411,14 @@ export default function AdminStaffManagement() {
                     {t('admin.loading')}
                   </td>
                 </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center text-black/45">
+                    {t('admin.noStaffInList')}
+                  </td>
+                </tr>
               ) : (
-                sortedRows.map((u) => (
+                filteredRows.map((u) => (
                   <tr key={u.phone_digits} className="hover:bg-black/[0.02]">
                     <td className="px-4 py-2.5 font-medium text-black/90">{u.display_name}</td>
                     <td className="px-4 py-2.5 font-mono text-[12px]">{u.phone_display}</td>
@@ -406,12 +463,38 @@ export default function AdminStaffManagement() {
       <AnimatePresence>
         {(showAdd || editing) && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="ios-glass rounded-2xl border border-white/60 p-6 space-y-4"
+            className="fixed inset-0 z-[240] flex items-end sm:items-center justify-center bg-slate-900/50 p-0 sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={closeForm}
           >
-            <h2 className="text-lg font-bold text-black/90">{editing ? t('admin.editStaff') : t('admin.newStaff')}</h2>
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 16 }}
+              className="ios-glass w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/60 p-6 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-lg font-bold text-black/90">{editing ? t('admin.editStaff') : t('admin.newStaff')}</h2>
+              <button
+                type="button"
+                onClick={closeForm}
+                className="p-2 rounded-lg hover:bg-black/5 text-black/50"
+                aria-label={t('admin.cancel')}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {error && (
+              <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-800">
+                <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                {error}
+              </div>
+            )}
             <form onSubmit={editing ? handleUpdate : handleCreate} className="grid sm:grid-cols-2 gap-3">
               <label className="space-y-1 sm:col-span-2">
                 <span className="text-[11px] font-semibold text-black/50">{t('admin.phone')}</span>
@@ -534,17 +617,14 @@ export default function AdminStaffManagement() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditing(null);
-                    setShowAdd(false);
-                    setForm(emptyForm);
-                  }}
+                  onClick={closeForm}
                   className="px-6 py-3 rounded-xl border border-black/10 font-semibold"
                 >
                   {t('admin.cancel')}
                 </button>
               </div>
             </form>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
