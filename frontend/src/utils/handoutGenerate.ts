@@ -51,19 +51,26 @@ async function rasterizePack(params: {
         /* ignore */
       }
     }
-    await new Promise((r) => window.setTimeout(r, 160));
+    await new Promise((r) => window.setTimeout(r, 220));
     const el = host.querySelector('[data-handout-poster]') as HTMLElement | null;
     if (!el) throw new Error('handout-poster-missing');
-    const canvas = await html2canvas(el, {
-      scale: 1.5,
-      useCORS: true,
-      backgroundColor: '#edf2f7',
-      logging: false,
-      width: HANDOUT_POSTER_W,
-      height: HANDOUT_POSTER_H,
-      windowWidth: HANDOUT_POSTER_W,
-      windowHeight: HANDOUT_POSTER_H,
-    });
+    const runCanvas = (scale: number) =>
+      html2canvas(el, {
+        scale,
+        useCORS: true,
+        backgroundColor: '#edf2f7',
+        logging: false,
+        width: HANDOUT_POSTER_W,
+        height: HANDOUT_POSTER_H,
+        windowWidth: HANDOUT_POSTER_W,
+        windowHeight: HANDOUT_POSTER_H,
+      });
+    let canvas: HTMLCanvasElement;
+    try {
+      canvas = await runCanvas(1.2);
+    } catch {
+      canvas = await runCanvas(1);
+    }
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('handout-png-empty'))), 'image/png');
     });

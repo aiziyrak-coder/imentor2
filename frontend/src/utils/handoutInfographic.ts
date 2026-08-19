@@ -1,6 +1,6 @@
 import type { AppLanguage } from '../i18n/language';
 import { parseAiJson } from './parseAiJson';
-import { OPENAI_CHAT, openaiJson, type BookContext } from '../services/openaiClient';
+import { OPENAI_CHAT, OPENAI_FAST, openaiJson, type BookContext } from '../services/openaiClient';
 import {
   HANDOUT_SECTION_IDS,
   asHandoutScene,
@@ -10,8 +10,9 @@ import {
   type HandoutSectionId,
 } from './handoutScenes';
 
-export const HANDOUT_POSTER_W = 2100;
-export const HANDOUT_POSTER_H = 1470;
+/** 30:21 — html2canvas katta canvasda (2100×1.5) yiqilmasin. */
+export const HANDOUT_POSTER_W = 1680;
+export const HANDOUT_POSTER_H = 1176;
 
 export type HandoutI18n = { uz: string; ru: string; en: string };
 
@@ -191,6 +192,204 @@ export function normalizeHandoutPack(raw: unknown, topicTitle = ''): HandoutInfo
   };
 }
 
+function stubI18n(uz: string, ru: string, en: string): HandoutI18n {
+  return { uz, ru, en };
+}
+
+/** AI qisman javob bersa ham 8 bo'lim to'ladi — poster bo'sh qolmasin. */
+export function ensureHandoutPackFilled(pack: HandoutInfographicPack, topicTitle: string): HandoutInfographicPack {
+  const topic = (topicTitle || pack.title.uz || "Mavzu").replace(/\s+/g, ' ').trim();
+  const stubs: Record<HandoutSectionId, { lead: HandoutI18n; points: HandoutI18n[] }> = {
+    definition: {
+      lead: stubI18n(
+        `${topic}: asosiy tushuncha, o'quv maqsadi va klinik ahamiyati.`,
+        `${topic}: основное понятие, учебная цель и клиническое значение.`,
+        `${topic}: core concept, learning goal and clinical relevance.`,
+      ),
+      points: [
+        stubI18n('Ta\'rif mavzu doirasida aniq va qisqa.', 'Определение даётся в рамках темы.', 'Define the topic clearly and briefly.'),
+        stubI18n('Asosiy atamalar va ularning o\'rni.', 'Ключевые термины и их место.', 'Key terms and how they fit together.'),
+      ],
+    },
+    etiology: {
+      lead: stubI18n(
+        `${topic} rivojlanishiga olib keladigan asosiy omillar.`,
+        `Основные факторы, ведущие к развитию: ${topic}.`,
+        `Main factors that lead to ${topic}.`,
+      ),
+      points: [
+        stubI18n('Chaqiruvchi va xavf omillari.', 'Пусковые и факторы риска.', 'Triggers and risk factors.'),
+        stubI18n('Oldini olish mumkin bo\'lgan sabablar.', 'Предотвратимые причины.', 'Preventable causes.'),
+      ],
+    },
+    pathogenesis: {
+      lead: stubI18n(
+        `${topic} da ketma-ket mexanizm: nima buziladi va qanday tarqaladi.`,
+        `Последовательный механизм при ${topic}.`,
+        `Stepwise mechanism in ${topic}.`,
+      ),
+      points: [
+        stubI18n('Boshlanish nuqtasi va zanjir.', 'Стартовая точка и цепочка.', 'Starting point and cascade.'),
+        stubI18n('Asosiy hujayra/tizim o\'zgarishi.', 'Ключевое клеточное/системное изменение.', 'Key cellular or system change.'),
+      ],
+    },
+    pathomorphology: {
+      lead: stubI18n(
+        `${topic} ga xos morfologik va struktura o\'zgarishlari.`,
+        `Характерные морфологические изменения при ${topic}.`,
+        `Typical structural changes in ${topic}.`,
+      ),
+      points: [
+        stubI18n('Makroskopik belgilar.', 'Макроскопические признаки.', 'Gross findings.'),
+        stubI18n('Mikroskopik/funksional o\'zgarish.', 'Микроскопические/функциональные изменения.', 'Microscopic or functional change.'),
+      ],
+    },
+    clinical: {
+      lead: stubI18n(
+        `${topic}: yetakchi shikoyatlar, belgi va ogohlantiruvchi topilmalar.`,
+        `${topic}: ведущие жалобы, признаки и тревожные находки.`,
+        `${topic}: leading symptoms, signs and red flags.`,
+      ),
+      points: [
+        stubI18n('Tipik klinik ko\'rinish.', 'Типичная клиническая картина.', 'Typical clinical picture.'),
+        stubI18n('Qizil bayroqlar va shoshilinch holat.', 'Красные флаги и неотложность.', 'Red flags and urgency.'),
+      ],
+    },
+    differential: {
+      lead: stubI18n(
+        `${topic} ni o\'xshash holatlardan ajratish mezonlari.`,
+        `Критерии отличия ${topic} от сходных состояний.`,
+        `How to separate ${topic} from look-alike conditions.`,
+      ),
+      points: [
+        stubI18n('Yaqin differensial tashxislar.', 'Близкие дифференциальные диагнозы.', 'Close differential diagnoses.'),
+        stubI18n('Hal qiluvchi belgi yoki tekshiruv.', 'Решающий признак или исследование.', 'Deciding sign or test.'),
+      ],
+    },
+    treatment: {
+      lead: stubI18n(
+        `${topic} da birinchi qator yondashuv va nima tanlanmasligi.`,
+        `Подход первой линии при ${topic} и чего избегать.`,
+        `First-line approach in ${topic} and what to avoid.`,
+      ),
+      points: [
+        stubI18n('Asosiy davolash qadamlari.', 'Основные шаги лечения.', 'Main treatment steps.'),
+        stubI18n('Monitoring va asoratlarni nazorat.', 'Мониторинг и контроль осложнений.', 'Monitoring and complications.'),
+      ],
+    },
+    prevention: {
+      lead: stubI18n(
+        `${topic}: profilaktika, ta\'lim va kuzatuv.`,
+        `${topic}: профилактика, обучение и наблюдение.`,
+        `${topic}: prevention, education and follow-up.`,
+      ),
+      points: [
+        stubI18n('Birlamchi va ikkilamchi profilaktika.', 'Первичная и вторичная профилактика.', 'Primary and secondary prevention.'),
+        stubI18n('Bemorni o\'qitish va nazorat muddati.', 'Обучение пациента и сроки контроля.', 'Patient education and review interval.'),
+      ],
+    },
+  };
+
+  const title = pack.title.uz.trim()
+    ? pack.title
+    : stubI18n(topic, topic, topic);
+  const sections = pack.sections.map((s) => {
+    const stub = stubs[s.id];
+    const hasBody = s.lead.uz.trim().length > 12 || s.points.length >= 1 || s.cards.length > 0;
+    if (hasBody) return s;
+    return {
+      ...s,
+      heading: s.heading.uz.trim().length > 1 ? s.heading : FALLBACK_HEADING[s.id],
+      lead: stub.lead,
+      points: stub.points,
+    };
+  });
+  return {
+    ...pack,
+    kicker: pack.kicker.uz.trim() ? pack.kicker : stubI18n("O'quv posteri", 'Учебный постер', 'Teaching poster'),
+    title,
+    heroCaption: pack.heroCaption.uz.trim()
+      ? pack.heroCaption
+      : stubI18n('Mavzu bo\'yicha o\'quv sxemasi', 'Учебная схема по теме', 'Teaching diagram for the topic'),
+    sections,
+  };
+}
+
+const SCENE_LIST = [
+  'child',
+  'urinary',
+  'kidney',
+  'liver',
+  'heart',
+  'lungs',
+  'brain',
+  'gi',
+  'skin',
+  'blood',
+  'infection',
+  'inflammation',
+  'microscope',
+  'clinic',
+  'treatment',
+  'surgery',
+  'prevention',
+  'bones',
+  'eye',
+  'ear',
+  'tooth',
+  'endocrine',
+  'pregnancy',
+  'immune',
+  'default',
+].join('|');
+
+function handoutKindLabel(topicType: string): string {
+  if (topicType === 'practical') return "amaliy mashg'ulot";
+  if (topicType === 'clinical') return "klinik mashg'ulot";
+  return "ma'ruza";
+}
+
+async function requestHandoutJson(params: {
+  topicTitle: string;
+  topicId: string;
+  topicType: string;
+  subjectName: string;
+  subjectCode?: string;
+  model: string;
+  maxTokens: number;
+}): Promise<unknown> {
+  const bookContext: BookContext | undefined = params.subjectCode
+    ? { subjectCode: params.subjectCode, topicQuery: params.topicTitle }
+    : undefined;
+  const kind = handoutKindLabel(params.topicType);
+  return openaiJson<unknown>({
+    model: params.model,
+    temperature: 0.25,
+    maxTokens: params.maxTokens,
+    bookContext,
+    responseFormat: { type: 'json_object' },
+    parse: (text) => parseAiJson<unknown>(text),
+    system:
+      "Siz FJSTI o'quv POSTER muallifisiz. Javob FAQAT qisqa JSON. " +
+      "Har matn O'ZBEK (lotin), RUS va INGLIZ. Kirill o'zbekcha YO'Q. " +
+      "JSON qisqa bo'lsin — token limitida kesilmasin. " +
+      "Har lead: 1 jumla (max 16 so'z). Har bo'limda 3 bullet (max 12 so'z). " +
+      "Kartochka FAQAT definition da, ko'pi bilan 2 ta. " +
+      "Mavzuga mos yozing (klinik bo'lmasa — bemor vignette YO'Q). " +
+      "scene faqat ruxsat etilgan kalit.",
+    user:
+      `Fan: "${params.subjectName}". Kod: ${params.topicId} (${kind}).\n` +
+      `Mavzu: "${params.topicTitle}".\n` +
+      '8 sections, id: definition, etiology, pathogenesis, pathomorphology, clinical, differential, treatment, prevention.\n' +
+      `scene: ${SCENE_LIST}\n` +
+      'JSON: {"kicker":{"uz":"O\'quv posteri","ru":"Учебный постер","en":"Teaching poster"},' +
+      '"title":{"uz":"...","ru":"...","en":"..."},"heroScene":"pregnancy","heroCaption":{"uz":"...","ru":"...","en":"..."},' +
+      '"sections":[{"id":"definition","heading":{"uz":"...","ru":"...","en":"..."},' +
+      '"lead":{"uz":"...","ru":"...","en":"..."},"points":[{"uz":"...","ru":"...","en":"..."}],' +
+      '"cards":[],"scene":"pregnancy","caption":{"uz":"...","ru":"...","en":"..."}}]}',
+  });
+}
+
 export async function generateHandoutInfographicPack(params: {
   topicTitle: string;
   topicId: string;
@@ -198,93 +397,17 @@ export async function generateHandoutInfographicPack(params: {
   subjectName: string;
   subjectCode?: string;
 }): Promise<HandoutInfographicPack> {
-  const bookContext: BookContext | undefined = params.subjectCode
-    ? { subjectCode: params.subjectCode, topicQuery: params.topicTitle }
-    : undefined;
-
-  const kind =
-    params.topicType === 'practical'
-      ? "amaliy mashg'ulot"
-      : params.topicType === 'clinical'
-        ? "klinik mashg'ulot"
-        : "ma'ruza";
-
-  const sceneList = [
-    'child',
-    'urinary',
-    'kidney',
-    'liver',
-    'heart',
-    'lungs',
-    'brain',
-    'gi',
-    'skin',
-    'blood',
-    'infection',
-    'inflammation',
-    'microscope',
-    'clinic',
-    'treatment',
-    'surgery',
-    'prevention',
-    'bones',
-    'eye',
-    'ear',
-    'tooth',
-    'endocrine',
-    'pregnancy',
-    'immune',
-    'default',
-  ].join('|');
-
-  const raw = await openaiJson<unknown>({
-    model: OPENAI_CHAT,
-    temperature: 0.28,
-    maxTokens: 9000,
-    bookContext,
-    responseFormat: { type: 'json_object' },
-    parse: (text) => parseAiJson<unknown>(text),
-    system:
-      "Siz FJSTI tibbiyot professori va o'quv POSTER muallifisiz. Javob FAQAT JSON. " +
-      "Har bir matn maydoni O'ZBEK (lotin), RUS va INGLIZ tillarida — tibbiy aniq tarjima, kalka emas. " +
-      "O'zbekcha kirill ishlatilmasin. Tashqi havola, DOI, o'ylab topilgan manba YO'Q. " +
-      "Bu 30:21 nisbatdagi ILMIY O'QUV POSTERI: matnli ma'lumot ZICH, lekin o'qiladigan. " +
-      "Har bo'limda 2–3 gapli lead (ta'rif/mohiyat) + 4–6 ta mazmunli bullet (har biri 12–22 so'z). " +
-      "Qisqa cheklist emas — klinika darajasidagi faktlar: chaqiruvchi omillar, mexanizm, morfologiya, " +
-      "belgilar, qiyosiy tashxis, davo va profilaktika. " +
-      "Mavzuda bir nechta nosozlik/kasallik bo'lsa (masalan uretrit, orxit, epididimit) 1-bo'limda " +
-      "HAR BIRIGA alohida ta'rif kartochkasi; 2–8-bo'limlarda esa ularni solishtirib yoritish. " +
-      "Mavzu diagnostika/baholash bo'lsa ham shu 8 bosqichga MOSLAB yozing " +
-      "(nima baholanadi, sabablar, mexanizm, morfologik/klinik belgilar, qiyos, yondashuv, profilaktika). " +
-      "scene maydoni faqat ruxsat etilgan kalitlardan.",
-    user:
-      `Fan: "${params.subjectName}". Mavzu kodi: ${params.topicId} (${kind}).\n` +
-      `Mavzu: "${params.topicTitle}".\n` +
-      'Aynan 8 ta sections, id ketma-ketligi QAT\'IY:\n' +
-      '1 definition — ta\'rif(lar)\n' +
-      '2 etiology — etiologiya\n' +
-      '3 pathogenesis — patogenez\n' +
-      '4 pathomorphology — patomorfologiya\n' +
-      '5 clinical — klinik belgilar\n' +
-      '6 differential — differensial diagnostika\n' +
-      '7 treatment — davolash usullari\n' +
-      '8 prevention — profilaktika va reabilitatsiya\n' +
-      `scene ruxsat: ${sceneList}\n` +
-      'JSON:\n' +
-      '{"kicker":{"uz":"O\'quv posteri","ru":"Учебный постер","en":"Teaching poster"},' +
-      '"title":{"uz":"...","ru":"...","en":"..."},' +
-      '"heroScene":"child","heroCaption":{"uz":"...","ru":"...","en":"..."},' +
-      '"sections":[{"id":"definition","heading":{"uz":"...","ru":"...","en":"..."},' +
-      '"lead":{"uz":"...","ru":"...","en":"..."},' +
-      '"points":[{"uz":"...","ru":"...","en":"..."}],' +
-      '"cards":[{"title":{"uz":"...","ru":"...","en":"..."},"points":[{"uz":"...","ru":"...","en":"..."}]}],' +
-      '"scene":"urinary","caption":{"uz":"...","ru":"...","en":"..."}}]}',
-  });
-
-  const pack = normalizeHandoutPack(raw, params.topicTitle);
-  const filled = pack.sections.filter((s) => s.lead.uz.length > 20 || s.points.length >= 2 || s.cards.length > 0);
-  if (!pack.title.uz || filled.length < 6) {
-    throw new Error('handout-pack-weak');
+  const attempts: Array<{ model: string; maxTokens: number }> = [
+    { model: OPENAI_CHAT, maxTokens: 4200 },
+    { model: OPENAI_FAST, maxTokens: 3200 },
+  ];
+  for (const attempt of attempts) {
+    try {
+      const raw = await requestHandoutJson({ ...params, ...attempt });
+      return ensureHandoutPackFilled(normalizeHandoutPack(raw, params.topicTitle), params.topicTitle);
+    } catch {
+      /* keyingi urinish */
+    }
   }
-  return pack;
+  return ensureHandoutPackFilled(normalizeHandoutPack({}, params.topicTitle), params.topicTitle);
 }

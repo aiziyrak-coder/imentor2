@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeHandoutPack, pickHandoutText } from './handoutInfographic';
+import { ensureHandoutPackFilled, normalizeHandoutPack, pickHandoutText } from './handoutInfographic';
 import { inferTopicScene, sceneForSection } from './handoutScenes';
 
 describe('normalizeHandoutPack', () => {
@@ -29,6 +29,13 @@ describe('normalizeHandoutPack', () => {
     expect(pickHandoutText(pack.sections[6].heading, 'ru')).toBe('Лечение');
     expect(pack.sections[7].cards[0].title.uz).toContain('Dieta');
     expect(pack.heroScene).toBe('liver');
+  });
+
+  it('bo\'sh AI javobida ham 8 bo\'limni to\'ldiradi', () => {
+    const pack = ensureHandoutPackFilled(normalizeHandoutPack({}, 'Urug\'lanish'), 'Urug\'lanish');
+    expect(pack.title.uz).toContain('Urug');
+    expect(pack.sections).toHaveLength(8);
+    expect(pack.sections.every((s) => s.lead.uz.length > 10 || s.points.length > 0)).toBe(true);
   });
 
   it('picks urinary art for urethritis-type topics', () => {
