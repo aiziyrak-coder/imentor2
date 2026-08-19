@@ -1,10 +1,11 @@
 import React from 'react';
-import { BookOpen, Check, FlaskConical, Loader2, X } from 'lucide-react';
+import { BookOpen, Check, FlaskConical, Loader2, Microscope, NotebookPen, Stethoscope, X } from 'lucide-react';
 import type { SyllabusTopic } from '../../services/aiService';
 import type { AppLanguage } from '../../i18n/language';
 import { instructionLanguageBadge } from '../../utils/syllabusInstructionLanguage';
 import { countTopicsByType } from '../../utils/syllabusVariant';
 import type { SyllabusVariant as VariantRow } from '../../utils/syllabusVariant';
+import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import { useUiText } from '../../i18n/useUiText';
 
 export type SyllabusUploadPreviewData = {
@@ -43,6 +44,14 @@ export default function SyllabusUploadPreview({
     (n, v) => n + countTopicsByType(v.topics).practicals,
     0,
   );
+  const totalIndependents = data.variants.reduce(
+    (n, v) => n + countTopicsByType(v.topics).independents,
+    0,
+  );
+  const totalLabs = data.variants.reduce(
+    (n, v) => n + countTopicsByType(v.topics).labs,
+    0,
+  );
   const totalTopics = data.variants.reduce((n, v) => n + v.topics.length, 0);
   const missingDirection =
     requireDirection && data.variants.some((v) => !(v.directionCode || '').trim());
@@ -76,10 +85,13 @@ export default function SyllabusUploadPreview({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <StatCard label={t('admin.previewTotal')} value={String(totalTopics)} />
             <StatCard label={t('admin.previewLecture')} value={String(totalLectures)} icon={<BookOpen size={14} />} />
             <StatCard label={t('admin.previewPractical')} value={String(totalPracticals)} icon={<FlaskConical size={14} />} />
+            <StatCard label={t('admin.previewClinical')} value={String(totalClinicals)} icon={<Stethoscope size={14} />} />
+            <StatCard label={t('admin.previewIndependent')} value={String(totalIndependents)} icon={<NotebookPen size={14} />} />
+            <StatCard label={t('admin.previewLab')} value={String(totalLabs)} icon={<Microscope size={14} />} />
           </div>
 
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-[11px] text-indigo-900 leading-relaxed">
@@ -89,7 +101,10 @@ export default function SyllabusUploadPreview({
           {data.variants.map((variant, index) => {
             const counts = countTopicsByType(variant.topics);
             const lectures = variant.topics.filter((x) => x.type === 'lecture');
-            const practicals = variant.topics.filter((x) => x.type !== 'lecture');
+            const practicals = variant.topics.filter((x) => x.type === 'practical');
+            const clinicals = variant.topics.filter((x) => x.type === 'clinical');
+            const independents = variant.topics.filter((x) => x.type === 'independent');
+            const labs = variant.topics.filter((x) => x.type === 'lab');
             return (
               <div
                 key={`${variant.file_name}-${index}`}
@@ -127,6 +142,9 @@ export default function SyllabusUploadPreview({
                     total: variant.topics.length,
                     lectures: counts.lectures,
                     practicals: counts.practicals,
+                    clinicals: counts.clinicals,
+                    independents: counts.independents,
+                    labs: counts.labs,
                   })}
                 </div>
                 <div className="max-h-56 overflow-y-auto divide-y divide-slate-50">
@@ -147,7 +165,40 @@ export default function SyllabusUploadPreview({
                       topics={practicals}
                       saving={saving}
                       onTitleChange={(topicId, title) => {
-                        const ti = variant.topics.findIndex((x) => x.id === topicId && x.type !== 'lecture');
+                        const ti = variant.topics.findIndex((x) => x.id === topicId && x.type === 'practical');
+                        if (ti >= 0) updateTopicTitle(index, ti, title);
+                      }}
+                    />
+                  )}
+                  {clinicals.length > 0 && (
+                    <TopicGroup
+                      title={t('admin.clinicalsSection')}
+                      topics={clinicals}
+                      saving={saving}
+                      onTitleChange={(topicId, title) => {
+                        const ti = variant.topics.findIndex((x) => x.id === topicId && x.type === 'clinical');
+                        if (ti >= 0) updateTopicTitle(index, ti, title);
+                      }}
+                    />
+                  )}
+                  {independents.length > 0 && (
+                    <TopicGroup
+                      title={t('admin.independentsSection')}
+                      topics={independents}
+                      saving={saving}
+                      onTitleChange={(topicId, title) => {
+                        const ti = variant.topics.findIndex((x) => x.id === topicId && x.type === 'independent');
+                        if (ti >= 0) updateTopicTitle(index, ti, title);
+                      }}
+                    />
+                  )}
+                  {labs.length > 0 && (
+                    <TopicGroup
+                      title={t('admin.labsSection')}
+                      topics={labs}
+                      saving={saving}
+                      onTitleChange={(topicId, title) => {
+                        const ti = variant.topics.findIndex((x) => x.id === topicId && x.type === 'lab');
                         if (ti >= 0) updateTopicTitle(index, ti, title);
                       }}
                     />
@@ -213,19 +264,27 @@ function TopicGroup({
   saving: boolean;
   onTitleChange: (topicId: string, title: string) => void;
 }) {
+  const { t } = useUiText();
   return (
     <div className="px-3 py-2 space-y-2">
       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{title}</p>
       {topics.map((topic) => {
-        const isLecture = topic.type === 'lecture';
+        const chip =
+          topic.type === 'lecture'
+            ? 'bg-blue-50 text-blue-700'
+            : topic.type === 'clinical'
+              ? 'bg-teal-50 text-teal-700'
+              : topic.type === 'independent'
+                ? 'bg-amber-50 text-amber-800'
+                : topic.type === 'lab'
+                  ? 'bg-slate-100 text-slate-700'
+                  : 'bg-violet-50 text-violet-700';
         return (
           <div key={`${topic.type}-${topic.id}`} className="flex items-start gap-2">
             <span
-              className={`shrink-0 mt-1.5 font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                isLecture ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'
-              }`}
+              className={`shrink-0 mt-1.5 font-bold px-1.5 py-0.5 rounded text-[10px] max-w-[11rem] leading-tight ${chip}`}
             >
-              {topic.id}
+              {formatTopicLessonLabel(topic.type, topic.id, t)}
             </span>
             <input
               value={topic.title}

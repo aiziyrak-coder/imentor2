@@ -36,20 +36,19 @@ import StaffPanel from './staff/StaffPanel';
 import { isTopicContextComplete } from '../utils/syllabusTopicContext';
 import MedicalReferencesList from './staff/MedicalReferencesList';
 import CaseAnswerView from './staff/CaseAnswerView';
+import CaseScenarioView from './staff/CaseScenarioView';
 import type { MedicalReference } from '../utils/medicalReferences';
 import {
   staffInput,
   staffLabel,
   staffBtnSecondary,
-  staffExplainBody,
-  staffExplainBox,
-  staffExplainTitle,
-  staffQuestionText,
   STAFF_HEADING,
 } from './staff/staffUi';
 import { messageFromAiError } from '../utils/aiErrors';
 import { parseKeywordsInput } from '../utils/generationVariety';
 import { downloadCaseAnswerKeyPdf, downloadCaseScenariosPdf } from '../utils/buildCasePdf';
+import { loadLatestLectureText } from '../utils/lectureExcerpt';
+import { makeGenerationScope } from '../utils/subjectDomain';
 import {
   caseFocusAccentBorderClass,
   caseFocusBadgeClass,
@@ -179,7 +178,20 @@ export default function CaseStudies() {
     setLoading(true);
     setError(null);
     try {
-      const data = await aiService.generateCaseStudy(currentTopic, contentLanguage, parsedKeywords, globalTopic?.subjectCode);
+      const lectureText = await loadLatestLectureText(globalTopic ?? currentTopic);
+      const scope = makeGenerationScope({
+        topic: currentTopic,
+        subjectName: globalTopic?.subjectName,
+        departmentName: globalTopic?.departmentName,
+        lectureText,
+      });
+      const data = await aiService.generateCaseStudy(
+        currentTopic,
+        contentLanguage,
+        parsedKeywords,
+        globalTopic?.subjectCode,
+        scope,
+      );
       // Avval ekranga chiqaramiz: generatsiya bir necha daqiqa vaqt va pul
       // oladi, saqlash yiqilsa ham natija foydalanuvchida qolishi kerak.
       applySession(data, null);
@@ -435,7 +447,12 @@ export default function CaseStudies() {
                       </div>
                       {/* Vaziyat matni — kartochkadagi asosiy o'qiladigan qism:
                           qalinroq va kengroq satr oralig'i bilan. */}
-                      <p className={`${staffQuestionText} whitespace-pre-wrap`}>{q.scenario}</p>
+                      <CaseScenarioView
+                        text={q.scenario}
+                        language={language}
+                        focus={q.focus}
+                        domain={caseSession.domain}
+                      />
                     </div>
                   </div>
 
@@ -453,19 +470,19 @@ export default function CaseStudies() {
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
-                        className={`mt-4 ${staffExplainBox}`}
+                        className="mt-4 space-y-3"
                       >
-                        <h4 className={staffExplainTitle}>
+                        <h4 className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-slate-600">
                           <KeyRound size={14} className="shrink-0" />
-                          {t('case.answerLabel')}
+                          {caseSession.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}
                         </h4>
-                        <CaseAnswerView
-                          text={q.answer}
-                          refAnchorPrefix={`case-${i}-ref`}
-                          citeUrls={citeUrlsFromRefs(q.references)}
-                        />
-                        {/* Matndagi FOYDALANILGAN ADABIYOTLAR CaseAnswerView ichida
-                            kesiladi; ro'yxat bir marta ko'rsatiladi. */}
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
+                          <CaseAnswerView
+                            text={q.answer}
+                            refAnchorPrefix={`case-${i}-ref`}
+                            citeUrls={citeUrlsFromRefs(q.references)}
+                          />
+                        </div>
                         {q.references && q.references.length > 0 && (
                           <MedicalReferencesList
                             references={q.references}
@@ -478,8 +495,10 @@ export default function CaseStudies() {
                   </div>
 
                   {/* Print: har doim javobni ko'rsatish */}
-                  <div className="hidden print:block px-7 pb-7 pl-[84px]">
-                    <h4 className={staffExplainTitle}>{t('case.answerLabel')}</h4>
+                  <div className="hidden print:block px-7 pb-7 pl-[84px] space-y-3">
+                    <h4 className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-slate-600">
+                      {caseSession.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}
+                    </h4>
                     <CaseAnswerView
                       text={q.answer}
                       refAnchorPrefix={`case-${i}-ref`}

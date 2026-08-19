@@ -1,6 +1,7 @@
 import { httpJson } from '../api/httpClient';
 import { unwrapPagedResults, type PagedResponse } from '../api/pagedResults';
 import { getBackendAccessToken } from './backendAuth';
+import { isStructuredTopicNorm } from './syllabusTopicContext';
 
 export type TopicVideo = {
   id: number;
@@ -23,6 +24,16 @@ function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
+function matchesTopic(row: TopicVideo, syllabusId: number, variantLabel: string, topicCode: string): boolean {
+  const norm = (row.topic_norm || '').trim().toLowerCase();
+  if (!isStructuredTopicNorm(norm)) return false;
+  const variant = (variantLabel || '').trim().toLowerCase() || 'asosiy';
+  const code = topicCode.trim().toLowerCase().replace(/\s+/g, '');
+  const expected = `${syllabusId}::${variant}::${code}`;
+  const emptyVariant = `${syllabusId}::::${code}`;
+  return norm === expected || (variant === 'asosiy' && norm === emptyVariant);
+}
+
 /** O'qituvchi: mavzu bo'yicha videolar (embed uchun) */
 export async function fetchTopicVideos(params: {
   syllabusId: number;
@@ -31,9 +42,10 @@ export async function fetchTopicVideos(params: {
 }): Promise<TopicVideo[]> {
   const token = await getBackendAccessToken();
   if (!token) return [];
+  const variantLabel = params.variantLabel.trim() || 'asosiy';
   const query = new URLSearchParams({
     syllabus_id: String(params.syllabusId),
-    variant_label: params.variantLabel,
+    variant_label: variantLabel,
     topic_code: params.topicCode,
   });
   try {
@@ -41,7 +53,8 @@ export async function fetchTopicVideos(params: {
       `${apiBaseUrl()}/v1/topic-videos/?${query.toString()}`,
       { headers: authHeaders(token), timeoutMs: 20000 },
     );
-    return Array.isArray(data) ? data : [];
+    const rows = Array.isArray(data) ? data : [];
+    return rows.filter((row) => matchesTopic(row, params.syllabusId, variantLabel, params.topicCode));
   } catch {
     return [];
   }

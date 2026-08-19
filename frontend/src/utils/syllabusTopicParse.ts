@@ -1,14 +1,23 @@
-import type { SyllabusTopic } from '../services/aiService';
+import type { SyllabusTopic, SyllabusTopicType } from '../services/aiService';
 
-export type TopicSection = 'lecture' | 'practical' | 'unknown';
+export type TopicSection = 'lecture' | 'practical' | 'clinical' | 'independent' | 'lab' | 'unknown';
 
 const LECTURE_PREFIXES = ['M', 'L', 'Л'];
 const PRACTICAL_PREFIXES = ['A', 'P', 'П'];
+const CLINICAL_PREFIXES = ['K', 'К'];
+const INDEPENDENT_PREFIXES = ['I'];
+const LAB_PREFIXES = ['B'];
 
 const LECTURE_SECTION_RE =
   /^(?:ma'?ruza(?:lar)?|maruza|lecture(?:s)?|лекци[яиюеё]?|теоретическ|theor)/iu;
+const CLINICAL_SECTION_RE =
+  /^(?:klinik\s*mashg|clinical|клиническ)/iu;
+const INDEPENDENT_SECTION_RE =
+  /^(?:mustaqil|самостоят|independent|\bsrc\b|\bсрс\b)/iu;
+const LAB_SECTION_RE =
+  /^(?:laborator|лаборатор|\blab\b)/iu;
 const PRACTICAL_SECTION_RE =
-  /^(?:amaliy(?:\s+mashg'?ulot)?|practical(?:s)?|практик[аиеё]?|лаборатор)/iu;
+  /^(?:amaliy(?:\s+mashg'?ulot)?|practical(?:s)?|практик[аиеё]?|seminar|семинар)/iu;
 
 const UNIVERSITY_NOISE_RE =
   /(?:universitet|institut|akademiy|vazirlik|ministry|республик|o[''`]zbekiston|uzbekistan|fakultet|kafedra|department|syllabus|учебн(?:ая|ый)\s+программ)/iu;
@@ -18,22 +27,30 @@ const ACADEMIC_YEAR_RE = /^\d{4}\s*[-–/]\s*\d{2,4}$/;
 export function detectTopicSection(line: string): TopicSection {
   const trimmed = line.trim();
   if (!trimmed) return 'unknown';
+  if (/\bseminar\b|\bсеминар/iu.test(trimmed)) return 'practical';
   if (LECTURE_SECTION_RE.test(trimmed)) return 'lecture';
+  if (CLINICAL_SECTION_RE.test(trimmed)) return 'clinical';
+  if (INDEPENDENT_SECTION_RE.test(trimmed)) return 'independent';
+  if (LAB_SECTION_RE.test(trimmed)) return 'lab';
   if (PRACTICAL_SECTION_RE.test(trimmed)) return 'practical';
   return 'unknown';
 }
 
-export function inferTopicTypeFromId(id: string): 'lecture' | 'practical' {
+export function inferTopicTypeFromId(id: string): SyllabusTopicType {
   const first = (id[0] || '').toUpperCase();
+  if (first === 'S') return 'practical';
   if (LECTURE_PREFIXES.includes(first)) return 'lecture';
+  if (CLINICAL_PREFIXES.includes(first)) return 'clinical';
   if (PRACTICAL_PREFIXES.includes(first)) return 'practical';
+  if (INDEPENDENT_PREFIXES.includes(first)) return 'independent';
+  if (LAB_PREFIXES.includes(first)) return 'lab';
   return 'lecture';
 }
 
-/** Har qanday ID formatini M1/L1/A1/P1 ko'rinishiga keltirish */
+/** Har qanday ID formatini L1/A1/K1 ko'rinishiga keltirish */
 export function coerceTopicId(
   rawId: string,
-  type: 'lecture' | 'practical',
+  type: SyllabusTopicType,
   fallbackIndex: number,
 ): string {
   const compact = String(rawId || '')
@@ -41,11 +58,18 @@ export function coerceTopicId(
     .toUpperCase()
     .replace(/\s+/g, '');
 
-  const standard = compact.match(/^([MALPЛП])(\d{1,2})$/u);
+  const standard = compact.match(/^([MALPKIBSЛПКк])(\d{1,2})$/u);
   if (standard) {
     const letter = standard[1].toUpperCase();
     const num = standard[2];
-    if (LECTURE_PREFIXES.includes(letter) || PRACTICAL_PREFIXES.includes(letter)) {
+    if (letter === 'S') return `A${num}`;
+    if (
+      LECTURE_PREFIXES.includes(letter) ||
+      PRACTICAL_PREFIXES.includes(letter) ||
+      CLINICAL_PREFIXES.includes(letter) ||
+      INDEPENDENT_PREFIXES.includes(letter) ||
+      LAB_PREFIXES.includes(letter)
+    ) {
       return `${letter}${num}`;
     }
   }
@@ -56,13 +80,27 @@ export function coerceTopicId(
   if (labeled) return `L${labeled[1]}`;
 
   const practicalLabeled = compact.match(
-    /^(?:AMALIY|PRACTICAL|PRAKTIK|ПРАКТИК|ПРАК)(?:№|#)?(\d{1,2})$/u,
+    /^(?:AMALIY|PRACTICAL|PRAKTIK|ПРАКТИК|ПРАК|SEMINAR|СЕМИНАР)(?:№|#)?(\d{1,2})$/u,
   );
   if (practicalLabeled) return `A${practicalLabeled[1]}`;
 
+  const clinicalLabeled = compact.match(
+    /^(?:KLINIK|CLINICAL|КЛИНИЧ)(?:№|#)?(\d{1,2})$/u,
+  );
+  if (clinicalLabeled) return `K${clinicalLabeled[1]}`;
+
   const numOnly = compact.match(/^(\d{1,2})$/);
   const num = numOnly ? numOnly[1] : String(fallbackIndex);
-  const prefix = type === 'practical' ? 'A' : 'L';
+  const prefix =
+    type === 'practical'
+      ? 'A'
+      : type === 'clinical'
+        ? 'K'
+        : type === 'independent'
+          ? 'I'
+          : type === 'lab'
+            ? 'B'
+            : 'L';
   return `${prefix}${num}`;
 }
 
@@ -71,12 +109,16 @@ export function normalizeSyllabusTopics(input: SyllabusTopic[]): SyllabusTopic[]
     .filter((t) => t && typeof t.title === 'string')
     .map((t, index) => {
       const title = t.title.trim();
-      const inferredType: 'lecture' | 'practical' =
-        t.type === 'practical' || t.type === 'lecture'
+      const inferredType: SyllabusTopicType =
+        t.type === 'practical' ||
+        t.type === 'lecture' ||
+        t.type === 'clinical' ||
+        t.type === 'independent' ||
+        t.type === 'lab'
           ? t.type
           : inferTopicTypeFromId(String(t.id || ''));
       const id = coerceTopicId(String(t.id || ''), inferredType, index + 1);
-      return { id, title, type: inferTopicTypeFromId(id) } as SyllabusTopic;
+      return { id, title, type: inferredType } as SyllabusTopic;
     })
     .filter((t) => t.title.length > 2 && !isWeakTopicTitle(t.title));
 
@@ -91,7 +133,15 @@ export function normalizeSyllabusTopics(input: SyllabusTopic[]): SyllabusTopic[]
   const parseOrder = (id: string): [number, number] => {
     const prefix = id[0] || '';
     const num = Number((id.match(/\d+/) || ['0'])[0]);
-    const group = LECTURE_PREFIXES.includes(prefix) ? 0 : 1;
+    const group = LECTURE_PREFIXES.includes(prefix)
+      ? 0
+      : PRACTICAL_PREFIXES.includes(prefix)
+        ? 1
+        : CLINICAL_PREFIXES.includes(prefix)
+          ? 2
+          : INDEPENDENT_PREFIXES.includes(prefix)
+            ? 3
+            : 4;
     return [group, Number.isFinite(num) ? num : 0];
   };
 
@@ -133,7 +183,7 @@ export function normalizeSyllabusDocumentText(text: string): string {
     .replace(/^Мl$/gim, 'M1');
 }
 
-const STANDALONE_TOPIC_ID_RE = /^([MALP])(\d{1,2})$/i;
+const STANDALONE_TOPIC_ID_RE = /^([MALPKIB])(\d{1,2})$/i;
 
 const RUBRIC_NOISE_RE =
   /(?:fanning\s+mohiyati|xatolik\s+va\s+chalkashlik|savollarga\s+aniq|aniq\s+tasavvurga|to[''`]liq\s+yorita|meyoriy-huquqiy|baholash\s+mezon|o[''`]zlashtirish\s+darajasi)/iu;
@@ -146,7 +196,7 @@ function isNoiseLine(line: string): boolean {
   if (/^\d{1,2}\s*>/.test(t)) return true;
   if (UNIVERSITY_NOISE_RE.test(t)) return true;
   if (RUBRIC_NOISE_RE.test(t)) return true;
-  if (LECTURE_SECTION_RE.test(t) || PRACTICAL_SECTION_RE.test(t)) return true;
+  if (LECTURE_SECTION_RE.test(t) || PRACTICAL_SECTION_RE.test(t) || CLINICAL_SECTION_RE.test(t)) return true;
   if (/^mashg['’]?ulotlar\s+shakli:/i.test(t)) return true;
   if (/^fan\s+ma[/\\]?muni$/i.test(t)) return true;
   return false;
@@ -233,12 +283,15 @@ function parseTopicFromLine(
   section: TopicSection,
   lectureCounter: { n: number },
   practicalCounter: { n: number },
+  clinicalCounter: { n: number },
+  independentCounter: { n: number },
+  labCounter: { n: number },
 ): SyllabusTopic | null {
   const trimmed = line.trim();
   if (trimmed.length < 4) return null;
 
   const standard = trimmed.match(
-    /\b([MALPЛП])\s*[-.):]?\s*(\d{1,2})\b[\s:.)–\-]*(.+)$/iu,
+    /\b([MALPKIBЛПК])\s*[-.):]?\s*(\d{1,2})\b[\s:.)–\-]*(.+)$/iu,
   );
   if (standard) {
     const prefix = standard[1].toUpperCase();
@@ -263,8 +316,41 @@ function parseTopicFromLine(
     };
   }
 
+  const clinicalLine = trimmed.match(
+    /^(?:klinik\s*mashg'?ulot|clinical|клиническ(?:ое)?(?:\s+занятие)?)\s*[#№.]?\s*(\d{1,2})[\s:.)–\-]+(.+)$/iu,
+  );
+  if (clinicalLine) {
+    return {
+      id: `K${clinicalLine[1]}`,
+      title: clinicalLine[2].trim(),
+      type: 'clinical',
+    };
+  }
+
+  const labLine = trimmed.match(
+    /^(?:laborator(?:iya)?|лаборатор(?:ная)?)\s*[#№.]?\s*(\d{1,2})[\s:.)–\-]+(.+)$/iu,
+  );
+  if (labLine) {
+    return {
+      id: `B${labLine[1]}`,
+      title: labLine[2].trim(),
+      type: 'lab',
+    };
+  }
+
+  const independentLine = trimmed.match(
+    /^(?:mustaqil(?:\s+ta'?lim)?|самостоят|independent)\s*[#№.]?\s*(\d{1,2})[\s:.)–\-]+(.+)$/iu,
+  );
+  if (independentLine) {
+    return {
+      id: `I${independentLine[1]}`,
+      title: independentLine[2].trim(),
+      type: 'independent',
+    };
+  }
+
   const practicalLine = trimmed.match(
-    /^(?:amaliy|practical|практик[аиеё]?|лаборатор(?:ная)?)\s*[#№.]?\s*(\d{1,2})[\s:.)–\-]+(.+)$/iu,
+    /^(?:amaliy|practical|практик[аиеё]?|seminar|семинар)\s*[#№.]?\s*(\d{1,2})[\s:.)–\-]+(.+)$/iu,
   );
   if (practicalLine) {
     return {
@@ -276,8 +362,26 @@ function parseTopicFromLine(
 
   const numbered = trimmed.match(/^(\d{1,2})[\s.)–\-]+(.{4,})$/);
   if (numbered && section !== 'unknown' && Number(numbered[1]) > 0) {
-    const type = section === 'practical' ? 'practical' : 'lecture';
-    const counter = type === 'practical' ? practicalCounter : lectureCounter;
+    const type: SyllabusTopicType =
+      section === 'practical'
+        ? 'practical'
+        : section === 'clinical'
+          ? 'clinical'
+          : section === 'independent'
+            ? 'independent'
+            : section === 'lab'
+              ? 'lab'
+              : 'lecture';
+    const counter =
+      type === 'practical'
+        ? practicalCounter
+        : type === 'clinical'
+          ? clinicalCounter
+          : type === 'independent'
+            ? independentCounter
+            : type === 'lab'
+              ? labCounter
+              : lectureCounter;
     counter.n += 1;
     const id = coerceTopicId(numbered[1], type, counter.n);
     return {
@@ -296,6 +400,9 @@ export function extractTopicsByRegex(text: string): SyllabusTopic[] {
   let section: TopicSection = 'unknown';
   const lectureCounter = { n: 0 };
   const practicalCounter = { n: 0 };
+  const clinicalCounter = { n: 0 };
+  const independentCounter = { n: 0 };
+  const labCounter = { n: 0 };
 
   let pendingId: string | null = null;
   let pendingTitleLines: string[] = [];
@@ -326,7 +433,15 @@ export function extractTopicsByRegex(text: string): SyllabusTopic[] {
       continue;
     }
 
-    const inlineTopic = parseTopicFromLine(line, section, lectureCounter, practicalCounter);
+    const inlineTopic = parseTopicFromLine(
+      line,
+      section,
+      lectureCounter,
+      practicalCounter,
+      clinicalCounter,
+      independentCounter,
+      labCounter,
+    );
     if (inlineTopic) {
       flushPending();
       result.push(inlineTopic);
@@ -395,9 +510,15 @@ function isPlausibleSubjectName(value?: string): boolean {
 export function countTopicsByType(topics: SyllabusTopic[]): {
   lectures: number;
   practicals: number;
+  clinicals: number;
+  independents: number;
+  labs: number;
 } {
   return {
     lectures: topics.filter((t) => t.type === 'lecture').length,
     practicals: topics.filter((t) => t.type === 'practical').length,
+    clinicals: topics.filter((t) => t.type === 'clinical').length,
+    independents: topics.filter((t) => t.type === 'independent').length,
+    labs: topics.filter((t) => t.type === 'lab').length,
   };
 }

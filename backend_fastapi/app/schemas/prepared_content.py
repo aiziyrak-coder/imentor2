@@ -56,13 +56,14 @@ class PreparedContentLatestOut(BaseModel):
 
 
 class PreparedContentSummaryOut(BaseModel):
-    """`Baza` (tarix) ro'yxati uchun — to'liq payload'siz, yengil."""
+    """Tarix ro'yxati uchun — to'liq payload'siz, yengil."""
 
     id: int
     kind: str
     topic: str
     topic_norm: str
     subject_name: str
-    # Baza ro'yxatida muallif ko'rsatiladi (kim yaratgan).
+    # Ro'yxatda muallif ko'rsatiladi (kim yaratgan).
     author_display_name: str = ""
     created_at: dt.datetime
+    can_delete: bool = False

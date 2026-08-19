@@ -5,11 +5,13 @@ import logging
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.core.db import get_db
+from app.core.staff_login import normalize_staff_login
 from app.models.content import AcademicDepartment, CourseSyllabus, StaffCourseSelection
 from app.models.user import User
 from app.schemas.content import (
@@ -386,12 +388,16 @@ def admin_assign_course_selection(
     db: Session = Depends(get_db),
     auth=Depends(require_roles("admin")),
 ) -> list[AdminStaffCourseSelectionOut]:
-    digits = "".join(ch for ch in payload.phone_digits if ch.isdigit())
-    if len(digits) != 12 or not digits.startswith("998"):
-        raise HTTPException(status_code=400, detail="phone_digits noto'g'ri format.")
+    try:
+        owner = normalize_staff_login(payload.phone_digits)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Telefon raqami (998XXXXXXXXX) yoki Xodim ID kiriting.",
+        )
 
-    if db.execute(select(User).where(User.username == digits)).scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Bu telefon raqamli xodim topilmadi.")
+    if db.execute(select(User).where(User.username == owner)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Bu loginli xodim topilmadi.")
 
     syllabus = db.get(CourseSyllabus, payload.syllabus_id)
     if syllabus is None:
@@ -416,14 +422,14 @@ def admin_assign_course_selection(
     for label in labels:
         sel = db.execute(
             select(StaffCourseSelection).where(
-                StaffCourseSelection.owner_key == digits,
+                StaffCourseSelection.owner_key == owner,
                 StaffCourseSelection.syllabus_id == syllabus.id,
                 StaffCourseSelection.variant_label == label,
             )
         ).scalar_one_or_none()
         if sel is None:
             sel = StaffCourseSelection(
-                owner_key=digits,
+                owner_key=owner,
                 syllabus_id=syllabus.id,
                 variant_label=label,
                 selected_at=dt.datetime.now(dt.timezone.utc),
@@ -432,7 +438,11 @@ def admin_assign_course_selection(
             db.flush()
         results.append(sel)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Bu fanni ushbu xodimga allaqachon biriktirilgan.") from exc
     for r in results:
         db.refresh(r)
     user_cache: dict[str, User | None] = {}
@@ -460,58 +470,9 @@ def admin_syllabus_stats(
     db: Session = Depends(get_db),
     auth=Depends(require_roles("admin")),
 ) -> dict:
-    by_department = db.execute(
-        select(
-            AcademicDepartment.id,
-            AcademicDepartment.name,
-            AcademicDepartment.code,
-            AcademicDepartment.sort_order,
-            func.count(CourseSyllabus.id).filter(CourseSyllabus.is_active.is_(True)).label("subjects_count"),
-        )
-        .select_from(AcademicDepartment)
-        .join(CourseSyllabus, CourseSyllabus.department_id == AcademicDepartment.id, isouter=True)
-        .where(AcademicDepartment.is_active.is_(True))
-        .group_by(
-            AcademicDepartment.id,
-            AcademicDepartment.name,
-            AcademicDepartment.code,
-            AcademicDepartment.sort_order,
-        )
-        .order_by(AcademicDepartment.sort_order, AcademicDepartment.name)
-    ).all()
+    from app.services.external_catalog import build_syllabus_catalog_stats
 
-    active_rows = db.execute(
-        select(CourseSyllabus.variants, CourseSyllabus.topics).where(CourseSyllabus.is_active.is_(True))
-    ).all()
-    subjects_total = db.execute(select(func.count()).select_from(CourseSyllabus)).scalar_one()
-    variants_count = 0
-    topics_count = 0
-    for variants, topics in active_rows:
-        if variants:
-            variants_count += len(variants)
-            for variant in variants:
-                topics_count += len((variant or {}).get("topics") or [])
-        elif topics:
-            variants_count += 1
-            topics_count += len(topics)
-
-    return {
-        "departments_count": len(by_department),
-        "subjects_count": len(active_rows),
-        "subjects_total": subjects_total,
-        "variants_count": variants_count,
-        "topics_count": topics_count,
-        "by_department": [
-            {
-                "id": r.id,
-                "name": r.name,
-                "code": r.code,
-                "subjects_count": r.subjects_count,
-                "sort_order": r.sort_order,
-            }
-            for r in by_department
-        ],
-    }
+    return build_syllabus_catalog_stats(db)
 
 
 @router.get("/admin/course-syllabuses/")

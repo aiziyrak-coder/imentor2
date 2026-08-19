@@ -28,6 +28,7 @@ export type TopicHandoutItem = {
   can_delete: boolean;
   sort_order: number;
   created_at: string;
+  language?: 'uz' | 'ru' | 'en' | string;
 };
 
 function apiBaseUrl(): string {
@@ -80,8 +81,15 @@ export function normHandoutTopic(topic: string | SyllabusTopic | SyllabusTopicCo
   return resolveTopicNorm(topic) || normTopicKey(topic.title);
 }
 
+export function handoutLanguage(item: TopicHandoutItem | { language?: string } | null | undefined): 'uz' | 'ru' | 'en' {
+  const raw = (item?.language || 'uz').trim().toLowerCase();
+  if (raw === 'ru' || raw === 'en') return raw;
+  return 'uz';
+}
+
 export async function fetchHandoutsForTopic(
   topic: string | SyllabusTopic | SyllabusTopicContext,
+  language?: string,
 ): Promise<TopicHandoutItem[]> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
@@ -96,10 +104,12 @@ export async function fetchHandoutsForTopic(
   const params = new URLSearchParams();
   if (typeof topic !== 'string' && isTopicContextComplete(topic)) {
     params.set('syllabus_id', String(topic.syllabusId));
-    params.set('variant_label', topic.variantLabel);
+    params.set('variant_label', topic.variantLabel || 'asosiy');
     params.set('topic_code', topic.id);
   }
   for (const key of lookupKeys) params.append('topic_norm', key);
+  const lang = (language || '').trim().toLowerCase();
+  if (lang === 'uz' || lang === 'ru' || lang === 'en') params.set('language', lang);
   const res = await fetchWithTimeout(`${apiBaseUrl()}/v1/handouts/?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -116,13 +126,19 @@ export async function fetchHandoutsForTopic(
     throw new HttpError(`HTTP ${res.status}`, res.status, data);
   }
   const rows = Array.isArray(data) ? (data as TopicHandoutItem[]) : [];
-  return rows.filter((row) => handoutMatchesTopic(row, topic));
+  const wanted = lang === 'ru' || lang === 'en' || lang === 'uz' ? lang : '';
+  return rows.filter((row) => {
+    if (!handoutMatchesTopic(row, topic)) return false;
+    if (!wanted) return true;
+    return handoutLanguage(row) === wanted;
+  });
 }
 
 export async function uploadHandout(params: {
   topic: string | SyllabusTopic | SyllabusTopicContext;
   file: File;
   title?: string;
+  language?: string;
 }): Promise<TopicHandoutItem> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
@@ -132,11 +148,12 @@ export async function uploadHandout(params: {
   form.append('topic', displayTopic);
   if (typeof params.topic !== 'string' && isTopicContextComplete(params.topic)) {
     form.append('syllabus_id', String(params.topic.syllabusId));
-    form.append('variant_label', params.topic.variantLabel);
+    form.append('variant_label', params.topic.variantLabel || 'asosiy');
     form.append('topic_code', params.topic.id);
   }
   form.append('topic_norm', normHandoutTopic(params.topic));
   form.append('file', params.file);
+  form.append('language', (params.language || 'uz').trim().toLowerCase() || 'uz');
   if (params.title?.trim()) form.append('title', params.title.trim());
 
   const res = await fetch(`${apiBaseUrl()}/v1/handouts/`, {
@@ -196,6 +213,7 @@ export async function uploadAdminHandout(params: {
   topicCode: string;
   topic: string;
   title?: string;
+  language?: string;
   file: File;
 }): Promise<TopicHandoutItem> {
   const token = await getBackendAccessToken();
@@ -206,6 +224,7 @@ export async function uploadAdminHandout(params: {
   form.append('variant_label', params.variantLabel);
   form.append('topic_code', params.topicCode);
   form.append('file', params.file);
+  form.append('language', (params.language || 'uz').trim().toLowerCase() || 'uz');
   if (params.title?.trim()) form.append('title', params.title.trim());
 
   const res = await fetch(`${apiBaseUrl()}/v1/admin/handouts/`, {

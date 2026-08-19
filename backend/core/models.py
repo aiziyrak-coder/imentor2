@@ -517,6 +517,7 @@ class TopicHandout(models.Model):
     file = models.FileField(upload_to=handout_upload_to, max_length=512)
     file_name = models.CharField(max_length=512)
     file_size = models.PositiveIntegerField(default=0)
+    language = models.CharField(max_length=8, default="uz", db_index=True)
     sort_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -527,6 +528,7 @@ class TopicHandout(models.Model):
         indexes = [
             models.Index(fields=["topic_norm", "sort_order", "created_at"]),
             models.Index(fields=["owner_key", "-created_at"]),
+            models.Index(fields=["topic_norm", "language"]),
         ]
 
     def __str__(self) -> str:

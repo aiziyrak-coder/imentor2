@@ -5,16 +5,14 @@ import {
   FileText,
   Sparkles,
   Loader2,
-  History,
   Download,
-  ArrowLeft,
   Copy,
   CheckCircle2,
   BookOpen,
   RefreshCw,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import Markdown from 'react-markdown';
+import LectureMarkdown from './staff/LectureMarkdown';
 import { aiService, LectureNote } from '../services/aiService';
 import {
   GlobalTopicContext,
@@ -23,7 +21,8 @@ import {
   AppNavigationContext,
 } from '../App';
 import { useUiText } from '../i18n/useUiText';
-import { isTopicContextComplete } from '../utils/syllabusTopicContext';
+import { formatTopicLessonLabel } from '../utils/topicLessonLabel';
+import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
 import {
   listPreparedForTopicSynced,
   loadPreparedByIdSynced,
@@ -35,7 +34,6 @@ import {
 import { useLocalizedTopic } from '../i18n/useLocalizedTopic';
 import { copyTextToClipboard } from '../utils/copyText';
 import StaffPageLayout from './staff/StaffPageLayout';
-import SavedWorkBanner from './staff/SavedWorkBanner';
 import SavedWorkList from './staff/SavedWorkList';
 import StaffTopicHeader from './staff/StaffTopicHeader';
 import StaffEmptyState from './staff/StaffEmptyState';
@@ -45,7 +43,6 @@ import StaffPanel from './staff/StaffPanel';
 import {
   staffBtnGhost,
   staffBtnPrimary,
-  staffBtnSecondary,
   staffInput,
   staffLabel,
   staffProse,
@@ -57,12 +54,10 @@ export default function LectureNotes() {
   const globalLecture = useContext(GlobalLectureContext);
   const { language } = useContext(AppLanguageContext);
   const { openSyllabus } = useContext(AppNavigationContext);
-  const { t, locale } = useUiText();
-  const topicTypeLabel = (type: 'lecture' | 'practical') =>
-    type === 'lecture' ? t('lecture.typeLecture') : t('lecture.typePractical');
+  const { t } = useUiText();
   const [topic, setTopic] = useState(globalTopic ? globalTopic.title : '');
   const [description, setDescription] = useState(
-    globalTopic ? `${globalTopic.id} - ${topicTypeLabel(globalTopic.type)}` : '',
+    globalTopic ? formatTopicLessonLabel(globalTopic.type, globalTopic.id, t) : '',
   );
 
   const [loading, setLoading] = useState(false);
@@ -77,7 +72,7 @@ export default function LectureNotes() {
   /** Saqlash yiqilganda — "Qayta saqlash" uchun kutayotgan ish. */
   const [pendingSave, setPendingSave] = useState<{ topic: string; data: LectureNote } | null>(null);
   const [retryingSave, setRetryingSave] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [openingSaved, setOpeningSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const setLectureContent = globalLecture.setContent;
@@ -86,53 +81,67 @@ export default function LectureNotes() {
   // Sarlavha interfeys tilida ko'rsatiladi (kontekstda asl matn turadi).
   const staffTopic = useLocalizedTopic(topicFromSyllabus && globalTopic ? globalTopic : null);
 
-  // Baza faqat TANLANGAN MAVZU bo'yicha (4 bo'limda bir xil qoida).
+  const topicKey = topicContextKey(globalTopic) || topic.trim();
+
   const refreshHistory = useCallback(() => {
     const lookup = globalTopic ?? topic;
     if (!topic.trim() && !globalTopic) {
       setSavedLectures([]);
       return;
     }
-    void listPreparedForTopicSynced('lecture', lookup).then(setSavedLectures);
+    void listPreparedForTopicSynced('lecture', lookup, { shared: true }).then(setSavedLectures);
   }, [topic, globalTopic]);
 
   useEffect(() => {
     if (globalTopic) {
       setTopic(globalTopic.title);
-      setDescription(`${globalTopic.id} - ${topicTypeLabel(globalTopic.type)}`);
+      setDescription(formatTopicLessonLabel(globalTopic.type, globalTopic.id, t));
     }
   }, [globalTopic]);
 
-  // Bazadan ma'ruza ochilganda `topic` ham o'sha yozuvnikiga o'zgaradi — quyidagi
-  // "mavzu almashdi → ekranni tozala" effekti aynan shu payt ishga tushib,
-  // endigina ochilgan ma'ruzani darhol yopib qo'yardi. Shu bitta tozalash
-  // o'tkazib yuboriladi.
-  const skipNextTopicResetRef = useRef(false);
-
+  // Mavzu ochilganda shu fan/mavzudagi OXIRGI ma'ruza avtomatik chiqadi.
+  // Qayta generatsiya qilinmaguncha yangi matn yaratilmaydi.
   useEffect(() => {
-    if (!topic.trim()) {
-      skipNextTopicResetRef.current = false;
+    let cancelled = false;
+    const lookup = globalTopic ?? topic;
+    if (!topic.trim() && !globalTopic) {
+      setSavedLectures([]);
       setLectureSession(null);
       setEditedContent('');
       setLectureContent('');
+      setActiveVersionId(null);
+      setOpeningSaved(false);
       return;
     }
-    if (skipNextTopicResetRef.current) {
-      skipNextTopicResetRef.current = false;
-      return;
-    }
-    // Sahifa TOZA ochiladi: avval yaratilgan material avtomatik ochilmaydi.
-    // Shu mavzuda saqlangani bo'lsa, tepadagi SavedWorkBanner orqali Bazadan
-    // ochiladi (4 bo'limda bir xil xatti-harakat).
+    setOpeningSaved(true);
     setLectureSession(null);
     setEditedContent('');
     setLectureContent('');
-    // globalLecture obyekti har renderda yangi — faqat topic/setContent.
-  }, [topic, setLectureContent]);
-
-  useEffect(() => {
-    refreshHistory();
-  }, [refreshHistory]);
+    setActiveVersionId(null);
+    void (async () => {
+      const rows = await listPreparedForTopicSynced('lecture', lookup, { shared: true });
+      if (cancelled) return;
+      setSavedLectures(rows);
+      if (!rows[0]) {
+        setOpeningSaved(false);
+        return;
+      }
+      const session = await loadPreparedByIdSynced<LectureNote>('lecture', rows[0].id);
+      if (cancelled) return;
+      if (session) {
+        setActiveVersionId(rows[0].id);
+        setLectureSession(session);
+        setEditedContent(session.content);
+        setLectureContent(session.content);
+      }
+      setOpeningSaved(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // faqat tanlangan mavzu kaliti — har harfda qayta yuklamaslik uchun
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicKey]);
 
   const handleGenerate = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -192,15 +201,10 @@ export default function LectureNotes() {
   const loadPastSession = async (summary: PreparedContentSummary) => {
     const session = await loadPreparedByIdSynced<LectureNote>('lecture', summary.id);
     if (!session) return;
-    // Mavzu haqiqatan almashsagina tozalash effektini o'tkazib yuboramiz —
-    // aks holda bayroq osilib qolib, keyingi haqiqiy mavzu almashuvini yeb qo'yardi.
-    if (session.topic !== topic) skipNextTopicResetRef.current = true;
     setActiveVersionId(summary.id);
     setLectureSession(session);
-    setTopic(session.topic);
     setEditedContent(session.content);
     globalLecture.setContent(session.content);
-    setShowHistory(false);
   };
 
   /** Yiqilgan saqlashni qayta urinish — tayyor matn yo'qolmasin. */
@@ -234,13 +238,18 @@ export default function LectureNotes() {
     void (async () => {
       try {
         await deletePreparedContent('lecture', id);
+        const remaining = savedLectures.filter((x) => x.id !== id);
+        setSavedLectures(remaining);
         if (activeVersionId === id) {
-          setActiveVersionId(null);
-          setLectureSession(null);
-          setEditedContent('');
-          setLectureContent('');
+          if (remaining[0]) {
+            await loadPastSession(remaining[0]);
+          } else {
+            setActiveVersionId(null);
+            setLectureSession(null);
+            setEditedContent('');
+            setLectureContent('');
+          }
         }
-        refreshHistory();
       } catch (err) {
         console.error('Delete lecture failed', err);
         setError(t('toolbar.deleteFailed'));
@@ -261,33 +270,6 @@ export default function LectureNotes() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (showHistory) {
-    return (
-      <StaffPageLayout>
-        <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={() => setShowHistory(false)} className={staffBtnGhost}>
-            <ArrowLeft size={18} />
-            {t('lecture.back')}
-          </button>
-          <h2 className={`text-lg font-bold flex items-center gap-2 ${STAFF_HEADING}`}>
-            <History size={20} />
-            {t('lecture.database')}
-          </h2>
-        </div>
-        <SavedWorkList
-          items={savedLectures}
-          activeId={activeVersionId}
-          onSelect={(id) => {
-            const item = savedLectures.find((x) => x.id === id);
-            if (item) void loadPastSession(item);
-          }}
-          onDelete={handleDeleteSaved}
-          emptyText={t('lecture.noSaved')}
-        />
-      </StaffPageLayout>
-    );
-  }
-
   if (!topicFromSyllabus && !topic.trim()) {
     return (
       <StaffPageLayout>
@@ -307,19 +289,6 @@ export default function LectureNotes() {
       <StaffTopicHeader
         moduleLabel={t('lecture.generateBadge')}
         topic={staffTopic}
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              refreshHistory();
-              setShowHistory(true);
-            }}
-            className={staffBtnGhost}
-          >
-            <History size={16} />
-            {t('lecture.databaseShort')}
-          </button>
-        }
       >
         {!topicFromSyllabus && (
           <input
@@ -340,20 +309,18 @@ export default function LectureNotes() {
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={loading || !topic.trim()}
-          className={staffBtnPrimary}
-        >
-          {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-          {t('lecture.generateButton')}
-        </button>
+        {!lectureSession && !openingSaved && (
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={loading || !topic.trim()}
+            className={staffBtnPrimary}
+          >
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+            {t('lecture.generateButton')}
+          </button>
+        )}
       </StaffTopicHeader>
-
-      {!lectureSession && !loading && (
-        <SavedWorkBanner count={savedLectures.length} />
-      )}
 
       {error && (
         <StaffErrorAlert
@@ -363,6 +330,10 @@ export default function LectureNotes() {
           actionBusy={retryingSave}
         />
       )}
+      {openingSaved && !loading && !lectureSession && (
+        <StaffLoading label={t('lecture.openingSaved')} hint={t('lecture.openingSavedHint')} />
+      )}
+
       {loading && !streamingContent && (
         <StaffLoading label={t('lecture.generating')} hint={t('lecture.generatingHint')} />
       )}
@@ -487,7 +458,7 @@ export default function LectureNotes() {
               </div>
             ) : (
               <article ref={printRef} className={staffProse}>
-                <Markdown>{lectureSession.content}</Markdown>
+                <LectureMarkdown>{lectureSession.content}</LectureMarkdown>
               </article>
             )}
           </StaffPanel>
@@ -499,22 +470,24 @@ export default function LectureNotes() {
               .staff-prose { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
             }
           `}</style>
-
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => {
-                setLectureSession(null);
-                setEditedContent('');
-                setActiveVersionId(null);
-                setError(null);
-              }}
-              className={staffBtnSecondary}
-            >
-              {t('lecture.createNew')}
-            </button>
-          </div>
         </motion.div>
+      )}
+
+      {savedLectures.length > 0 && !loading && !openingSaved && (
+        <div className="space-y-2 pt-2">
+          <h3 className={`text-[14px] font-bold ${STAFF_HEADING}`}>{t('lecture.topicVersions')}</h3>
+          <p className="text-[12.5px] text-black/45">{t('lecture.topicVersionsHint')}</p>
+          <SavedWorkList
+            items={savedLectures}
+            activeId={activeVersionId}
+            onSelect={(id) => {
+              const item = savedLectures.find((x) => x.id === id);
+              if (item) void loadPastSession(item);
+            }}
+            onDelete={handleDeleteSaved}
+            emptyText={t('lecture.noSaved')}
+          />
+        </div>
       )}
     </StaffPageLayout>
   );

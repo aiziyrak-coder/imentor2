@@ -22,6 +22,21 @@ describe('parseCaseAnswer', () => {
     expect(parsed.leftover).toBe('');
   });
 
+  it('splits heading-only sections without a–e letters', () => {
+    const parsed = parseCaseAnswer(`Klinik xulosa
+Asosiy tashxis pyelonefrit [5].
+
+Differensial tahlil
+Sistit rad etiladi.
+
+FOYDALANILGAN ADABIYOTLAR:
+[5] Smith Urology`);
+    expect(parsed.sections[0].key).toBe('a');
+    expect(parsed.sections[0].title).toMatch(/Klinik xulosa/i);
+    expect(parsed.sections[1].key).toBe('b');
+    expect(parsed.bibliography).toMatch(/\[5\]/);
+  });
+
   it('keeps plain text as leftover when no section markers', () => {
     const parsed = parseCaseAnswer('Oddiy yechim matni.');
     expect(parsed.sections).toHaveLength(0);

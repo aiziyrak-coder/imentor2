@@ -36,4 +36,13 @@ describe('normalizeSyllabusTopics — buzuq matnni filtrlash', () => {
   it('keeps short-but-real titles containing an abbreviation', () => {
     expect(titlesAfterNormalize('EKG tahlili asoslari')).toEqual(['EKG tahlili asoslari']);
   });
+
+  it('preserves clinical topic ids as K*', () => {
+    const out = normalizeSyllabusTopics([
+      { id: 'K1', title: 'Klinik ko\'rik va bemor bilan ishlash', type: 'clinical' },
+    ]);
+    expect(out).toEqual([
+      { id: 'K1', title: 'Klinik ko\'rik va bemor bilan ishlash', type: 'clinical' },
+    ]);
+  });
 });

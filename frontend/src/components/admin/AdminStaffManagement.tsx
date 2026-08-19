@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search, FilterX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isValidStaffLogin, normalizeStaffLogin, type UserRole } from '../../utils/localStaffAuth';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../utils/staffDirectoryApi';
 import { fetchAdminSyllabusCatalogStats } from '../../utils/syllabusApi';
 import { fetchPublicKafedralar } from '../../utils/academicCatalogApi';
+import { matchDepartmentByName } from '../../utils/departmentMatch';
 import { HttpError } from '../../api/httpClient';
 import { roleLabel } from '../../i18n/translations';
 import { useUiText } from '../../i18n/useUiText';
@@ -80,7 +81,11 @@ export default function AdminStaffManagement() {
   const [form, setForm] = useState(emptyForm);
   const [showAdd, setShowAdd] = useState(false);
   const [query, setQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
   const [departments, setDepartments] = useState<DeptOption[]>([]);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,10 +109,14 @@ export default function AdminStaffManagement() {
   }, [load]);
 
   useEffect(() => {
-    // Sillabusdagi kafedralar + akademik katalogdagi barcha kafedralar birlashtiriladi,
-    // shunda hali sillabusi yo'q kafedra ham xodim qo'shishda tanlanadi.
     void Promise.allSettled([fetchAdminSyllabusCatalogStats(), fetchPublicKafedralar()]).then(
       ([statsRes, kafedraRes]) => {
+        const academic: DeptOption[] = [];
+        if (statsRes.status === 'fulfilled') {
+          for (const d of statsRes.value?.by_department || []) {
+            academic.push({ id: d.id, name: d.name, code: d.code || d.name });
+          }
+        }
         const merged: DeptOption[] = [];
         const seen = new Set<string>();
         const push = (opt: DeptOption) => {
@@ -116,15 +125,16 @@ export default function AdminStaffManagement() {
           seen.add(key);
           merged.push(opt);
         };
-        if (statsRes.status === 'fulfilled') {
-          for (const d of statsRes.value?.by_department || []) {
-            push({ id: d.id, name: d.name, code: d.code || d.name });
-          }
-        }
-        if (kafedraRes.status === 'fulfilled') {
+        if (kafedraRes.status === 'fulfilled' && (kafedraRes.value || []).length > 0) {
           for (const k of kafedraRes.value) {
-            push({ id: null, name: k.name, code: k.code || k.name });
+            const hit = matchDepartmentByName(k.name, k.code, academic);
+            push({ id: hit?.id ?? null, name: k.name, code: k.code || k.name });
           }
+          for (const d of academic) {
+            if (!matchDepartmentByName(d.name, d.code, merged)) push(d);
+          }
+        } else {
+          for (const d of academic) push(d);
         }
         merged.sort((a, b) => a.name.localeCompare(b.name));
         setDepartments(merged);
@@ -304,16 +314,64 @@ export default function AdminStaffManagement() {
     return list;
   }, [rows, sortDirection, sortKey]);
 
+  const roleOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const u of rows) {
+      const role = String(u.role || 'hodim');
+      if (seen.has(role)) continue;
+      seen.add(role);
+      list.push(role);
+    }
+    return list;
+  }, [rows]);
+
+  const deptFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    let hasUnassigned = false;
+    for (const u of rows) {
+      const name = (u.department || '').trim();
+      if (!name) {
+        hasUnassigned = true;
+        continue;
+      }
+      const key = name.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+    names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return { names, hasUnassigned };
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
-    if (!q) return sortedRows;
     return sortedRows.filter((u) => {
+      if (roleFilter && String(u.role || 'hodim') !== roleFilter) return false;
+      const dept = (u.department || '').trim();
+      if (deptFilter === '__none__' && dept) return false;
+      if (deptFilter && deptFilter !== '__none__' && dept !== deptFilter) return false;
+      if (!q) return true;
       const hay = [u.display_name, u.phone_display, u.phone_digits, u.role, u.department]
         .join(' ')
         .toLocaleLowerCase();
       return hay.includes(q);
     });
-  }, [query, sortedRows]);
+  }, [deptFilter, query, roleFilter, sortedRows]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, roleFilter, deptFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pagedRows = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safePage]);
+
+  const filtersActive = Boolean(query.trim() || roleFilter || deptFilter);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -380,21 +438,77 @@ export default function AdminStaffManagement() {
         </div>
       )}
 
-      <label className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/70 px-3 py-2">
-        <Search size={16} className="text-black/40 shrink-0" />
-        <input
-          className="w-full bg-transparent text-[14px] outline-none"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('admin.searchPlaceholder')}
-        />
-      </label>
+      <div className="ios-glass rounded-2xl border border-white/70 p-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="relative sm:col-span-2">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            className="w-full h-10 pl-9 pr-3 rounded-xl border border-slate-200 bg-white text-[13px] outline-none"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('admin.searchPlaceholder')}
+          />
+        </div>
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-[13px]"
+        >
+          <option value="">{t('admin.filterAllRoles')}</option>
+          {roleOptions.map((role) => (
+            <option key={role} value={role}>
+              {roleLabel(language, role)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={deptFilter}
+          onChange={(e) => setDeptFilter(e.target.value)}
+          className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-[13px]"
+        >
+          <option value="">{t('admin.filterAllDepartments')}</option>
+          {deptFilterOptions.hasUnassigned ? (
+            <option value="__none__">{t('admin.departmentUnassigned')}</option>
+          ) : null}
+          {deptFilterOptions.names.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <div className="sm:col-span-2 lg:col-span-4 flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-[12px] text-black/50 font-medium">
+            {t('admin.staffShownCount', { shown: filteredRows.length, total: rows.length })}
+            {filteredRows.length > PAGE_SIZE
+              ? ` · ${t('admin.pageStatus', {
+                  from: String((safePage - 1) * PAGE_SIZE + 1),
+                  to: String(Math.min(safePage * PAGE_SIZE, filteredRows.length)),
+                  total: String(filteredRows.length),
+                })}`
+              : ''}
+          </p>
+          {filtersActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setRoleFilter('');
+                setDeptFilter('');
+              }}
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <FilterX size={14} />
+              {t('admin.clearFilters')}
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       <div className="ios-glass rounded-2xl border border-white/60 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-[13px]">
             <thead className="bg-black/[0.04] text-black/55 font-semibold">
               <tr>
+                <th className="px-4 py-3 w-14 whitespace-nowrap">{t('admin.serialNo')}</th>
                 <th className="px-4 py-3">{sortLabel('displayName', t('admin.fullName'))}</th>
                 <th className="px-4 py-3">{sortLabel('phoneDisplay', t('admin.phone'))}</th>
                 <th className="px-4 py-3">{sortLabel('role', t('admin.role'))}</th>
@@ -406,20 +520,21 @@ export default function AdminStaffManagement() {
             <tbody className="divide-y divide-black/5">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-black/45">
+                  <td colSpan={7} className="px-4 py-12 text-center text-black/45">
                     <Loader2 className="animate-spin inline mr-2" size={18} />
                     {t('admin.loading')}
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-black/45">
-                    {t('admin.noStaffInList')}
+                  <td colSpan={7} className="px-4 py-12 text-center text-black/45">
+                    {filtersActive ? t('admin.noResults') : t('admin.noStaffInList')}
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((u) => (
+                pagedRows.map((u, index) => (
                   <tr key={u.phone_digits} className="hover:bg-black/[0.02]">
+                    <td className="px-4 py-2.5 text-black/45 tabular-nums text-[12px]">{(safePage - 1) * PAGE_SIZE + index + 1}</td>
                     <td className="px-4 py-2.5 font-medium text-black/90">{u.display_name}</td>
                     <td className="px-4 py-2.5 font-mono text-[12px]">{u.phone_display}</td>
                     <td className="px-4 py-2.5">
@@ -458,6 +573,33 @@ export default function AdminStaffManagement() {
             </tbody>
           </table>
         </div>
+        {filteredRows.length > PAGE_SIZE ? (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-black/5">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 h-9 px-3 rounded-xl border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 disabled:opacity-40"
+            >
+              <ChevronLeft size={16} /> {t('common.prev')}
+            </button>
+            <span className="text-[12px] text-slate-500 font-medium">
+              {t('admin.pageStatus', {
+                from: String((safePage - 1) * PAGE_SIZE + 1),
+                to: String(Math.min(safePage * PAGE_SIZE, filteredRows.length)),
+                total: String(filteredRows.length),
+              })}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              className="inline-flex items-center gap-1 h-9 px-3 rounded-xl border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 disabled:opacity-40"
+            >
+              {t('common.next')} <ChevronRight size={16} />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <AnimatePresence>

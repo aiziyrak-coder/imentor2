@@ -4,12 +4,15 @@ import {
   BookOpen,
   Loader2,
   FlaskConical,
+  Stethoscope,
   ArrowRight,
   Check,
   GraduationCap,
   ListChecks,
   ChevronLeft,
   ChevronRight,
+  Microscope,
+  NotebookPen,
 } from 'lucide-react';
 import type { SyllabusTopic } from '../services/aiService';
 import { AppLanguageContext } from '../App';
@@ -28,6 +31,7 @@ import {
   type StaffCourseSelectionRow,
 } from '../utils/syllabusApi';
 import { resolveSyllabusVariants, totalTopicCount } from '../utils/syllabusVariant';
+import { formatTopicLessonLabel, topicNumberFromId } from '../utils/topicLessonLabel';
 import {
   buildTopicContext,
   topicsMatch,
@@ -182,7 +186,15 @@ export default function SyllabusView({
   ) => {
     const instructionLanguage = resolveSyllabusInstructionLanguage(syllabus);
     onSelectTopic(
-      buildTopicContext(topic, syllabus.id, syllabus.subject_name, syllabus.subject_code, variantLabel, instructionLanguage),
+      buildTopicContext(
+        topic,
+        syllabus.id,
+        syllabus.subject_name,
+        syllabus.subject_code,
+        variantLabel,
+        instructionLanguage,
+        syllabus.department_name || '',
+      ),
     );
   };
 
@@ -206,7 +218,16 @@ export default function SyllabusView({
   const activeTopics = activeVariant?.topics ?? [];
   const activeLectures = activeTopics.filter((topic) => topic.type === 'lecture');
   const activePracticals = activeTopics.filter((topic) => topic.type === 'practical');
-  const showSplitTopics = activeLectures.length > 0 && activePracticals.length > 0;
+  const activeClinicals = activeTopics.filter((topic) => topic.type === 'clinical');
+  const activeIndependents = activeTopics.filter((topic) => topic.type === 'independent');
+  const activeLabs = activeTopics.filter((topic) => topic.type === 'lab');
+  const topicColumnCount = [
+    activeLectures,
+    activePracticals,
+    activeClinicals,
+    activeIndependents,
+    activeLabs,
+  ].filter((g) => g.length > 0).length;
 
   const step1Done = mySelections.length > 0 && activeSyllabus != null;
   const step2Done = selectedTopic != null;
@@ -347,8 +368,11 @@ export default function SyllabusView({
                         {t('syllabus.selectedTopic')}
                       </p>
                       <p className="text-[12px] font-semibold text-gray-900 mt-0.5 leading-snug">
-                        <span className="text-blue-700">{selectedTopic.id}</span>{' '}
-                        — {localizedTopicTitle(activeSyllabus, selectedTopic.title, language)}
+                        <span className="text-blue-700">
+                          {formatTopicLessonLabel(selectedTopic.type, selectedTopic.id, t)}
+                        </span>
+                        {' — '}
+                        {localizedTopicTitle(activeSyllabus, selectedTopic.title, language)}
                       </p>
                     </div>
                     <button
@@ -363,43 +387,78 @@ export default function SyllabusView({
                 </div>
               )}
 
-              <div className={showSplitTopics ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'space-y-3'}>
-                {showSplitTopics ? (
-                  <>
-                    <TopicColumn
-                      title={t('syllabus.lectures')}
-                      icon={<BookOpen size={18} />}
-                      iconBg="bg-blue-50 text-blue-600"
-                      topics={activeLectures}
-                      selectedTopic={selectedTopic}
-                      syllabus={activeSyllabus}
-                      variantLabel={activeLabel}
-                      onPickTopic={pickTopic}
-                      accent="blue"
-                    />
-                    <TopicColumn
-                      title={t('syllabus.practicals')}
-                      icon={<FlaskConical size={18} />}
-                      iconBg="bg-indigo-50 text-indigo-600"
-                      topics={activePracticals}
-                      selectedTopic={selectedTopic}
-                      syllabus={activeSyllabus}
-                      variantLabel={activeLabel}
-                      onPickTopic={pickTopic}
-                      accent="indigo"
-                    />
-                  </>
-                ) : (
+              <div
+                className={
+                  topicColumnCount >= 3
+                    ? 'grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3'
+                    : topicColumnCount === 2
+                      ? 'grid grid-cols-1 xl:grid-cols-2 gap-3'
+                      : 'space-y-3'
+                }
+              >
+                {activeLectures.length > 0 && (
                   <TopicColumn
-                    title={t('syllabus.allTopics')}
+                    title={t('syllabus.lectures')}
                     icon={<BookOpen size={18} />}
                     iconBg="bg-blue-50 text-blue-600"
-                    topics={activeTopics}
+                    topics={activeLectures}
                     selectedTopic={selectedTopic}
                     syllabus={activeSyllabus}
                     variantLabel={activeLabel}
                     onPickTopic={pickTopic}
                     accent="blue"
+                  />
+                )}
+                {activePracticals.length > 0 && (
+                  <TopicColumn
+                    title={t('syllabus.practicals')}
+                    icon={<FlaskConical size={18} />}
+                    iconBg="bg-indigo-50 text-indigo-600"
+                    topics={activePracticals}
+                    selectedTopic={selectedTopic}
+                    syllabus={activeSyllabus}
+                    variantLabel={activeLabel}
+                    onPickTopic={pickTopic}
+                    accent="indigo"
+                  />
+                )}
+                {activeClinicals.length > 0 && (
+                  <TopicColumn
+                    title={t('syllabus.clinicals')}
+                    icon={<Stethoscope size={18} />}
+                    iconBg="bg-teal-50 text-teal-600"
+                    topics={activeClinicals}
+                    selectedTopic={selectedTopic}
+                    syllabus={activeSyllabus}
+                    variantLabel={activeLabel}
+                    onPickTopic={pickTopic}
+                    accent="teal"
+                  />
+                )}
+                {activeIndependents.length > 0 && (
+                  <TopicColumn
+                    title={t('syllabus.independents')}
+                    icon={<NotebookPen size={18} />}
+                    iconBg="bg-amber-50 text-amber-700"
+                    topics={activeIndependents}
+                    selectedTopic={selectedTopic}
+                    syllabus={activeSyllabus}
+                    variantLabel={activeLabel}
+                    onPickTopic={pickTopic}
+                    accent="amber"
+                  />
+                )}
+                {activeLabs.length > 0 && (
+                  <TopicColumn
+                    title={t('syllabus.labs')}
+                    icon={<Microscope size={18} />}
+                    iconBg="bg-slate-100 text-slate-700"
+                    topics={activeLabs}
+                    selectedTopic={selectedTopic}
+                    syllabus={activeSyllabus}
+                    variantLabel={activeLabel}
+                    onPickTopic={pickTopic}
+                    accent="slate"
                   />
                 )}
               </div>
@@ -449,6 +508,49 @@ function SyllabusStepSection({
   );
 }
 
+type TopicAccent = 'blue' | 'indigo' | 'teal' | 'amber' | 'slate';
+
+const ACCENT_STYLES: Record<
+  TopicAccent,
+  { selected: string; hover: string; badgeOn: string; badgeOff: string; check: string }
+> = {
+  blue: {
+    selected: 'border-2 ring-blue-200 border-blue-500 bg-blue-50/80',
+    hover: 'hover:border-blue-300 hover:bg-blue-50/50',
+    badgeOn: 'bg-blue-600 text-white',
+    badgeOff: 'bg-blue-50 text-blue-700',
+    check: 'text-blue-600',
+  },
+  indigo: {
+    selected: 'border-2 ring-indigo-200 border-indigo-500 bg-indigo-50/80',
+    hover: 'hover:border-indigo-300 hover:bg-indigo-50/50',
+    badgeOn: 'bg-indigo-600 text-white',
+    badgeOff: 'bg-indigo-50 text-indigo-700',
+    check: 'text-indigo-600',
+  },
+  teal: {
+    selected: 'border-2 ring-teal-200 border-teal-500 bg-teal-50/80',
+    hover: 'hover:border-teal-300 hover:bg-teal-50/50',
+    badgeOn: 'bg-teal-600 text-white',
+    badgeOff: 'bg-teal-50 text-teal-700',
+    check: 'text-teal-600',
+  },
+  amber: {
+    selected: 'border-2 ring-amber-200 border-amber-500 bg-amber-50/80',
+    hover: 'hover:border-amber-300 hover:bg-amber-50/50',
+    badgeOn: 'bg-amber-600 text-white',
+    badgeOff: 'bg-amber-50 text-amber-800',
+    check: 'text-amber-700',
+  },
+  slate: {
+    selected: 'border-2 ring-slate-200 border-slate-500 bg-slate-50',
+    hover: 'hover:border-slate-300 hover:bg-slate-50',
+    badgeOn: 'bg-slate-700 text-white',
+    badgeOff: 'bg-slate-100 text-slate-700',
+    check: 'text-slate-700',
+  },
+};
+
 const TOPICS_PER_PAGE = 10;
 
 function TopicColumn({
@@ -470,7 +572,7 @@ function TopicColumn({
   syllabus: CourseSyllabusRow;
   variantLabel: string;
   onPickTopic: (topic: SyllabusTopic, syllabus: CourseSyllabusRow, variantLabel: string) => void;
-  accent: 'blue' | 'indigo';
+  accent: TopicAccent;
 }) {
   const { t } = useUiText();
   const [page, setPage] = useState(0);
@@ -491,7 +593,7 @@ function TopicColumn({
     const idx = topics.findIndex((topic) =>
       topicsMatch(
         selectedTopic,
-        buildTopicContext(topic, syllabus.id, syllabus.subject_name, syllabus.subject_code, variantLabel, instructionLanguage),
+        buildTopicContext(topic, syllabus.id, syllabus.subject_name, syllabus.subject_code, variantLabel, instructionLanguage, syllabus.department_name || ''),
       ),
     );
     if (idx >= 0) setPage(Math.floor(idx / TOPICS_PER_PAGE));
@@ -504,14 +606,7 @@ function TopicColumn({
   const showPagination = topics.length > TOPICS_PER_PAGE;
 
   const { language } = React.useContext(AppLanguageContext);
-  const selectedCard =
-    accent === 'blue'
-      ? 'border-2 ring-blue-200 border-blue-500 bg-blue-50/80'
-      : 'border-2 ring-indigo-200 border-indigo-500 bg-indigo-50/80';
-  const hover =
-    accent === 'blue'
-      ? 'hover:border-blue-300 hover:bg-blue-50/50'
-      : 'hover:border-indigo-300 hover:bg-indigo-50/50';
+  const tone = ACCENT_STYLES[accent];
 
   return (
     <div className="space-y-2">
@@ -537,6 +632,7 @@ function TopicColumn({
               syllabus.subject_code,
               variantLabel,
               resolveSyllabusInstructionLanguage(syllabus),
+              syllabus.department_name || '',
             );
             const isSelected = topicsMatch(selectedTopic, ctx);
             return (
@@ -545,29 +641,26 @@ function TopicColumn({
                 type="button"
                 onClick={() => onPickTopic(topic, syllabus, variantLabel)}
                 className={`flex items-start gap-2 p-2 sm:p-2.5 text-left rounded-xl border shadow-sm transition-all ${
-                  isSelected ? selectedCard : `bg-white border-gray-100 ${hover}`
+                  isSelected ? tone.selected : `bg-white border-gray-100 ${tone.hover}`
                 }`}
               >
                 <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 ${
-                    isSelected
-                      ? accent === 'blue'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-indigo-600 text-white'
-                      : accent === 'blue'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'bg-indigo-50 text-indigo-700'
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[11px] shrink-0 ${
+                    isSelected ? tone.badgeOn : tone.badgeOff
                   }`}
                 >
-                  {topic.id}
+                  {topicNumberFromId(topic.id) || topic.id}
                 </div>
                 <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-semibold text-gray-500 leading-tight">
+                    {formatTopicLessonLabel(topic.type, topic.id, t)}
+                  </p>
                   <p className="font-medium text-gray-800 text-[12px] leading-snug break-words line-clamp-2">
                     {localizedTopicTitle(syllabus, topic.title, language)}
                   </p>
                 </div>
                 {isSelected ? (
-                  <Check size={20} className={accent === 'blue' ? 'text-blue-600' : 'text-indigo-600'} />
+                  <Check size={20} className={tone.check} />
                 ) : (
                   <ArrowRight size={18} className="text-gray-300 shrink-0 mt-1" />
                 )}

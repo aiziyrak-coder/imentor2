@@ -17,7 +17,7 @@ import {
 import { motion } from 'motion/react';
 import { fetchAdminCatalogStats, type CatalogStats } from '../../utils/contentCatalogApi';
 import { fetchStaffDirectory } from '../../utils/staffDirectoryApi';
-import { fetchAdminSyllabusCatalogStats, type SyllabusCatalogStats } from '../../utils/syllabusApi';
+import { fetchAcademicCatalog } from '../../utils/academicCatalogApi';
 import { fetchAdminLiveTestStats, type AdminLiveTestStatRow } from '../../utils/liveTestApi';
 import { useUiText } from '../../i18n/useUiText';
 import {
@@ -80,6 +80,7 @@ export default function AdminDashboardHome() {
   const { t, language } = useUiText();
   const [loading, setLoading] = useState(true);
   const [staffCount, setStaffCount] = useState(0);
+  const [teacherCount, setTeacherCount] = useState(0);
   const [todayLogins, setTodayLogins] = useState(0);
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [catalogStats, setCatalogStats] = useState<SyllabusCatalogStats | null>(null);
@@ -88,16 +89,35 @@ export default function AdminDashboardHome() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [staff, catalogContentStats, syllabusStats, testStats] = await Promise.all([
+      const [staff, catalogContentStats, syllabusStats, testStats, academicCatalog] = await Promise.all([
         fetchStaffDirectory().catch(() => []),
         fetchAdminCatalogStats().catch(() => null),
         fetchAdminSyllabusCatalogStats().catch(() => null),
         fetchAdminLiveTestStats().catch(() => []),
+        fetchAcademicCatalog().catch(() => null),
       ]);
       setStaffCount(staff.length);
+      setTeacherCount(staff.filter((s) => String(s.role || '') === 'hodim').length);
       setTodayLogins(staff.filter((s) => isToday(s.last_login)).length);
       setStats(catalogContentStats);
-      setCatalogStats(syllabusStats);
+      const apiKafedra = (academicCatalog?.kafedralar || []).filter((k) => (k.name || '').trim()).length;
+      if (syllabusStats) {
+        setCatalogStats({
+          ...syllabusStats,
+          departments_count: apiKafedra || syllabusStats.departments_count,
+        });
+      } else if (apiKafedra) {
+        setCatalogStats({
+          departments_count: apiKafedra,
+          subjects_count: 0,
+          subjects_total: 0,
+          variants_count: 0,
+          topics_count: 0,
+          by_department: [],
+        });
+      } else {
+        setCatalogStats(syllabusStats);
+      }
       setLiveTestStats(testStats);
     } finally {
       setLoading(false);
@@ -229,7 +249,7 @@ export default function AdminDashboardHome() {
         <KpiCard
           label={t('admin.registeredUsers')}
           value={staffCount}
-          hint={`${todayLogins} ${t('admin.todayLogins').toLowerCase()}`}
+          hint={`${teacherCount} ${t('admin.hodimRole')} · ${todayLogins} ${t('admin.todayLogins').toLowerCase()}`}
           icon={Users}
           gradient="bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900 border-slate-200/80"
           delay={0}

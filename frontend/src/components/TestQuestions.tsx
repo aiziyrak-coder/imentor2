@@ -70,7 +70,9 @@ import {
 } from '../utils/buildTestPdf';
 import { gradeBadgeClass, scoreToGrade } from '../utils/testGrading';
 import { stripOptionLetterPrefix } from '../utils/testOptionText';
-import { DEFAULT_TEST_DIFFICULTY, type TestDifficulty } from '../utils/testDifficulty';
+import { DEFAULT_TEST_DIFFICULTY, DEFAULT_TEST_QUESTION_COUNT } from '../utils/testDifficulty';
+import { loadLatestLectureText } from '../utils/lectureExcerpt';
+import { makeGenerationScope } from '../utils/subjectDomain';
 
 interface LiveTestSessionDoc {
   topic: string;
@@ -219,8 +221,6 @@ export default function TestQuestions() {
   const studentSessionId = (queryParams.get('sid') || queryParams.get('id') || '').trim();
 
   const [topic, setTopic] = useState(globalTopic ? globalTopic.title : '');
-  const [questionCount, setQuestionCount] = useState(10);
-  const [difficulty, setDifficulty] = useState<TestDifficulty>(DEFAULT_TEST_DIFFICULTY);
   const [loading, setLoading] = useState(false);
   const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [versions, setVersions] = useState<PreparedContentSummary[]>([]);
@@ -726,15 +726,23 @@ export default function TestQuestions() {
     const enrichToken = Symbol('test-enrich');
     enrichTokenRef.current = enrichToken;
     try {
-      const count = Math.min(90, Math.max(10, questionCount));
+      const count = DEFAULT_TEST_QUESTION_COUNT;
       // Asosiy til = UI tili (header dagi uz/ru/en). Qolgan 2 til — fonda tarjima.
       const contentLanguage = language;
+      const lectureText = await loadLatestLectureText(globalTopic ?? topic);
+      const scope = makeGenerationScope({
+        topic,
+        subjectName: globalTopic.subjectName,
+        departmentName: globalTopic.departmentName,
+        lectureText,
+      });
       const data = await aiService.generateTests(
         topic,
         count,
         contentLanguage,
         globalTopic.subjectCode,
-        difficulty,
+        DEFAULT_TEST_DIFFICULTY,
+        scope,
       );
       setTestSession(data);
       setViewLang(data.primaryLanguage || contentLanguage);
@@ -1085,23 +1093,17 @@ export default function TestQuestions() {
   return (
     <StaffPageLayout spacious>
       <ContentTopicToolbar
-        moduleLabel={t('test.teacherBadge', { count: questionCount })}
+        moduleLabel={t('test.teacherBadge', { count: DEFAULT_TEST_QUESTION_COUNT })}
         topic={staffTopic}
         topicValue={topic}
         onTopicChange={setTopic}
         topicLabel={t('test.topicLabel')}
         topicPlaceholder={t('test.topicPlaceholder')}
-        createLabel={t('test.create', { count: questionCount })}
+        createLabel={t('test.create', { count: DEFAULT_TEST_QUESTION_COUNT })}
         loading={loading}
         onCreate={() => void handleGenerate()}
         lockTopicFromSyllabus={Boolean(staffTopic)}
         hint={t('test.heroSubtitle')}
-        questionCount={questionCount}
-        onQuestionCountChange={setQuestionCount}
-        questionCountMin={10}
-        questionCountMax={90}
-        difficulty={difficulty}
-        onDifficultyChange={setDifficulty}
         versions={versions}
         activeVersionId={activeVersionId}
         onSelectVersion={handleSelectVersion}
@@ -1114,13 +1116,10 @@ export default function TestQuestions() {
       {loading && (
         <StaffLoading
           label={t('test.generating')}
-          hint={t('test.generatingHint', { count: questionCount, level: t(
-            difficulty === 'easy'
-              ? 'test.difficultyEasy'
-              : difficulty === 'hard'
-                ? 'test.difficultyHard'
-                : 'test.difficultyMedium',
-          ) })}
+          hint={t('test.generatingHint', {
+            count: DEFAULT_TEST_QUESTION_COUNT,
+            level: t('test.difficultyHard'),
+          })}
         />
       )}
 

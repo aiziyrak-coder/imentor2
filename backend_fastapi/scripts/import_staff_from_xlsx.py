@@ -164,6 +164,7 @@ def import_rows(rows: list[list[str]], *, password: str, reset_password: bool, a
 
     stats = Counter()
     seen_ids: set[str] = set()
+    unmatched_depts: Counter[str] = Counter()
     db = SessionLocal()
     try:
         for line_no, row in enumerate(rows[1:], start=2):
@@ -178,12 +179,17 @@ def import_rows(rows: list[list[str]], *, password: str, reset_password: bool, a
                 continue
             if staff_id in seen_ids:
                 stats["skipped_duplicate"] += 1
-                print(f"  [{line_no}] o'tkazib yuborildi — faylda takroriy ID: {staff_id}")
                 continue
             seen_ids.add(staff_id)
 
             user = auth_service.get_user_by_username(db, staff_id)
             created = user is None
+            dept_obj = staff_dept.resolve_department(db, department_name=department) if department else None
+            if department and dept_obj is None:
+                stats["unmatched_dept"] += 1
+                unmatched_depts[department] += 1
+            elif dept_obj is not None:
+                stats["linked_dept"] += 1
 
             if apply:
                 if created:
@@ -210,8 +216,10 @@ def import_rows(rows: list[list[str]], *, password: str, reset_password: bool, a
                 profile.updated_at = dt.datetime.now(dt.timezone.utc)
 
             stats["created" if created else "updated"] += 1
-            action = "YARATILADI" if created else ("PAROL YANGILANADI" if reset_password else "mavjud")
-            print(f"  [{line_no}] {staff_id}  {last_name} {first_name}  · {department or '—'}  → {action}")
+            if created or dept_obj is None:
+                action = "YARATILADI" if created else ("PAROL YANGILANADI" if reset_password else "mavjud")
+                mapped = dept_obj.name if dept_obj else "KAFEDRA MOS KELMADI"
+                print(f"  [{line_no}] {staff_id}  {last_name} {first_name}  · {department or '—'}  → {action} / {mapped}")
 
         if apply:
             db.commit()
@@ -222,10 +230,17 @@ def import_rows(rows: list[list[str]], *, password: str, reset_password: bool, a
 
     print()
     print(f"Jami qator      : {len(rows) - 1}")
+    print(f"Noyob Xodim ID  : {len(seen_ids)}")
     print(f"Yangi xodim     : {stats['created']}")
     print(f"Mavjud xodim    : {stats['updated']}")
+    print(f"Kafedra bog'landi: {stats['linked_dept']}")
+    print(f"Kafedra topilmadi: {stats['unmatched_dept']}")
     print(f"ID yo'q         : {stats['skipped_no_id']}")
     print(f"Takroriy ID     : {stats['skipped_duplicate']}")
+    if unmatched_depts:
+        print("Mos kelmagan kafedra nomlari:")
+        for name, n in unmatched_depts.most_common():
+            print(f"  {n:4d}  {name}")
     print()
     if apply:
         print("Bazaga yozildi.")

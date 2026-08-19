@@ -43,12 +43,9 @@ import {
   openaiText,
   openaiTextStream,
 } from './openaiClient';
-
-const SYS_MEDICAL =
-  'Siz FJSTI tibbiyot professori va klinik ta\'lim metodistisiz. Javoblar ilmiy, aniq, darsga tayyor.';
-
 import {
   buildAvoidRepeatsBlock,
+  buildCaseClinicalRules,
   buildCaseStructurePrompt,
   buildCaseKeywordsFocusPrompt,
   buildTestVarietyPrompt,
@@ -71,8 +68,25 @@ import {
   testStemInstruction,
   type TestDifficulty,
 } from '../utils/testDifficulty';
-import { httpJson } from '../api/httpClient';
+import {
+  emptyScope,
+  buildScopePrompt,
+  type GenerationScope,
+  type SubjectDomain,
+} from '../utils/subjectDomain';
 import { ensureBackendAccessToken, getBackendAccessToken } from '../utils/backendAuth';
+import { httpJson } from '../api/httpClient';
+
+const SYS_MEDICAL =
+  'Siz FJSTI tibbiyot professori va klinik ta\'lim metodistisiz. Javoblar ilmiy, aniq, darsga tayyor.';
+
+const SYS_ACADEMIC =
+  'Siz FJSTI professori va berilgan FAN bo\'yicha metodistsiz. Klinik bemor kartasi, kasallik vignette, ' +
+  'KROK/USMLE ssenariysi YARATILMASIN — faqat shu fan, kafedra va mavzu (ma\'ruza bo\'lsa — u).';
+
+function sysRole(domain: SubjectDomain): string {
+  return domain === 'academic' ? SYS_ACADEMIC : SYS_MEDICAL;
+}
 
 // Hech qachon tashqi (DOI/PubMed/veb) havola yoki "Foydalanilgan adabiyotlar" ro'yxati so'ralmaydi —
 // bular ko'pincha AI tomonidan o'ylab topiladi (haqiqiy maqolaga bog'lanmasligi mumkin). Kitob
@@ -204,6 +218,7 @@ export interface CaseStudySession {
   questions: CaseStudyQuestion[];
   references?: MedicalReference[];
   keywords?: string[];
+  domain?: SubjectDomain;
 }
 
 export interface TestQuestion {
@@ -236,6 +251,7 @@ export interface TestSession {
   translations?: Partial<Record<AppLanguage, TestSessionContent>>;
   /** Oson / o'rta / qiyin — yaratishda tanlangan. */
   difficulty?: TestDifficulty;
+  domain?: SubjectDomain;
 }
 
 export interface LectureNote {
@@ -261,10 +277,17 @@ function parseJSONSafe<T>(text: string | undefined): T {
   return parseAiJson<T>(text);
 }
 
+export type SyllabusTopicType =
+  | 'lecture'
+  | 'practical'
+  | 'clinical'
+  | 'independent'
+  | 'lab';
+
 export interface SyllabusTopic {
-  id: string; // M1/L1/Л1 or A1/P1/П1
+  id: string; // L1 / A1 / K1 / I1 / B1 — UI da to'liq nom chiqadi
   title: string;
-  type: 'lecture' | 'practical';
+  type: SyllabusTopicType;
   /** Fan katalogi identifikatori (mavzu konteksti) */
   syllabusId?: number;
   subjectName?: string;
@@ -284,7 +307,7 @@ function languageName(lang: AppLanguage): string {
 }
 
 const SYLLABUS_AI_JSON_HINT =
-  '{"subject_name":"...","instruction_language":"uz|en|ru","topics":[{"id":"L1","title":"...","type":"lecture|practical"}]}';
+  '{"subject_name":"...","instruction_language":"uz|en|ru","topics":[{"id":"L1","title":"...","type":"lecture|practical|clinical|independent|lab"}]}';
 
 const SYLLABUS_NO_TRANSLATE_RULE =
   'CRITICAL: subject_name and every topic title MUST stay in the original document language. NEVER translate into another language. ' +
@@ -442,10 +465,34 @@ function syllabusExtractionErrorMessage(err: unknown, fileName: string, lang: Ap
 
 export { syllabusExtractionErrorMessage };
 
+const CASE_FOCUS_HINTS_ACADEMIC: Record<CaseStudyFocus, string> = {
+  profilaktika:
+    'xatolik/xavfsizlik/standartni buzmaslik — oddiy "ehtiyot bo\'ling" EMAS, aniq qaror',
+  davolash:
+    'yechim tanlovi ikkilamchi: ikkita yaqin usul, cheklov tufayli bittasi mos emas',
+  tashxis:
+    'ildiz sabab yoki to\'g\'ri model — ta\'rif emas, konkret shartlardan xulosa',
+};
+
+const CASE_PERSONA_HINTS_ACADEMIC: Record<CaseStudyFocus, string> = {
+  profilaktika:
+    'Ishtirokchi: yosh mutaxassis/talaba, aniq vazifa (tizim sozlash, hisob, dars). Kasallik YO\'Q.',
+  davolash:
+    'Ishtirokchi: o\'rta tajribali muhandis/o\'qituvchi. Birinchi urinish muvaffaqiyatsiz yoki cheklov bor.',
+  tashxis:
+    'Ishtirokchi: tajribali mutaxassis. Ikki yaqin tushuncha chalkashishi mumkin; bitta fakt kesadi.',
+};
+
 const CASE_FOCUS_HINTS: Record<CaseStudyFocus, string> = {
-  profilaktika: 'profilaktika, skrining, xavf omillarini boshqarish, kasallikni oldini olish',
-  davolash: 'davolash strategiyasi, dori tanlash, kuzatuv, asoratlarni kamaytirish',
-  tashxis: 'differensial tashxis, qo\'shimcha tekshiruvlar, klinik mantiq, tashxisni asoslash',
+  profilaktika:
+    'profilaktika/skrining qarori noaniq: raqobatdosh xavf, kontrendikatsiya yoki o\'tkazib yuborilgan skrining — ' +
+    'sog\'lom odamga oddiy maslahat EMAS',
+  davolash:
+    'davolash tanlovi ikkilamchi: komorbidlik, dori interaksiyasi, buyrak/jigar, birinchi qator samarasiz — ' +
+    'birinchi qatorni shunchaki yozib qo\'yish EMAS',
+  tashxis:
+    'atipik yoki o\'xshash sindromlar, 3 ta ishonchli DDx, hal qiluvchi belgi/tahlil — ' +
+    'darslikdagi tipik "oson" kechish EMAS',
 };
 
 /** Har fokus uchun MAJBURIY, bir-biriga o'xshamaydigan bemor profili — 3 ta
@@ -454,22 +501,23 @@ const CASE_FOCUS_HINTS: Record<CaseStudyFocus, string> = {
  * tanlaydi (masalan hammasi "Anvar"). */
 const CASE_PERSONA_HINTS: Record<CaseStudyFocus, string> = {
   profilaktika:
-    'Bemor: YOSH (20-35 yosh) AYOL, aniq kasbi bo\'lsin (masalan talaba, sotuvchi, muhandis). ' +
-    'Ism — kam uchraydigan, o\'ziga xos o\'zbekcha ism tanlang (Anvar/Nigora/Shirin/Gulnora kabi ' +
-    'juda keng tarqalgan ismlardan QOCHING).',
+    'Bemor: YOSH (20-35 yosh) AYOL, aniq kasbi. Lekin SOG\'LOM emas — mavzuga oid yashirin xavf, ' +
+    'o\'tkazib yuborilgan skrining yoki profilaktika uchun kontrendikatsiya bo\'lsin. ' +
+    'Ism — kam uchraydigan o\'zbekcha ism (Anvar/Nigora/Shirin/Gulnora dan QOCHING).',
   davolash:
-    'Bemor: O\'RTA YOSHLI (40-55 yosh) ERKAK, aniq kasbi bo\'lsin (masalan haydovchi, dehqon, ' +
-    'tadbirkor). Ism — kam uchraydigan, o\'ziga xos o\'zbekcha ism tanlang (Anvar/Nigora/Shirin/' +
-    'Gulnora kabi juda keng tarqalgan ismlardan QOCHING).',
+    'Bemor: O\'RTA YOSHLI (40-55 yosh) ERKAK, aniq kasbi. Polifarmasiya, buyrak/jigar cheklovi ' +
+    'yoki muvaffaqiyatsiz birinchi davolash bo\'lsin — oddiy "dori yozib berish" holati EMAS. ' +
+    'Ism — kam uchraydigan o\'zbekcha ism (Anvar/Nigora/Shirin/Gulnora dan QOCHING).',
   tashxis:
-    'Bemor: KEKSA (60-75 yosh), jinsi ixtiyoriy, nafaqaga chiqqan yoki hali ishlaydigan bo\'lishi ' +
-    'mumkin. Ism — kam uchraydigan, o\'ziga xos o\'zbekcha ism tanlang (Anvar/Nigora/Shirin/Gulnora ' +
-    'kabi juda keng tarqalgan ismlardan QOCHING).',
+    'Bemor: KEKSA (60-75 yosh), jinsi ixtiyoriy. Belgilari ikki yaqin tashxisni ham qo\'llab-quvvatlasin; ' +
+    'bitta topilma hal qiluvchi bo\'lsin. Klassik darslik kechishi EMAS. ' +
+    'Kam lab + pastki qorin = appenditsit kabi oson ssenariy YO\'Q. ' +
+    'Ism — kam uchraydigan o\'zbekcha ism (Anvar/Nigora/Shirin/Gulnora/Qodir dan QOCHING).',
 };
 
 /** Keys yechimi bo'limlarga ajratilgan holda so'raladi — bitta uzun "answer"
- *  so'ralganda model hajm ko'rsatmasini bajarmay, 400 so'z atrofida qaytarardi.
- *  Alohida maydonlar har biriga o'z ulushini beradi. */
+ *  so'ralganda model hajm ko'rsatmasini bajarmay qisqarardi. Alohida maydonlar
+ *  har biriga o'z ulushini beradi; prompt zich klinik karta (~1400 so'z) ushlab turadi. */
 type CaseSections = {
   patient?: string;
   complaints?: string;
@@ -494,9 +542,30 @@ const CASE_SCENARIO_PARTS: (keyof CaseSections)[] = [
   'labs',
 ];
 
-/** Vaziyat bo'limlarini bitta bemor tarixi matniga birlashtiradi. */
-function joinCaseScenario(raw: CaseSections): string {
-  return CASE_SCENARIO_PARTS.map((k) => String(raw[k] || '').trim())
+const CASE_SCENARIO_TITLES: Record<AppLanguage, string[]> = {
+  uz: ['Bemor', 'Shikoyatlar', 'Anamnez', 'Hayot tarzi', "Obyektiv ko'rik", 'Laboratoriya'],
+  ru: ['Пациент', 'Жалобы', 'Анамнез', 'Образ жизни', 'Объективный осмотр', 'Лаборатория'],
+  en: ['Patient', 'Complaints', 'History', 'Lifestyle', 'Examination', 'Investigations'],
+};
+
+const CASE_SCENARIO_TITLES_ACADEMIC: Record<AppLanguage, string[]> = {
+  uz: ['Ishtirokchi', 'Muammo', 'Shartlar', 'Muhit va vositalar', "Kuzatuv va o'lchov", "Ma'lumotlar"],
+  ru: ['Участник', 'Задача', 'Условия', 'Среда и средства', 'Наблюдения', 'Данные'],
+  en: ['Actor', 'Problem', 'Constraints', 'Environment', 'Observations', 'Data'],
+};
+
+/** Vaziyatni klinik karta qatorlariga birlashtiradi (`### Sarlavha`). */
+function joinCaseScenario(
+  raw: CaseSections,
+  language: AppLanguage = 'uz',
+  domain: SubjectDomain = 'clinical',
+): string {
+  const table = domain === 'academic' ? CASE_SCENARIO_TITLES_ACADEMIC : CASE_SCENARIO_TITLES;
+  const labels = table[language] ?? table.uz;
+  return CASE_SCENARIO_PARTS.map((k, i) => {
+    const text = String(raw[k] || '').trim();
+    return text ? `### ${labels[i]}\n${text}` : '';
+  })
     .filter(Boolean)
     .join('\n\n');
 }
@@ -512,34 +581,91 @@ const CASE_SECTION_KEYS: (keyof CaseSections)[] = [
 /** Yechim bo'limlari sarlavhalari — interfeys tilida ko'rsatiladi. */
 const CASE_SECTION_TITLES: Record<AppLanguage, string[]> = {
   uz: [
-    'Klinik tashxis va asoslanishi',
-    'Differensial tashxis',
-    "Qo'shimcha tekshiruvlar",
-    'Davolash / profilaktika taktikasi',
-    'Amaliy tavsiyalar va prognoz',
+    'Klinik xulosa',
+    'Differensial tahlil',
+    'Keyingi tekshiruvlar',
+    'Davolash taktikasi',
+    'Kuzatuv va ogohlantirish',
   ],
   ru: [
-    'Клинический диагноз и его обоснование',
-    'Дифференциальный диагноз',
-    'Дополнительные исследования',
-    'Тактика лечения / профилактики',
-    'Практические рекомендации и прогноз',
+    'Клиническое заключение',
+    'Дифференциальный анализ',
+    'Следующие обследования',
+    'Тактика лечения',
+    'Наблюдение и предупреждения',
   ],
   en: [
-    'Clinical diagnosis and rationale',
-    'Differential diagnosis',
-    'Additional investigations',
-    'Management / prevention plan',
-    'Practical recommendations and prognosis',
+    'Clinical impression',
+    'Differential analysis',
+    'Next investigations',
+    'Management plan',
+    'Follow-up and red flags',
   ],
 };
 
-/** Bo'limlarni sarlavhali yagona yechim matniga birlashtiradi. */
-function joinCaseSections(raw: CaseSections, language: AppLanguage = 'uz'): string {
-  const labels = CASE_SECTION_TITLES[language] ?? CASE_SECTION_TITLES.uz;
+const CASE_SECTION_TITLES_ACADEMIC: Record<AppLanguage, string[]> = {
+  uz: ['Xulosa', 'Muqobil tahlil', 'Tekshirish qadamlari', 'Yechim', 'Oldini olish'],
+  ru: ['Вывод', 'Альтернативы', 'Проверка', 'Решение', 'Профилактика ошибки'],
+  en: ['Conclusion', 'Alternatives', 'Verification', 'Solution', 'Prevention'],
+};
+
+const CASE_ACADEMIC_FIELDS =
+  'MAYDONLAR (JSON kalitlari o\'sha, mazmuni KLINIK EMAS):\n' +
+  '1. Vaziyat (jami 520–720 so\'z) — fan/mavzu bo\'yicha amaliy masala, bemor kartasi EMAS:\n' +
+  '   "patient" (55–75 so\'z) — ishtirokchi (talaba/muhandis/o\'qituvchi), kasb, vazifa; kasallik YO\'Q.\n' +
+  '   "complaints" (90–120 so\'z) — texnik yoki o\'quv muammo (xato, cheklov, noto\'g\'ri sozlama).\n' +
+  '   "history" (110–150 so\'z) — avvalgi urinishlar, berilgan shartlar, standart/protokol.\n' +
+  '   "lifestyle" (50–75 so\'z) — vositalar, muhit, dastur/uskuna/qoida (vital belgi YO\'Q).\n' +
+  '   "examination" (110–150 so\'z) — o\'lchov, log, hisob, ekran/natija — T/AB/puls YO\'Q.\n' +
+  '   "labs" (100–140 so\'z) — raqamli ma\'lumot (hajm, tezlik, formula, sozlama); HbA1c/WBC YO\'Q.\n' +
+  '2. Yechim (jami 700–920 so\'z):\n' +
+  '   "diagnosis" (130–170 so\'z) — ildiz sabab (nozologiya EMAS) + qaysi 3–4 fakt buni ochadi.\n' +
+  '   "differential" (170–220 so\'z) — 3 yaqin muqobil tushuntirish; har birida 1 qo\'llab + 1 rad etuvchi fakt.\n' +
+  '   "investigations" (110–150 so\'z) — 2–3 tekshirish qadami (nima o\'lchanadi/qayer qaraladi).\n' +
+  '   "management" (160–210 so\'z) — aniq yechim (qadam, sozlama, formula); nima tanlanmadi va nega.\n' +
+  '   "recommendations" (80–110 so\'z) — xatolikni oldini olish qoidalari.\n' +
+  '3. TAQIQLANGAN: 55 yoshli ayol + diabet + HbA1c + metformin + elektron pochta; bemor vignette; KROK.\n' +
+  '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Boshqa ism/kasb.\n';
+
+const CASE_CLINICAL_FIELDS =
+  'MAYDONLAR:\n' +
+  '1. Vaziyat (jami 520–720 so\'z) — to\'liq, lekin suvsiz klinik karta:\n' +
+  '   "patient" (55–75 so\'z) — ism, yosh, jins, BMI yoki tana tuzilishi, kasb, qayerga/qachon kelgan.\n' +
+  '   "complaints" (90–120 so\'z) — boshlang\'ich (soat/kun), migratsiya/irradiatsiya, kuchaytiruvchi/yengillatiruvchi, ' +
+  'hamroh belgilar (ishtaha, ko\'ngil aynishi, isitma, siydik/najas). Takrorlamang.\n' +
+  '   "history" (110–150 so\'z) — kasalliklar, JARROHLIK, DORILAR (nomi+doza+muddat), allergiya, ' +
+  'oxirgi 48 soatdagi muhim voqea. Faqat qarorga ta\'sir qiladigan fakt.\n' +
+  '   "lifestyle" (50–75 so\'z) — FAQAT qarorni o\'zgartiradigan odat/kasb/epidemiologiya. ' +
+  '"Chekmaydi, haftasiga 3 marta yuradi" TAQIQLANADI agar bu taktika o\'zgartirmasa.\n' +
+  '   "examination" (110–150 so\'z) — T, AB, puls, RR, SpO2; qorin/o\'pka/yurakdan MAVZUGA OID aniq belgilar ' +
+  '(masalan periton simptomlari BOR yoki YO\'Q — bu trap bo\'lishi mumkin). "Hamma tizim me\'yor" YO\'Q.\n' +
+  '   "labs" (100–140 so\'z) — 7–10 ko\'rsatkich (raqam+birlik), ulardan KAMIDA 1 tasi raqobatdosh tashxisni ' +
+  'qo\'llab-quvvatlasin. Imkon bo\'lsa 1 ta allaqachon qilingan vizualizatsiya (noaniq/chalg\'ituvchi natija).\n' +
+  '2. Yechim (jami 700–920 so\'z) — oliy ta\'lim klinik fikr:\n' +
+  '   "diagnosis" (130–170 so\'z) — aniq nozologiya + qaysi 3–4 belgi/mezon (yo\'riqnoma/skor) qanoatlanadi; ' +
+  'qaysi topilma chalg\'ituvchi va nima uchun e\'tiborsiz qoldirilmaydi.\n' +
+  '   "differential" (170–220 so\'z) — 3 ta YAQQOL yaqin DDx (oson rad etiladigan emas). HAR biri: 1 qo\'llab-quvvatlovchi + 1 rad etuvchi ANIQ raqam/belgi.\n' +
+  '   "investigations" (110–150 so\'z) — 2–3 tekshiruv: nima uchun USHBU bemorda, kutiladigan aniq natija, ' +
+  'nima qilinMASLIGI kerak (masalan oddiy appenditsitda qon ekilmasi).\n' +
+  '   "management" (160–210 so\'z) — 1-qator taktika (dori/doza/yo\'l YOKI operatsiya turi); ' +
+  'komorbidlik tufayli nima tanlanmadi; asorat xavfi.\n' +
+  '   "recommendations" (80–110 so\'z) — qizil bayroqlar (qachon qayta murojaat) + aniq nazorat muddati. Umumiy nasihat YO\'Q.\n' +
+  '3. Aniq yozing: nozologiya, mezon, dori, doza, qiymat. "Ehtimol" o\'rniga dalil.\n' +
+  '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Boshqa ism/yosh/kasb. Anvar, Nigora, Shirin, Gulnora, Madina, ' +
+  'Iskandar, Odil, Otabek, Qodir ismlaridan QOCHING.\n' +
+  '5. TAQIQLANGAN ssenariy: kam lab + pastki qorin og\'rig\'i = appenditsit; yoki bitta klassik belgi = tashxis.\n';
+
+/** Bo'limlarni harfsiz klinik fikr matniga birlashtiradi. */
+function joinCaseSections(
+  raw: CaseSections,
+  language: AppLanguage = 'uz',
+  domain: SubjectDomain = 'clinical',
+): string {
+  const table = domain === 'academic' ? CASE_SECTION_TITLES_ACADEMIC : CASE_SECTION_TITLES;
+  const labels = table[language] ?? table.uz;
   return CASE_SECTION_KEYS.map((key, i) => {
     const text = String(raw[key] || '').trim();
-    return text ? `${String.fromCharCode(97 + i)}) ${labels[i]}\n${text}` : '';
+    return text ? `${labels[i]}\n${text}` : '';
   })
     .filter(Boolean)
     .join('\n\n');
@@ -553,72 +679,52 @@ async function generateSingleCaseQuestion(
   avoid: string,
   contextText: string,
   sources: CaseSource[],
+  scope: GenerationScope,
 ): Promise<CaseStudyQuestion> {
+  const domain = scope.domain;
   const outLang = languageName(language);
-  const structure = buildCaseStructurePrompt(topic);
+  const structure = buildCaseStructurePrompt(topic, domain);
+  const clinicalRules = buildCaseClinicalRules(domain);
   const hasContext = Boolean(contextText.trim());
+  const scopeBlock = buildScopePrompt(scope);
+  const focusHint = domain === 'academic' ? CASE_FOCUS_HINTS_ACADEMIC[focus] : CASE_FOCUS_HINTS[focus];
+  const personaHint = domain === 'academic' ? CASE_PERSONA_HINTS_ACADEMIC[focus] : CASE_PERSONA_HINTS[focus];
   const request = (strict: boolean) =>
     openaiJson<CaseSections>({
       model: OPENAI_CHAT,
       system:
-        `${SYS_MEDICAL} ${GENERATION_UNIQUENESS_RULE} Return ONLY valid JSON object with EXACTLY ` +
+        `${sysRole(domain)} ` +
+        (domain === 'academic'
+          ? 'Oliy ta\'lim AMALIY keys, klinik bemor EMAS. '
+          : 'Oliy tibbiy ta\'lim klinik keysi (KROK / rezidentura), maktab/oson appenditsit EMAS. ') +
+        `${GENERATION_UNIQUENESS_RULE} Return ONLY valid JSON object with EXACTLY ` +
         'these keys: {"patient","complaints","history","lifestyle","examination","labs",' +
         '"diagnosis","differential","investigations","management","recommendations"}. ' +
-        'Har bir kalit alohida, to\'liq yozilgan matn bo\'lsin — qisqartirilgan tezis emas. ' +
+        (domain === 'academic'
+          ? 'Har maydon 4–8 dens gap. Kasallik, dori, lab, vital belgi YO\'Q. '
+          : 'Zich klinik karta: har maydon 4–8 dens gap, kam ma\'lumotli oson hikoya YO\'Q. ') +
+        'Yechimda a) b) c) d) e) harflari YOZILMASIN — bu fikr, test varianti emas. ' +
         `Language: ${outLang}. ${strictLanguageDirective(language)} focus="${focus}". ` +
-        (hasContext
-          ? 'MANBALAR (raqamlangan) sizga user xabarida berilgan — "answer" matnida HAR bir muhim klinik ' +
-            'da\'vodan keyin mos manba raqamini [n] shaklida qo\'ying (masalan "...tavsiya etiladi [2]."). ' +
-            'Kamida 5 ta turli manba raqami ishlatilsin. Manbada bo\'lmagan narsani manba raqami bilan ' +
-            'bog\'lamang. HECH QACHON o\'zingiz PMID/DOI/link yoki manba raqami o\'ylab topmang — faqat ' +
-            'sizga berilgan manbalar ro\'yxatidagi raqamlardan foydalaning. "Foydalanilgan adabiyotlar" ' +
-            'bo\'limini o\'zingiz yozmang — u dasturiy ravishda alohida qo\'shiladi.'
-          : 'Hech qanday manba berilmagan — hech qanday raqamli iqtibos [n], link yoki "Manba:" degan matn yozmang, faqat umumiy klinik bilim asosida yozing.'),
+        (domain === 'academic'
+          ? 'Hech qanday [n] iqtibos, PMID yoki klinik manba yozmang.'
+          : hasContext
+            ? 'MANBALAR (raqamlangan) sizga user xabarida berilgan — yechimda muhim klinik ' +
+              'da\'vodan keyin mos manba raqamini [n] qo\'ying. Kamida 2 ta DARSLIK va 2 ta ' +
+              'jurnal/PubMed raqami ishlatilsin. Wikipedia iqtibos qilmang. ' +
+              'Manbada yo\'q narsani [n] bilan bog\'lamang. PMID/DOI/link o\'ylab topmang. ' +
+              '"Foydalanilgan adabiyotlar" yozmang — dastur qo\'shadi.'
+            : 'Hech qanday manba berilmagan — hech qanday raqamli iqtibos [n], link yoki "Manba:" degan matn yozmang, faqat umumiy klinik bilim asosida yozing.'),
       user:
-        `${structure}${keywordFocus}${avoid}\n\n` +
-        `Generate ONE clinical case with focus="${focus}" (${CASE_FOCUS_HINTS[focus]}). ` +
-        `${CASE_PERSONA_HINTS[focus]}\n` +
-        'QATTIQ QOIDALAR:\n' +
-        '1. Vaziyat OLTITA alohida maydonga yoziladi (jami kamida 700 so\'z), har biri to\'liq ' +
-        'paragraf(lar) bo\'lsin:\n' +
-        '   "patient" (kamida 90 so\'z) — bemor ismi, yoshi, jinsi, kasbi, oilaviy holati va murojaat sababi.\n' +
-        '   "complaints" (kamida 120 so\'z) — shikoyatlar tafsiloti: xarakteri, joylashuvi, kuchi, ' +
-        'qachon kuchayadi/yengillashadi.\n' +
-        '   "history" (kamida 130 so\'z) — kasallik tarixi, o\'tgan kasalliklar, qabul qilayotgan dorilar, ' +
-        'allergiya, oilaviy anamnez.\n' +
-        '   "lifestyle" (kamida 90 so\'z) — hayot tarzi, ish sharoiti, ovqatlanish, zararli odatlar, ' +
-        'ijtimoiy-psixologik kontekst.\n' +
-        '   "examination" (kamida 140 so\'z) — obyektiv ko\'rik TIZIM-TIZIM bo\'yicha (umumiy holat, ' +
-        'yurak-qon tomir, nafas, hazm, asab), aniq o\'lchovlar bilan (AB, puls, harorat, BMI).\n' +
-        '   "labs" (kamida 130 so\'z) — laborator va instrumental natijalar ANIQ raqam va o\'lchov ' +
-        'birligi bilan, me\'yor oralig\'i ko\'rsatilgan holda.\n' +
-        '2. Yechim BESHTA ALOHIDA maydonga yoziladi. HAR BIRI o\'z hajmiga ega bo\'lsin ' +
-        '(jami kamida 1000-1200 so\'z), qisqartirmang:\n' +
-        '   "diagnosis" (kamida 180 so\'z) — klinik tashxis ANIQ nozologiya nomi bilan va uning ' +
-        'to\'liq asoslanishi: qaysi shikoyat/topilma/laborator qiymat qaysi mezonni qanoatlantiradi.\n' +
-        '   "differential" (kamida 220 so\'z) — kamida 3-4 muqobil tashxis, HAR biri uchun ' +
-        'qo\'llab-quvvatlovchi va rad etuvchi aniq dalillar.\n' +
-        '   "investigations" (kamida 180 so\'z) — qo\'shimcha tekshiruvlar, har biri uchun maqsad va ' +
-        'kutilayotgan natija (aniq qiymat oralig\'i bilan).\n' +
-        '   "management" (kamida 250 so\'z) — bosqichma-bosqich davolash/profilaktika: aniq dori nomi, ' +
-        'dozasi, qabul yo\'li va davomiyligi, muqobil variantlar, kuzatuv jadvali.\n' +
-        '   "recommendations" (kamida 170 so\'z) — bemorga/oilaga amaliy tavsiyalar, xavf belgilari ' +
-        '(qachon shoshilinch murojaat qilish) va uzoq muddatli prognoz/kuzatuv rejasi.\n' +
-        '4. REAL VA QAT\'IY BO\'LSIN: taxminiy/ehtimoliy iboralardan qoching — "taxminiy tashxis", ' +
-        '"taxmin qilish mumkin", "ehtimol", "bo\'lishi mumkin" kabi ikkilanishlar o\'rniga aniq nozologiya, ' +
-        'aniq dori nomi va dozasi, aniq tekshiruv nomi va kutilayotgan qiymat yozilsin. Laborator ' +
-        'ko\'rsatkichlar aniq raqam va o\'lchov birligi bilan berilsin. Xalqaro klinik yo\'riqnomalarga ' +
-        '(guideline) mos, haqiqiy amaliyotda qo\'llanadigan yechim bo\'lsin.\n' +
-        '3. Bu 3 ta vaziyatdan FAQAT BITTASI — qolgan ikkitasi boshqa bemor, boshqa ism, boshqa yosh/kasb ' +
-        'bilan alohida generatsiya qilinmoqda. O\'zingizning vaziyatingiz ularnikidan butunlay farq qilishi ' +
-        'shart: umumiy ismlardan (Anvar, Nigora, Shirin, Gulnora, Madina, Iskandar, Odil, Otabek kabi juda ' +
-        'ko\'p ishlatiladigan ismlardan) qoching, o\'ziga xos ism tanlang.\n' +
-        (hasContext ? `\nMANBALAR:\n${contextText}\n` : '') +
+        `${scopeBlock}\n\n${structure}${keywordFocus}${avoid}\n\n` +
+        `${clinicalRules}\n\n` +
+        `Generate ONE case with focus="${focus}" (${focusHint}). ` +
+        `${personaHint}\n` +
+        (domain === 'academic' ? CASE_ACADEMIC_FIELDS : CASE_CLINICAL_FIELDS) +
+        (domain !== 'academic' && hasContext ? `\nMANBALAR:\n${contextText}\n` : '') +
         (strict ? `\nStrict valid JSON only.\n${strictLanguageDirective(language)}` : ''),
-      // 11 ta maydon (6 vaziyat + 5 yechim) bitta JSON'ga sig'ishi kerak.
-      // 11000 token'da JSON oxiri kesilib, yechim bo'limlari bo'sh qolardi.
-      maxTokens: 16000,
-      temperature: strict ? 0.45 : 0.65,
+      // Zich keys: ~1400 so'z JSON.
+      maxTokens: 10000,
+      temperature: strict ? 0.32 : 0.42,
       parse: (t) => parseJSONSafe(t),
     });
 
@@ -631,11 +737,11 @@ async function generateSingleCaseQuestion(
 
   // Til nazorati: model so'ralgan til o'rniga o'zbekchani (ko'pincha kirilda)
   // qaytarsa — bir marta qat'iyroq rejimda qayta so'raymiz.
-  if (outputLanguageLooksWrong(joinCaseSections(raw, language), language)) {
+  if (outputLanguageLooksWrong(joinCaseSections(raw, language, domain), language)) {
     console.warn(`Case focus "${focus}": javob ${language} tilida emas, qayta urinilmoqda`);
     try {
       const retry = await request(true);
-      if (!outputLanguageLooksWrong(joinCaseSections(retry, language), language)) {
+      if (!outputLanguageLooksWrong(joinCaseSections(retry, language, domain), language)) {
         raw = retry;
       }
     } catch (err) {
@@ -643,7 +749,7 @@ async function generateSingleCaseQuestion(
     }
   }
 
-  const answer = joinCaseSections(raw, language);
+  const answer = joinCaseSections(raw, language, domain);
   const usedIndices = new Set(
     Array.from(answer.matchAll(/\[(\d+)\]/g)).map((m) => Number(m[1])),
   );
@@ -651,12 +757,16 @@ async function generateSingleCaseQuestion(
   // manbalar ustuvor; agar u [n] yozishni unutgan bo'lsa ham, yechim aynan shu
   // manbalar asosida yaratilgani uchun ular ro'yxatda beriladi (bo'sh "Foydalanilgan
   // adabiyotlar" bo'limi chiqmasligi kerak).
-  const citedSources = sources.filter((s) => usedIndices.has(s.index));
-  const shownSources = citedSources.length ? citedSources : sources.slice(0, 8);
+  const citedSources = sources.filter((s) => usedIndices.has(s.index) && s.type !== 'wikipedia');
+  const books = sources.filter((s) => s.type === 'book');
+  const journals = sources.filter((s) => s.type === 'pubmed' || s.type === 'scholar');
+  const seen = new Set(citedSources.map((s) => s.index));
+  const extras = domain === 'academic' ? [] : [...books, ...journals].filter((s) => !seen.has(s.index));
+  const shownSources = domain === 'academic' ? [] : [...citedSources, ...extras].slice(0, 10);
   const referencesSection = buildReferencesSection(shownSources, language);
 
   return {
-    scenario: joinCaseScenario(raw),
+    scenario: joinCaseScenario(raw, language, domain),
     answer: answer + referencesSection,
     focus: normalizeCaseFocus(raw.focus, CASE_STUDY_FOCUS_ORDER.indexOf(focus)),
     ...(shownSources.length ? { references: sourcesToMedicalReferences(shownSources) } : {}),
@@ -696,6 +806,7 @@ function normalizeCaseSession(
     topic: (data.topic || topic || '').trim() || topic,
     questions: cleanedQuestions,
     references: [],
+    ...(data.domain ? { domain: data.domain } : {}),
   };
 }
 
@@ -784,6 +895,7 @@ function normalizeTestSession(
     questions,
     references: sessionRefs,
     difficulty: data.difficulty,
+    ...(data.domain ? { domain: data.domain } : {}),
   };
 }
 
@@ -919,10 +1031,12 @@ function sourcesToMedicalReferences(sources: CaseSource[]): MedicalReference[] {
   return sources.map((s) => ({
     title: s.title,
     citeIndex: s.index,
+    kind: s.type,
     ...(s.authors ? { authors: s.authors } : {}),
     publisher: sourcePublisherLabel(s.type),
     ...(s.url ? { url: s.url } : {}),
     ...(s.type === 'book' && s.meta ? { pages: s.meta.replace(/-bet$/, '') } : {}),
+    ...(s.type !== 'book' && s.meta ? { note: s.meta } : {}),
   }));
 }
 
@@ -996,6 +1110,70 @@ const OPTION_EXPLANATION_CHUNK = 4;
  * `optionExplanations` ni o'zgartirmasdan uzatadi) va iMentor test ekranida har
  * variant ostida ko'rinadi.
  */
+function optionExplanationSystem(
+  domain: SubjectDomain,
+  bookContext: BookContext | undefined,
+  outLang: string,
+  language: AppLanguage,
+): string {
+  if (domain === 'academic') {
+    return (
+      `${SYS_ACADEMIC} Har savol uchun IKKITA narsa yoz.\n` +
+      '1) `analysis` — to\'g\'ri javob tahlili: 8-12 gap. FAN mantiqi (qoida, formula, protokol, sozlama). ' +
+      'Klinik sindrom, dori, lab, patofiziologiya YOZILMASIN.\n' +
+      '(a) Qaysi shart/cheklov hal qiluvchi.\n' +
+      '(b) Nega aynan shu javob mavzu/ma\'ruzaga mos.\n' +
+      '(c) Nega yaqin distraktor xato.\n' +
+      '2) `explanations` — HAR BIR variantga bittadan qisqa izoh (1 gap, 20 so\'zgacha).\n' +
+      'JSON: {items:[{id:<berilgan id>, analysis:"...", explanations:[{i:<variantning berilgan i raqami>, text:"..."}]}]}. ' +
+      (bookContext
+        ? 'MANBA: darslik parchalariga tayaning. '
+        : 'Faqat shu fan bilimiga tayaning. ') +
+      `Til: ${outLang}. ${strictLanguageDirective(language)}`
+    );
+  }
+  return (
+    `${SYS_MEDICAL} Har savol uchun IKKITA narsa yoz.\n` +
+    '1) `analysis` — to\'g\'ri javob tahlili: KAMIDA 8, KO\'PI BILAN 12 gap (230-330 so\'z). ' +
+    'Bu shunchaki javob emas — TALABAGA KLINIK FIKRLASHNI o\'rgatadigan tahlil bo\'lsin, ' +
+    'quyidagi ketma-ketlikda:\n' +
+    '(a) Kalit ma\'lumotlar: vignettadagi qaysi belgilar/ko\'rsatkichlar hal qiluvchi va ' +
+    'qaysilari chalg\'ituvchi ekanini ajrating (yosh, muddat, dinamika, laborator qiymat).\n' +
+    '(b) Klinik fikrlash zanjiri: shikoyat → yetakchi sindrom → differensial doira → ' +
+    'qaysi belgi qaysi tashxisni kesib tashlaydi → nega aynan shu javob qoladi.\n' +
+    '(c) Patofiziologiya: qaysi ferment/retseptor/hujayra/tizim buzilgan va bu belgilarni ' +
+    'qanday mexanizm bilan keltirib chiqaradi.\n' +
+    '(d) Tasdiqlash: "oltin standart" va birinchi navbatdagi tekshiruv, undan kutiladigan ' +
+    'ANIQ natija (ko\'rsatkich nomi va o\'zgarish yo\'nalishi bilan).\n' +
+    '(e) Taktika: keyingi qadam va tanlangan usul/dori mexanizmi, nega aynan shu ustuvor.\n' +
+    '(f) Xavf va prognoz: kechiktirilsa yuzaga keladigan asorat, "red flag" belgilari.\n' +
+    'Har gap YANGI ma\'lumot bersin — bir fikrni boshqacha so\'z bilan takrorlamang; ' +
+    'umumiy iboralar ("muhim ahamiyatga ega", "e\'tibor berish kerak") o\'rniga aniq ' +
+    'atama, ko\'rsatkich, muddat va doza guruhini yozing. ' +
+    'Savol matnini takrorlamang. Boshqa variantlarni bu yerda muhokama qilmang — ular ' +
+    'uchun alohida izoh bor. "Shuning uchun ... eng maqsadga muvofiq" kabi xulosa gapini ' +
+    'YOZMANG, u hech qanday ma\'lumot qo\'shmaydi.\n' +
+    '2) `explanations` — HAR BIR variantga bittadan qisqa izoh: to\'g\'ri variant uchun ' +
+    'nega aynan shu to\'g\'ri; qolganlari uchun nega bu klinik vaziyatda noto\'g\'ri. ' +
+    'Har izoh 1 ta gap, 20 so\'zgacha.\n' +
+    'JSON: {items:[{id:<berilgan id>, analysis:"...", explanations:[{i:<variantning berilgan i raqami>, text:"..."}]}]}. ' +
+    'MUHIM: `i` — aynan o\'sha variantning berilgan raqami; izoh SHU variant haqida bo\'lsin. ' +
+    'To\'g\'ri variant izohini birinchi o\'ringa ko\'chirmang — har bir variant o\'z `i` si bilan qaytsin. ' +
+    'Har variant uchun bittadan yozing, birortasini tashlab ketmang.\n' +
+    (bookContext
+      ? 'MANBA: yuqoridagi darslik parchalariga TAYANING — ta\'rif, tasnif, ' +
+        'ko\'rsatkich va davolash sxemasi imkon qadar o\'sha matndan olinsin. ' +
+        'Parchalarda yo\'q narsani o\'ylab topmang; darslikda yo\'q bo\'lsa, umumiy tan ' +
+        'olingan klinik amaliyotga tayaning va aniq raqam o\'rniga umumiy qoidani yozing. '
+      : 'Faqat umumiy tan olingan klinik bilimga tayaning. ') +
+    'HECH QACHON o\'ylab topilgan raqam, doza, statistika yoki havola yozmang. ' +
+    'SAFSATA TAQIQLANADI: "muhim ahamiyatga ega", "e\'tibor berish kerak", "to\'g\'ri ' +
+    'yondashuv talab etiladi" kabi hech narsa tushuntirmaydigan gaplar YOZMANG — ' +
+    'har gapda aniq atama, mexanizm, ko\'rsatkich yoki qadam bo\'lsin.\n' +
+    `Til: ${outLang}. ${strictLanguageDirective(language)}`
+  );
+}
+
 async function attachOptionExplanations(
   session: TestSession,
   language: AppLanguage,
@@ -1042,45 +1220,7 @@ async function attachOptionExplanations(
           // Bo'lak 4 tadan va parallel ketadi, shuning uchun vaqt sezilarli
           // uzaymaydi.
           model: OPENAI_CHAT,
-          system:
-            `${SYS_MEDICAL} Har savol uchun IKKITA narsa yoz.\n` +
-            '1) `analysis` — to\'g\'ri javob tahlili: KAMIDA 8, KO\'PI BILAN 12 gap (230-330 so\'z). ' +
-            'Bu shunchaki javob emas — TALABAGA KLINIK FIKRLASHNI o\'rgatadigan tahlil bo\'lsin, ' +
-            'quyidagi ketma-ketlikda:\n' +
-            '(a) Kalit ma\'lumotlar: vignettadagi qaysi belgilar/ko\'rsatkichlar hal qiluvchi va ' +
-            'qaysilari chalg\'ituvchi ekanini ajrating (yosh, muddat, dinamika, laborator qiymat).\n' +
-            '(b) Klinik fikrlash zanjiri: shikoyat → yetakchi sindrom → differensial doira → ' +
-            'qaysi belgi qaysi tashxisni kesib tashlaydi → nega aynan shu javob qoladi.\n' +
-            '(c) Patofiziologiya: qaysi ferment/retseptor/hujayra/tizim buzilgan va bu belgilarni ' +
-            'qanday mexanizm bilan keltirib chiqaradi.\n' +
-            '(d) Tasdiqlash: "oltin standart" va birinchi navbatdagi tekshiruv, undan kutiladigan ' +
-            'ANIQ natija (ko\'rsatkich nomi va o\'zgarish yo\'nalishi bilan).\n' +
-            '(e) Taktika: keyingi qadam va tanlangan usul/dori mexanizmi, nega aynan shu ustuvor.\n' +
-            '(f) Xavf va prognoz: kechiktirilsa yuzaga keladigan asorat, "red flag" belgilari.\n' +
-            'Har gap YANGI ma\'lumot bersin — bir fikrni boshqacha so\'z bilan takrorlamang; ' +
-            'umumiy iboralar ("muhim ahamiyatga ega", "e\'tibor berish kerak") o\'rniga aniq ' +
-            'atama, ko\'rsatkich, muddat va doza guruhini yozing. ' +
-            'Savol matnini takrorlamang. Boshqa variantlarni bu yerda muhokama qilmang — ular ' +
-            'uchun alohida izoh bor. "Shuning uchun ... eng maqsadga muvofiq" kabi xulosa gapini ' +
-            'YOZMANG, u hech qanday ma\'lumot qo\'shmaydi.\n' +
-            '2) `explanations` — HAR BIR variantga bittadan qisqa izoh: to\'g\'ri variant uchun ' +
-            'nega aynan shu to\'g\'ri; qolganlari uchun nega bu klinik vaziyatda noto\'g\'ri. ' +
-            'Har izoh 1 ta gap, 20 so\'zgacha.\n' +
-            'JSON: {items:[{id:<berilgan id>, analysis:"...", explanations:[{i:<variantning berilgan i raqami>, text:"..."}]}]}. ' +
-            'MUHIM: `i` — aynan o\'sha variantning berilgan raqami; izoh SHU variant haqida bo\'lsin. ' +
-            'To\'g\'ri variant izohini birinchi o\'ringa ko\'chirmang — har bir variant o\'z `i` si bilan qaytsin. ' +
-            'Har variant uchun bittadan yozing, birortasini tashlab ketmang.\n' +
-            (bookContext
-              ? 'MANBA: yuqoridagi darslik parchalariga TAYANING — ta\'rif, tasnif, ' +
-                'ko\'rsatkich va davolash sxemasi imkon qadar o\'sha matndan olinsin. ' +
-                'Parchalarda yo\'q narsani o\'ylab topmang; darslikda yo\'q bo\'lsa, umumiy tan ' +
-                'olingan klinik amaliyotga tayaning va aniq raqam o\'rniga umumiy qoidani yozing. '
-              : 'Faqat umumiy tan olingan klinik bilimga tayaning. ') +
-            'HECH QACHON o\'ylab topilgan raqam, doza, statistika yoki havola yozmang. ' +
-            'SAFSATA TAQIQLANADI: "muhim ahamiyatga ega", "e\'tibor berish kerak", "to\'g\'ri ' +
-            'yondashuv talab etiladi" kabi hech narsa tushuntirmaydigan gaplar YOZMANG — ' +
-            'har gapda aniq atama, mexanizm, ko\'rsatkich yoki qadam bo\'lsin.\n' +
-            `Til: ${outLang}. ${strictLanguageDirective(language)}`,
+          system: optionExplanationSystem(session.domain || 'clinical', bookContext, outLang, language),
           user: JSON.stringify(source),
           bookContext,
           // ~1800 token/savol: 8-12 gaplik klinik tahlil + 5 ta variant izohi
@@ -1327,7 +1467,7 @@ async function attachTestTranslations(session: TestSession, primaryLang: AppLang
 async function requestPresentationDeckFromAi(params: {
   topicTitle: string;
   topicId: string;
-  topicType: 'lecture' | 'practical';
+  topicType: SyllabusTopicType;
   subjectName: string;
   variantLabel: string;
   language: AppLanguage;
@@ -1343,7 +1483,12 @@ async function requestPresentationDeckFromAi(params: {
   const bookContext: BookContext | undefined = params.subjectCode
     ? { subjectCode: params.subjectCode, topicQuery: params.topicTitle }
     : undefined;
-  const kind = params.topicType === 'practical' ? "amaliy mashg'ulot" : "ma'ruza";
+  const kind =
+    params.topicType === 'practical'
+      ? "amaliy mashg'ulot"
+      : params.topicType === 'clinical'
+        ? "klinik mashg'ulot"
+        : "ma'ruza";
   const fallbackTitle = `${params.topicId} — ${params.topicTitle}`;
 
   // Taqdimot ma'ruza matni asosida quriladi; yuklangan PDF (bo'lsa) qo'shimcha
@@ -1496,7 +1641,7 @@ export const aiService = {
     try {
       if (syllabusFileExtension(file.name) === '.xlsx') {
         const rows = await readXlsxRows(await file.arrayBuffer());
-        const parsed = parseSyllabusExcel(rows);
+        const parsed = parseSyllabusExcel(rows, file.name);
         if (!parsed.topics.length) {
           throw new Error('empty-document');
         }
@@ -1527,6 +1672,7 @@ export const aiService = {
     language: AppLanguage = 'uz',
     keywords: string[] = [],
     subjectCode?: string,
+    scope: GenerationScope = emptyScope(topic),
   ): Promise<CaseStudySession> {
     try {
       assertOpenAiApiKey();
@@ -1534,7 +1680,12 @@ export const aiService = {
       const keywordFocus = buildCaseKeywordsFocusPrompt(keywords);
       // RAG: kitob chunk'lari + PubMed/Semantic Scholar'dan REAL manbalar — bir marta
       // olinadi va 3 ta fokus (profilaktika/davolash/tashxis) uchun baravar ishlatiladi.
-      const { sources: caseSources, contextText: caseContextText } = await fetchCaseContext(topic, subjectCode);
+      // RAG: kitob + PubMed — faqat klinik fanlar. Akademik fanda PubMed klinik
+      // vignette'ni kuchaytiradi, shuning uchun o'tkazib yuboriladi.
+      const { sources: caseSources, contextText: caseContextText } =
+        scope.domain === 'academic'
+          ? { sources: [] as CaseSource[], contextText: '' }
+          : await fetchCaseContext(topic, subjectCode);
 
       // Har bir fokus MUSTAQIL urinadi — bittasi vaqtinchalik xato bersa ham
       // (tarmoq/JSON parse), qolgan ikkitasi qisqa/manbasiz eski rejimga
@@ -1553,6 +1704,7 @@ export const aiService = {
               avoid,
               caseContextText,
               caseSources,
+              scope,
             );
           } catch (err) {
             console.warn(`Case focus "${focus}" birinchi urinishda muvaffaqiyatsiz, qayta urinilmoqda:`, err);
@@ -1564,6 +1716,7 @@ export const aiService = {
               avoid,
               caseContextText,
               caseSources,
+              scope,
             );
           }
         }),
@@ -1573,6 +1726,7 @@ export const aiService = {
         topic,
         questions,
         references: [],
+        domain: scope.domain,
       };
       const normalized = normalizeCaseSession(topic, data, language);
       return keywords.length ? { ...normalized, keywords } : normalized;
@@ -1592,8 +1746,11 @@ export const aiService = {
     language: AppLanguage = 'uz',
     subjectCode?: string,
     difficulty: TestDifficulty = DEFAULT_TEST_DIFFICULTY,
+    scope: GenerationScope = emptyScope(topic),
   ): Promise<TestSession> {
     assertOpenAiApiKey();
+    const domain = scope.domain;
+    const scopeBlock = buildScopePrompt(scope);
     const safeCount = Math.min(90, Math.max(10, Math.round(count) || 10));
     const outLang = languageName(language);
     const bookContext: BookContext | undefined = subjectCode?.trim()
@@ -1606,32 +1763,40 @@ export const aiService = {
     ]);
 
     const generate = async (requestedCount: number): Promise<TestSession> => {
-      const variety = buildTestVarietyPrompt(topic, requestedCount, difficulty);
-      const levelBlock = buildTestDifficultyPrompt(difficulty);
-      // ~480 token/savol: 5-7 gaplik klinik `explanation` (o'zbekcha ~3 token/so'z).
-      // gpt-4o max output (16000) dan oshmasin.
-      const scaledMaxTokens = Math.min(16000, Math.ceil(requestedCount * 480) + 500);
+      const variety = buildTestVarietyPrompt(topic, requestedCount, difficulty, domain);
+      const levelBlock = buildTestDifficultyPrompt(difficulty, domain);
+      // ~640 token/savol: 3 zich jumla + 5–7 gaplik klinik explanation.
+      const scaledMaxTokens = Math.min(16000, Math.ceil(requestedCount * 640) + 500);
       // OpenAI + server RAG: book_references completion javobidan olinadi.
       let bookReferences: MedicalReference[] = [];
       const parsed = await openaiJson({
         model: OPENAI_CHAT,
         system:
-          `${SYS_MEDICAL} ${GENERATION_UNIQUENESS_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
+          `${sysRole(domain)} ` +
+          (domain === 'academic'
+            ? 'Oliy ta\'lim testlari SHU FAN bo\'yicha. Klinik bemor, KROK/USMLE vignette YO\'Q. '
+            : 'Oliy tibbiy ta\'lim testlari (KROK / USMLE Step 2 CK), maktab/kollej emas. ') +
+          `${GENERATION_UNIQUENESS_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
           `${requestedCount} ta test JSON: ` +
           `{topic, references:[], questions:[{question, options[5], correctOptionIndex, explanation, references:[]}]}. ` +
-          // optionExplanations shu yerda so'ralmaydi — u `enrichTestSession`
-          // ichida, fonda, bo'lak-bo'lak olinadi (katta partiyalarda javob
-          // token limitiga urilib JSON kesilib qolmasligi uchun).
-          `${testExplanationInstruction(difficulty)} ` +
-          'O\'ylab topilgan raqam, doza, statistika yoki havola yozmang — ishonchingiz komil ' +
-          'bo\'lmasa, aniq son o\'rniga umumiy qoidani yozing. ' +
+          `${testExplanationInstruction(difficulty, domain)} ` +
+          (domain === 'academic'
+            ? 'Uydirma foiz, PMID, maqola yoki havola YOZILMASIN. Bemor+kasallik+dori vignette TAQIQLANADI. '
+            : 'Stemda kamida IKKITA realistik vital/lab qiymat (birlik bilan) bo\'lsin. Uydirma foiz, PMID, ' +
+              'maqola yoki havola YOZILMASIN. Oliy tibbiy ta\'lim saviyasi: klassik bitta ABG/lab = tashxis TAQIQLANADI. ') +
           `${levelBlock} ` +
           'optionExplanations YOZMANG. ' +
           `Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
-          `${variety}${avoid}\n\n${requestedCount} ta NOYOB savol. ${testStemInstruction(difficulty)} ` +
-          'Har savolni yozishdan oldin o\'zingizga savol bering: "to\'g\'ri javobim shu mavzuga kiradimi va stemdan kelib chiqadimi? Ikkinchi variant ham to\'g\'rimi?" — ' +
-          'kirmasa yoki ikkita to\'g\'ri bo\'lsa, savolni almashtiring. explanation — 5-7 gaplik klinik tahlil. Faqat valid JSON.',
+          `${scopeBlock}\n\n${variety}${avoid}\n\n${requestedCount} ta NOYOB, QIYIN, ZICH savol. ${testStemInstruction(difficulty, domain)} ` +
+          (domain === 'academic'
+            ? 'Klinik vignette (yoshli bemor + kasallik + lab) yozilsa — butunlay almashtiring. ' +
+              'Har savolni yozishdan oldin: "to\'g\'ri javob shu fan/mavzu/ma\'ruzadami? Bemor yo\'qmi?" — yo\'q bo\'lsa almashtiring. ' +
+              'explanation — 5-7 gaplik FAN tahlili, klinik patofiziologiya emas. Faqat valid JSON.'
+            : 'Maktab darajasidagi qisqa vignette ("yosh + 1 lab + qaysi tashxis ehtimoliy?") yozilsa — butunlay almashtiring. ' +
+              'Har savolni yozishdan oldin: "to\'g\'ri javob mavzudami? Stemdan IKKITA belgi kerakmi? ' +
+              'Komorbidlik/dori/trap bormi? Ikkinchi variant ham to\'g\'rimi? 3 zich jumlami?" — yo\'q bo\'lsa almashtiring. ' +
+              'explanation — 5-7 gaplik klinik tahlil. Faqat valid JSON.'),
         maxTokens: scaledMaxTokens,
         temperature: testDifficultyTemperature(difficulty),
         bookContext,
@@ -1640,7 +1805,7 @@ export const aiService = {
         },
         parse: (t) => parseJSONSafe<TestSession>(t),
       });
-      return { ...normalizeTestSession(topic, { ...parsed, difficulty }, requestedCount, bookReferences) };
+      return { ...normalizeTestSession(topic, { ...parsed, difficulty, domain }, requestedCount, bookReferences) };
     };
 
     /** Savol matnlari so'ralgan tilda ekanini tekshiradi. */
@@ -1664,11 +1829,11 @@ export const aiService = {
           console.warn('Test tili bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
         }
       }
-      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty };
+      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);
       const data = await generate(Math.min(safeCount, 10));
-      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty };
+      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
     }
   },
 
@@ -1814,7 +1979,7 @@ export const aiService = {
   async generatePresentationDeck(params: {
     topicTitle: string;
     topicId: string;
-    topicType: 'lecture' | 'practical';
+    topicType: SyllabusTopicType;
     subjectName: string;
     variantLabel: string;
     language: AppLanguage;

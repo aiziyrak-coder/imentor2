@@ -200,42 +200,100 @@ def external_department_detail(db: Session, department_code: str) -> dict | None
     }
 
 
-def build_syllabus_catalog_stats(db: Session) -> dict:
-    by_department = db.execute(
-        select(
-            AcademicDepartment.name,
-            AcademicDepartment.code,
-            func.count(CourseSyllabus.id).filter(CourseSyllabus.is_active.is_(True)).label("subjects_count"),
-        )
-        .select_from(AcademicDepartment)
-        .join(CourseSyllabus, CourseSyllabus.department_id == AcademicDepartment.id, isouter=True)
-        .where(AcademicDepartment.is_active.is_(True))
-        .group_by(AcademicDepartment.name, AcademicDepartment.code, AcademicDepartment.sort_order)
-        .order_by(AcademicDepartment.sort_order, AcademicDepartment.name)
-    ).all()
+def _real_department_ids(db: Session) -> set[int]:
+    """Faqat fan yoki xodimi bor kafedralar (bo'sh klinik qoldiqlar emas)."""
+    from app.models.staff_location import StaffProfile
 
-    active_rows = db.execute(select(CourseSyllabus.variants, CourseSyllabus.topics).where(CourseSyllabus.is_active.is_(True))).all()
-    subjects_count = len(active_rows)
+    ids: set[int] = set()
+    ids.update(
+        i
+        for i in db.execute(
+            select(CourseSyllabus.department_id).where(
+                CourseSyllabus.is_active.is_(True),
+                CourseSyllabus.department_id.is_not(None),
+            )
+        ).scalars()
+        if i is not None
+    )
+    ids.update(
+        i
+        for i in db.execute(
+            select(StaffProfile.department_id).where(StaffProfile.department_id.is_not(None))
+        ).scalars()
+        if i is not None
+    )
+    return ids
+
+
+def academic_kafedra_count() -> int | None:
+    """OnlineTest academic-catalog dagi kafedralar soni (dashboard bilan bir xil manba)."""
+    from app.services.online_test_client import OnlineTestAuthError, fetch_academic_catalog
+
+    try:
+        catalog = fetch_academic_catalog()
+    except OnlineTestAuthError:
+        return None
+    n = sum(1 for row in catalog.get("kafedralar") or [] if str(row.get("name") or "").strip())
+    return n or None
+
+
+def build_syllabus_catalog_stats(db: Session) -> dict:
+    real_ids = _real_department_ids(db)
+    by_department = []
+    if real_ids:
+        by_department = db.execute(
+            select(
+                AcademicDepartment.id,
+                AcademicDepartment.name,
+                AcademicDepartment.code,
+                AcademicDepartment.sort_order,
+                func.count(CourseSyllabus.id)
+                .filter(CourseSyllabus.is_active.is_(True))
+                .label("subjects_count"),
+            )
+            .select_from(AcademicDepartment)
+            .join(CourseSyllabus, CourseSyllabus.department_id == AcademicDepartment.id, isouter=True)
+            .where(AcademicDepartment.id.in_(real_ids), AcademicDepartment.is_active.is_(True))
+            .group_by(
+                AcademicDepartment.id,
+                AcademicDepartment.name,
+                AcademicDepartment.code,
+                AcademicDepartment.sort_order,
+            )
+            .order_by(AcademicDepartment.sort_order, AcademicDepartment.name)
+        ).all()
+
+    subjects_count = db.execute(
+        select(func.count()).select_from(CourseSyllabus).where(CourseSyllabus.is_active.is_(True))
+    ).scalar_one()
     subjects_total = db.execute(select(func.count()).select_from(CourseSyllabus)).scalar_one()
-    variants_count = 0
-    topics_count = 0
-    for variants, topics in active_rows:
-        if variants:
-            variants_count += len(variants)
-            for variant in variants:
-                topics_count += len((variant or {}).get("topics") or [])
-        elif topics:
-            variants_count += 1
-            topics_count += len(topics)
+    variants_count = db.execute(
+        select(func.count(func.distinct(CourseSyllabus.direction_code))).where(
+            CourseSyllabus.is_active.is_(True),
+            CourseSyllabus.direction_code != "",
+        )
+    ).scalar_one()
+    topics_count = db.execute(
+        select(func.coalesce(func.sum(func.jsonb_array_length(CourseSyllabus.topics)), 0)).where(
+            CourseSyllabus.is_active.is_(True)
+        )
+    ).scalar_one()
 
     return {
-        "departments_count": len(by_department),
-        "subjects_count": subjects_count,
-        "subjects_total": subjects_total,
-        "variants_count": variants_count,
-        "topics_count": topics_count,
+        "departments_count": academic_kafedra_count() or len(by_department),
+        "subjects_count": int(subjects_count or 0),
+        "subjects_total": int(subjects_total or 0),
+        "variants_count": int(variants_count or 0),
+        "topics_count": int(topics_count or 0),
         "by_department": [
-            {"name": r.name, "code": r.code, "subjects_count": r.subjects_count} for r in by_department
+            {
+                "id": r.id,
+                "name": r.name,
+                "code": r.code,
+                "subjects_count": int(r.subjects_count or 0),
+                "sort_order": r.sort_order,
+            }
+            for r in by_department
         ],
     }
 

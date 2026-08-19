@@ -97,7 +97,7 @@ export default function SavedWorkList({
                 </p>
               </button>
 
-              {onDelete && (
+              {onDelete && item.canDelete !== false && (
                 <button
                   type="button"
                   onClick={() => onDelete(item.id)}

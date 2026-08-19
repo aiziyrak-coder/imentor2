@@ -155,6 +155,7 @@ class TopicHandoutSerializer(serializers.ModelSerializer):
             "can_delete",
             "sort_order",
             "created_at",
+            "language",
         ]
         read_only_fields = fields
 

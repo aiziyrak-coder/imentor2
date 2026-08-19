@@ -108,7 +108,7 @@ export async function extractSyllabusDocumentText(file: File): Promise<string> {
     const { readXlsxRows } = await import('./xlsxRows');
     const { parseSyllabusExcel } = await import('./syllabusExcelParse');
     const rows = await readXlsxRows(await file.arrayBuffer());
-    const parsed = parseSyllabusExcel(rows);
+    const parsed = parseSyllabusExcel(rows, file.name);
     if (parsed.asText.trim()) return parsed.asText;
     return rows.map((r) => r.join('\t')).join('\n');
   }

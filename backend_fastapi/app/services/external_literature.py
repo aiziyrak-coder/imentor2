@@ -81,7 +81,15 @@ def re_sub_html(text: str) -> str:
     return _re.sub(r"<[^>]+>", "", text)
 
 
-def search_pubmed(query: str, retmax: int = 5) -> list[dict]:
+_CORE_JOURNALS = (
+    '"Lancet"[Journal] OR "N Engl J Med"[Journal] OR "JAMA"[Journal] OR "BMJ"[Journal] OR '
+    '"Cochrane Database Syst Rev"[Journal] OR "Nat Med"[Journal] OR "Ann Intern Med"[Journal] OR '
+    '"Circulation"[Journal] OR "Eur Heart J"[Journal] OR "Thorax"[Journal] OR "Chest"[Journal] OR '
+    "Review[Publication Type] OR Guideline[Publication Type]"
+)
+
+
+def search_pubmed(query: str, retmax: int = 5, *, prefer_core: bool = False) -> list[dict]:
     """PubMed'dan mavzuga oid maqolalarni topib, sarlavha/muallif/yil/abstrakt
     bilan qaytaradi. Har biri haqiqiy `https://pubmed.ncbi.nlm.nih.gov/{pmid}/`
     havolasiga ega. Xato/timeout bo'lsa bo'sh ro'yxat qaytadi (generatsiya
@@ -89,6 +97,12 @@ def search_pubmed(query: str, retmax: int = 5) -> list[dict]:
     query = (query or "").strip()
     if not query:
         return []
+    if prefer_core:
+        core = search_pubmed(f"({query}) AND ({_CORE_JOURNALS})", retmax=retmax, prefer_core=False)
+        if len(core) >= 3:
+            return core[: max(1, min(retmax, 10))]
+        extra = search_pubmed(query, retmax=retmax, prefer_core=False)
+        return dedupe_external_sources(core + extra)[: max(1, min(retmax, 10))]
     try:
         search_resp = requests.get(
             _PUBMED_ESEARCH,

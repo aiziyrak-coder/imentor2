@@ -3,6 +3,7 @@ import { Loader2, Plus, RefreshCw, Search, Trash2, Youtube } from 'lucide-react'
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
+import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import {
   createAdminTopicVideo,
@@ -105,7 +106,14 @@ export default function AdminTopicVideos() {
     () => variants.find((v) => v.label === variantLabel) || null,
     [variants, variantLabel],
   );
-  const topics = selectedVariant?.topics ?? [];
+  const topics = useMemo(() => {
+    const seen = new Set<string>();
+    return (selectedVariant?.topics ?? []).filter((tp) => {
+      if (!tp.id || seen.has(tp.id)) return false;
+      seen.add(tp.id);
+      return true;
+    });
+  }, [selectedVariant]);
 
   useEffect(() => {
     // Yo'nalish UI yo'q — teacher flow bilan bir xil: birinchi (yoki yagona) variant.
@@ -151,15 +159,18 @@ export default function AdminTopicVideos() {
   const grouped = useMemo(() => {
     const map = new Map<string, { fanName: string; topic: string; rows: TopicVideo[] }>();
     for (const v of filteredVideos) {
-      const syllabusId = Number((v.topic_norm || '').split('::')[0]);
+      const parts = (v.topic_norm || '').split('::');
+      const syllabusId = Number(parts[0]);
+      const code = (parts[2] || '').toUpperCase();
       const fanName = fanNameById.get(syllabusId) || t('catalog.otherTopics');
-      const key = `${fanName}||${v.topic}`;
-      if (!map.has(key)) map.set(key, { fanName, topic: v.topic, rows: [] });
+      const key = v.topic_norm || `${fanName}||${v.topic}`;
+      const label = code ? `${code} · ${v.topic}` : v.topic;
+      if (!map.has(key)) map.set(key, { fanName, topic: label, rows: [] });
       map.get(key)!.rows.push(v);
     }
-    return [...map.values()].sort(
-      (a, b) => a.fanName.localeCompare(b.fanName) || a.topic.localeCompare(b.topic),
-    );
+    return [...map.entries()]
+      .map(([key, g]) => ({ key, ...g }))
+      .sort((a, b) => a.fanName.localeCompare(b.fanName) || a.topic.localeCompare(b.topic));
   }, [filteredVideos, fanNameById, t]);
 
   const addVideo = async () => {
@@ -249,8 +260,8 @@ export default function AdminTopicVideos() {
             >
               <option value="">{t('admin.selectTopicPlaceholder')}</option>
               {topics.map((tp) => (
-                <option key={tp.id} value={tp.id}>
-                  {tp.id} · {tp.title}
+                <option key={`${tp.type}-${tp.id}`} value={tp.id}>
+                  {formatTopicLessonLabel(tp.type, tp.id, t)} · {tp.title}
                 </option>
               ))}
             </select>
@@ -340,7 +351,7 @@ export default function AdminTopicVideos() {
       ) : (
         <ul className="space-y-3">
           {grouped.map((g) => (
-            <li key={`${g.fanName}-${g.topic}`} className="ios-glass rounded-2xl border border-white/70 overflow-hidden">
+            <li key={g.key} className="ios-glass rounded-2xl border border-white/70 overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60">
                 <span className="font-bold text-slate-900">{g.topic}</span>
                 <span className="text-[11px] text-slate-400"> · {g.fanName}</span>

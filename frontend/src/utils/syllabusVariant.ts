@@ -43,9 +43,18 @@ export function totalTopicCount(variants: SyllabusVariant[]): number {
   return variants.reduce((n, v) => n + (v.topics?.length ?? 0), 0);
 }
 
-export function countTopicsByType(topics: SyllabusTopic[]): { lectures: number; practicals: number } {
+export function countTopicsByType(topics: SyllabusTopic[]): {
+  lectures: number;
+  practicals: number;
+  clinicals: number;
+  independents: number;
+  labs: number;
+} {
   return {
     lectures: topics.filter((t) => t.type === 'lecture').length,
     practicals: topics.filter((t) => t.type === 'practical').length,
+    clinicals: topics.filter((t) => t.type === 'clinical').length,
+    independents: topics.filter((t) => t.type === 'independent').length,
+    labs: topics.filter((t) => t.type === 'lab').length,
   };
 }

@@ -15,7 +15,7 @@ LECTURE_SECTION_RE = re.compile(
     re.I,
 )
 PRACTICAL_SECTION_RE = re.compile(
-    r"^(?:amaliy(?:\s+mashg'?ulot)?|practical(?:s)?|практик[аиеё]?|лаборатор)",
+    r"^(?:amaliy(?:\s+mashg'?ulot)?|practical(?:s)?|практик[аиеё]?|лаборатор|seminar|семинар)",
     re.I,
 )
 UNIVERSITY_NOISE_RE = re.compile(
@@ -47,6 +47,8 @@ def detect_topic_section(line: str) -> TopicSection:
     trimmed = line.strip()
     if not trimmed:
         return "unknown"
+    if re.search(r"\bseminar\b|\bсеминар", trimmed, re.I):
+        return "practical"
     if LECTURE_SECTION_RE.search(trimmed):
         return "lecture"
     if PRACTICAL_SECTION_RE.search(trimmed):
@@ -56,6 +58,8 @@ def detect_topic_section(line: str) -> TopicSection:
 
 def infer_topic_type_from_id(topic_id: str) -> Literal["lecture", "practical"]:
     first = (topic_id[:1] or "").upper()
+    if first == "S":
+        return "practical"
     if first in LECTURE_PREFIXES:
         return "lecture"
     if first in PRACTICAL_PREFIXES:

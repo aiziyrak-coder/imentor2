@@ -22,8 +22,10 @@ export type PreparedContentSummary = {
   topicNorm?: string;
   createdAt: number;
   source: 'local' | 'cloud';
-  /** Kim yaratgan — Baza ro'yxatida ko'rsatiladi. */
+  /** Kim yaratgan — versiyalar ro'yxatida ko'rsatiladi. */
   author?: string;
+  /** False bo'lsa o'chirish tugmasi chiqmaydi (boshqa o'qituvchiniki). */
+  canDelete?: boolean;
 };
 
 const CLOUD_ID_PREFIX = 'cloud_';
@@ -200,6 +202,7 @@ type MineRow = {
   topic_norm?: string;
   author_display_name?: string;
   created_at: string;
+  can_delete?: boolean;
 };
 
 const MINE_PAGE_SIZE = 300;
@@ -212,6 +215,7 @@ const MINE_MAX_PAGES = 20;
 async function fetchMineRows(
   kind: PreparedContentKind,
   topicNorms?: string[],
+  options?: { shared?: boolean },
 ): Promise<PreparedContentSummary[]> {
   const token = await getBackendAccessToken();
   if (!token) return [];
@@ -223,6 +227,7 @@ async function fetchMineRows(
       page: String(page),
       page_size: String(MINE_PAGE_SIZE),
     });
+    if (options?.shared) params.set('shared', '1');
     for (const norm of topicNorms || []) params.append('topic_norm', norm);
     const data = await httpJson<{ results?: MineRow[]; count?: number }>(
       `${apiBaseUrl()}/v1/prepared-content/mine/?${params.toString()}`,
@@ -239,6 +244,7 @@ async function fetchMineRows(
         author: r.author_display_name || '',
         createdAt: new Date(r.created_at).getTime(),
         source: 'cloud' as const,
+        canDelete: r.can_delete !== false,
       });
     }
     // Backend `paginate` javobi: {count, page, page_size, results} — `next` yo'q,
@@ -261,32 +267,23 @@ export async function listAllPreparedForKindSynced(
 }
 
 /** Mavzu bo'yicha FastAPI tarix — filtrlash SERVERDA, aniq `topic_norm`
- * tenglik bo'yicha. `topicNormLookupKeys` eski (sarlavha) kalitni ham
- * qaytaradi, shuning uchun eski yozuvlar ham topiladi.
- *
- * Ilgari bu yerda "includes" bilan taxminiy solishtirish bor edi va bir
- * mavzuning Bazasiga nomi o'xshash boshqa mavzular materiallari aralashib
- * ketardi. */
+ * tenglik bo'yicha. Faqat tuzilmali kalit (`fan::variant::kod`) — sarlavha
+ * bo'yicha qidiruv fanlarni aralashtirardi. */
 export async function listPreparedForTopicSynced(
   kind: PreparedContentKind,
   topic: SyllabusTopic | SyllabusTopicContext | string,
+  options?: { shared?: boolean },
 ): Promise<PreparedContentSummary[]> {
   const wantedKeys = (
     typeof topic === 'string' ? [normTopic(topic)] : topicNormLookupKeys(topic)
   )
     .map((k) => k.trim().toLowerCase())
-    .filter(Boolean);
+    .filter((k) => k.includes('::'));
   if (!wantedKeys.length) return [];
   try {
-    const rows = await fetchMineRows(kind, wantedKeys);
-    // Ikkilamchi himoya: server filtrni qo'llamagan bo'lsa ham (eski build)
-    // ro'yxat ANIQ kalitlar bo'yicha qisqartiriladi.
+    const rows = await fetchMineRows(kind, wantedKeys, options);
     const wanted = new Set(wantedKeys);
-    return rows.filter((r) =>
-      [r.topicNorm || '', normTopic(r.topic)]
-        .map((k) => k.trim().toLowerCase())
-        .some((k) => k && wanted.has(k)),
-    );
+    return rows.filter((r) => wanted.has((r.topicNorm || '').trim().toLowerCase()));
   } catch {
     return [];
   }
@@ -338,7 +335,7 @@ export async function loadLatestPreparedContent<T>(
     typeof topic === 'string' ? [normTopic(topic)] : topicNormLookupKeys(topic)
   )
     .map((k) => k.toLowerCase())
-    .filter(Boolean);
+    .filter((k) => k.includes('::'));
   if (!lookupKeys.length) return null;
 
   try {

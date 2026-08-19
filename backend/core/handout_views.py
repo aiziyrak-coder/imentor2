@@ -135,6 +135,7 @@ class TopicHandoutUploadSerializer(serializers.Serializer):
     variant_label = serializers.CharField(max_length=128, required=False, allow_blank=True)
     topic_code = serializers.CharField(max_length=32, required=False, allow_blank=True)
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    language = serializers.CharField(max_length=8, required=False, allow_blank=True)
     file = serializers.FileField()
 
     def validate(self, attrs):
@@ -187,6 +188,9 @@ class TopicHandoutListCreateView(APIView):
         if query is None:
             return Response([], status=status.HTTP_200_OK)
         qs = TopicHandout.objects.filter(query).distinct()
+        lang = (request.query_params.get("language") or "").strip().lower()
+        if lang in ("uz", "ru", "en"):
+            qs = qs.filter(language=lang)
         ser = TopicHandoutSerializer(qs, many=True, context={"request": request})
         return Response(ser.data)
 

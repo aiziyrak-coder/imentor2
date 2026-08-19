@@ -3,7 +3,27 @@ import type { SyllabusTopic } from '../services/aiService';
 export type ParsedSyllabusExcel = {
   topics: SyllabusTopic[];
   skippedLabCount: number;
+  skippedIndependentCount: number;
   asText: string;
+};
+
+const TYPE_PREFIX: Record<
+  'lecture' | 'practical' | 'clinical' | 'independent' | 'lab',
+  string
+> = {
+  lecture: 'L',
+  practical: 'A',
+  clinical: 'K',
+  independent: 'I',
+  lab: 'B',
+};
+
+const TYPE_LABEL: Record<keyof typeof TYPE_PREFIX, string> = {
+  lecture: "Ma'ruza",
+  practical: 'Amaliy mashg\'ulot',
+  clinical: "Klinik mashg'ulot",
+  independent: "Mustaqil ta'lim",
+  lab: 'Laboratoriya',
 };
 
 function norm(value: string): string {
@@ -14,29 +34,37 @@ function norm(value: string): string {
     .trim();
 }
 
-function classifyActivity(value: string): 'lecture' | 'practical' | 'lab' | 'unknown' {
+function classifyActivity(
+  value: string,
+): 'lecture' | 'practical' | 'clinical' | 'lab' | 'independent' | 'unknown' {
   const s = norm(value);
   if (!s) return 'unknown';
+  if (/mustaqil|самостоят|\bsrc\b|\bсрс\b|independent/.test(s)) return 'independent';
   if (/laborator|лаборатор|\blab\b/.test(s)) return 'lab';
-  if (/ma'?ruza|maruza|lecture|лекци|теорет/.test(s)) return 'lecture';
-  if (/amaliy|practical|практик|seminar|семинар/.test(s)) return 'practical';
+  // Excel'da Seminar = amaliy mashg'ulot, ma'ruza/leksiya EMAS (avval tekshiriladi).
+  if (/\bseminar|\bсеминар/.test(s)) return 'practical';
+  if (/klinik\s*mashg|клиническ|\bclinical\b/.test(s)) return 'clinical';
+  if (/amaliy|practical|практик/.test(s)) return 'practical';
+  if (/ma'?ruza|maruza|lecture|leksiya|lektsiya|лекци|теорет/.test(s)) return 'lecture';
   return 'unknown';
 }
 
 function isTitleHeader(cell: string): boolean {
-  const s = norm(cell);
-  if (!s) return false;
-  if (/^(nomi|mavzu|title|topic|тема|название)$/.test(s)) return true;
+  const s = norm(cell).replace(/[º°]/g, '').trim();
+  if (!s || s.length > 24) return false;
+  if (/^nomi\b/.test(s)) return true;
+  if (/^(mavzu|title|topic|тема|название)$/.test(s)) return true;
   if (/mavzu\s*nomi|topic\s*name|название\s*тем/.test(s)) return true;
-  return s === "fan nomi" || s === 'subject';
+  return s === 'fan nomi' || s === 'subject';
 }
 
 function isTypeHeader(cell: string): boolean {
   const s = norm(cell);
-  if (!s) return false;
+  if (!s || s.length > 20) return false;
+  if (classifyActivity(s) !== 'unknown') return false;
   if (/mashg'?ul/.test(s)) return true;
   if (/^(turi|type|вид)$/.test(s)) return true;
-  return /mashg'?ulot|заняти/.test(s);
+  return s === 'занятие';
 }
 
 function looksLikeHeaderRow(row: string[]): boolean {
@@ -44,13 +72,16 @@ function looksLikeHeaderRow(row: string[]): boolean {
 }
 
 function detectTypeColumn(rows: string[][], titleCol: number): number {
-  const sample = rows.slice(0, 12);
+  const sample = rows.slice(0, 40);
   let best = -1;
   let bestHits = 0;
   const width = Math.max(0, ...sample.map((r) => r.length));
   for (let col = 0; col < width; col++) {
     if (col === titleCol) continue;
-    const hits = sample.reduce((n, row) => (classifyActivity(row[col] || '') === 'unknown' ? n : n + 1), 0);
+    const hits = sample.reduce((n, row) => {
+      const kind = classifyActivity(row[col] || '');
+      return kind === 'unknown' ? n : n + 1;
+    }, 0);
     if (hits > bestHits) {
       bestHits = hits;
       best = col;
@@ -59,70 +90,95 @@ function detectTypeColumn(rows: string[][], titleCol: number): number {
   return bestHits >= 2 ? best : -1;
 }
 
-function titleLooksLikeLab(title: string): boolean {
-  return classifyActivity(title) === 'lab' || /^laboratoriya\b/i.test(title.trim());
+function detectTitleColumn(rows: string[][], typeCol: number): number {
+  const sample = rows.filter((r) => r.some((c) => c.trim())).slice(0, 40);
+  const width = Math.max(0, ...sample.map((r) => r.length));
+  let best = typeCol === 1 ? 0 : 1;
+  let bestScore = -1;
+  for (let col = 0; col < width; col++) {
+    if (col === typeCol) continue;
+    let score = 0;
+    for (const row of sample) {
+      const cell = (row[col] || '').trim();
+      if (cell.length >= 8 && classifyActivity(cell) === 'unknown') score += cell.length;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = col;
+    }
+  }
+  return best;
 }
 
 /**
- * Excel (Nomi + Mashg'ul) qatorlaridan ma'ruza/amaliy mavzular.
- * Laboratoriya qatorlari ataylab tashlanadi.
+ * Excel (Nomi + Mashg'ulot) qatorlaridan barcha dars turlari:
+ * ma'ruza, amaliy, klinik, mustaqil ta'lim, laboratoriya.
+ * Bir xil nom turli mashg'ulotda alohida saqlanadi.
  */
-export function parseSyllabusExcel(rows: string[][]): ParsedSyllabusExcel {
+export function parseSyllabusExcel(rows: string[][], sourceName = ''): ParsedSyllabusExcel {
   let headerIdx = rows.findIndex(looksLikeHeaderRow);
-  if (headerIdx < 0) headerIdx = -1;
-
   const header = headerIdx >= 0 ? rows[headerIdx] : [];
   let titleCol = header.findIndex(isTitleHeader);
   let typeCol = header.findIndex(isTypeHeader);
-  const dataRows = rows.slice(headerIdx + 1);
+  const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1) : rows;
 
-  if (titleCol < 0) {
-    // Sarlavha yo'q — 2-ustun (B) yoki eng uzun matnli ustun.
-    titleCol = 1;
-    const width = Math.max(0, ...dataRows.map((r) => r.length));
-    if (width > 0 && dataRows.every((r) => !(r[titleCol] || '').trim())) {
-      titleCol = 0;
-    }
-  }
   if (typeCol < 0) typeCol = detectTypeColumn(dataRows, titleCol);
+  if (titleCol < 0) titleCol = detectTitleColumn(dataRows, typeCol);
 
-  const lectures: string[] = [];
-  const practicals: string[] = [];
-  let skippedLabCount = 0;
+  const sample = dataRows.slice(0, 20);
+  const digitish = sample.filter((r) => /^\d{1,3}$/.test((r[titleCol] || '').trim())).length;
+  const typeHits = sample.filter((r) => {
+    const raw = typeCol >= 0 ? r[typeCol] || '' : '';
+    const kind = classifyActivity(raw);
+    return kind !== 'unknown' && raw.trim().length <= 32;
+  }).length;
+  if (digitish >= 3 && typeHits < 2) {
+    titleCol += 1;
+    if (typeCol >= 0) typeCol += 1;
+  }
+
+  const buckets: Record<keyof typeof TYPE_PREFIX, string[]> = {
+    lecture: [],
+    practical: [],
+    clinical: [],
+    independent: [],
+    lab: [],
+  };
   const seen = new Set<string>();
 
   for (const row of dataRows) {
     const title = (row[titleCol] || '').replace(/\s+/g, ' ').trim();
     if (title.length < 4) continue;
     if (looksLikeHeaderRow(row)) continue;
-    if (seen.has(title.toLowerCase())) continue;
+    if (/^\d{1,3}$/.test(title)) continue;
 
     const typeRaw = typeCol >= 0 ? row[typeCol] || '' : '';
     let kind = classifyActivity(typeRaw);
-    if (kind === 'unknown' && titleLooksLikeLab(title)) kind = 'lab';
-    if (kind === 'lab') {
-      skippedLabCount += 1;
-      seen.add(title.toLowerCase());
-      continue;
+    if (kind === 'unknown' && /\bseminar|\bсеминар/i.test(sourceName)) {
+      kind = 'practical';
     }
-    if (kind === 'unknown') {
-      // Turi bo'sh bo'lsa ham mavzu saqlanadi — default ma'ruza.
-      kind = 'lecture';
-    }
-    seen.add(title.toLowerCase());
-    if (kind === 'practical') practicals.push(title);
-    else lectures.push(title);
+    if (kind === 'unknown') continue;
+
+    const key = `${kind}::${title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    buckets[kind].push(title);
   }
 
-  const topics: SyllabusTopic[] = [
-    ...lectures.map((title, i) => ({ id: `L${i + 1}`, title, type: 'lecture' as const })),
-    ...practicals.map((title, i) => ({ id: `A${i + 1}`, title, type: 'practical' as const })),
-  ];
+  const order = ['lecture', 'practical', 'clinical', 'independent', 'lab'] as const;
+  const topics: SyllabusTopic[] = order.flatMap((kind) =>
+    buckets[kind].map((title, i) => ({
+      id: `${TYPE_PREFIX[kind]}${i + 1}`,
+      title,
+      type: kind,
+    })),
+  );
 
-  const asText = [
-    ...lectures.map((t, i) => `L${i + 1}\tMa'ruza\t${t}`),
-    ...practicals.map((t, i) => `A${i + 1}\tAmaliy\t${t}`),
-  ].join('\n');
+  const asText = order
+    .flatMap((kind) =>
+      buckets[kind].map((title, i) => `${TYPE_PREFIX[kind]}${i + 1}\t${TYPE_LABEL[kind]}\t${title}`),
+    )
+    .join('\n');
 
-  return { topics, skippedLabCount, asText };
+  return { topics, skippedLabCount: 0, skippedIndependentCount: 0, asText };
 }

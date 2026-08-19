@@ -35,14 +35,34 @@ function authHeaders(token: string) {
 export async function fetchStaffDirectory(): Promise<StaffDirectoryEntry[]> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
-  const data = await httpJson<StaffDirectoryEntry[] | PagedResponse<StaffDirectoryEntry>>(
-    `${apiBaseUrl()}/v1/admin/staff/`,
+  const pageSize = 1000;
+  const first = await httpJson<StaffDirectoryEntry[] | PagedResponse<StaffDirectoryEntry>>(
+    `${apiBaseUrl()}/v1/admin/staff/?page_size=${pageSize}&page=1`,
     {
       headers: authHeaders(token),
       timeoutMs: 30000,
     },
   );
-  return unwrapPagedResults(data);
+  const rows = unwrapPagedResults(first);
+  if (Array.isArray(first)) return rows;
+  const total = typeof first.count === 'number' ? first.count : rows.length;
+  if (rows.length >= total) return rows;
+  const all = [...rows];
+  let page = 2;
+  while (all.length < total) {
+    const next = await httpJson<StaffDirectoryEntry[] | PagedResponse<StaffDirectoryEntry>>(
+      `${apiBaseUrl()}/v1/admin/staff/?page_size=${pageSize}&page=${page}`,
+      {
+        headers: authHeaders(token),
+        timeoutMs: 30000,
+      },
+    );
+    const chunk = unwrapPagedResults(next);
+    if (!chunk.length) break;
+    all.push(...chunk);
+    page += 1;
+  }
+  return all;
 }
 
 export type StaffUpsertInput = {

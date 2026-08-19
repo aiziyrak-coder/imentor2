@@ -25,7 +25,8 @@ import {
 import type { CaseStudySession, TestQuestion, TestSession } from '../../services/aiService';
 import { caseFocusBadgeClass, caseFocusLabel } from '../../utils/caseFocusLabels';
 import MedicalReferencesList from '../staff/MedicalReferencesList';
-import LinkifiedText from '../staff/LinkifiedText';
+import CaseAnswerView from '../staff/CaseAnswerView';
+import CaseScenarioView from '../staff/CaseScenarioView';
 import { stripOptionLetterPrefix } from '../../utils/testOptionText';
 
 type KindFilter = '' | CatalogKind;
@@ -70,10 +71,15 @@ function CatalogDetailPanel({
                   </span>
                 )}
               </div>
-              <p className="text-[14px] leading-relaxed whitespace-pre-wrap text-black/85">{q.scenario}</p>
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                <p className="text-[11px] font-bold uppercase text-blue-800 mb-2">{t('catalog.answerKey')}</p>
-                <LinkifiedText text={q.answer} className="text-[14px] text-blue-900/90 whitespace-pre-wrap leading-relaxed" />
+              <CaseScenarioView
+                text={q.scenario}
+                language={language}
+                focus={q.focus}
+                domain={session.domain}
+              />
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600 mb-2">{session.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}</p>
+                <CaseAnswerView text={q.answer} />
               </div>
               {q.references && q.references.length > 0 && (
                 <MedicalReferencesList references={q.references} title={t('catalog.references')} compact />

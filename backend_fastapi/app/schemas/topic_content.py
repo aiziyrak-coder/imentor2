@@ -19,6 +19,7 @@ class TopicHandoutOut(BaseModel):
     file_url: str
     can_delete: bool
     sort_order: int
+    language: str = "uz"
 
 
 class TopicPresentationOut(BaseModel):

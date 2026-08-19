@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_TEST_DIFFICULTY,
+  DEFAULT_TEST_QUESTION_COUNT,
   buildTestDifficultyPrompt,
   isTestDifficulty,
   testDifficultyTemperature,
@@ -9,8 +10,9 @@ import {
 } from './testDifficulty';
 
 describe('testDifficulty', () => {
-  it('defaults to medium', () => {
-    expect(DEFAULT_TEST_DIFFICULTY).toBe('medium');
+  it('defaults to 10 hard questions', () => {
+    expect(DEFAULT_TEST_DIFFICULTY).toBe('hard');
+    expect(DEFAULT_TEST_QUESTION_COUNT).toBe(10);
   });
 
   it('accepts only easy/medium/hard', () => {
@@ -23,15 +25,21 @@ describe('testDifficulty', () => {
     expect(testDifficultyTemperature('medium')).toBeLessThan(testDifficultyTemperature('hard'));
   });
 
-  it('quality rules ban two correct options', () => {
-    const prompt = buildTestDifficultyPrompt('medium');
+  it('quality rules ban school-level ABG=diagnosis and two correct options', () => {
+    const prompt = buildTestDifficultyPrompt('hard');
     expect(prompt).toMatch(/bitta to'g'ri javob/i);
-    expect(prompt).toMatch(/O'RTA/);
+    expect(prompt).toMatch(/OLIY TIBBIY TA'LIM/);
+    expect(prompt).toMatch(/PaCO2 60/);
+    expect(prompt).toMatch(/QIYIN/);
+    expect(prompt).toMatch(/ehtimoliy tashxis/);
   });
 
-  it('easy stem is not a complex vignette', () => {
-    expect(buildTestDifficultyPrompt('easy')).toMatch(/OSON/);
+  it('every level requires a vignette, not a definition', () => {
+    expect(buildTestDifficultyPrompt('easy')).toMatch(/TA'RIF EMAS|TA'RIF/);
+    expect(testStemInstruction('easy')).toMatch(/2 qatorlik/);
+    expect(testStemInstruction('medium')).toMatch(/2–3 qatorlik/);
+    expect(testStemInstruction('hard')).toMatch(/3 zich jumla/);
+    expect(testStemInstruction('hard')).toMatch(/ABG=tashxis/);
     expect(testExplanationInstruction('easy')).toMatch(/3-5/);
-    expect(testStemInstruction('hard')).toMatch(/2–3 gap/);
   });
 });

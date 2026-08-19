@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BriefcaseMedical, Trash2, RefreshCw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../utils/contentCatalogApi';
 import type { CaseStudySession } from '../../services/aiService';
 import { useUiText } from '../../i18n/useUiText';
+import AdminSmartFilter from './AdminSmartFilter';
 
 export default function AdminCasesLibrary() {
   const { t } = useUiText();
@@ -19,6 +20,10 @@ export default function AdminCasesLibrary() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [detailById, setDetailById] = useState<Record<number, CatalogItemDetail>>({});
   const [detailLoading, setDetailLoading] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [fanFilter, setFanFilter] = useState('');
+  const [variantFilter, setVariantFilter] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +67,53 @@ export default function AdminCasesLibrary() {
     [t, load],
   );
 
+  const deptOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      const name = (r.department_name || '').trim();
+      if (name) map.set(name, name);
+    }
+    return [...map.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  const fanOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      if (deptFilter && (r.department_name || '').trim() !== deptFilter) continue;
+      const code = r.subject_code?.trim() || r.subject_name?.trim();
+      if (!code) continue;
+      map.set(code, r.subject_name?.trim() || code);
+    }
+    return [...map.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows, deptFilter]);
+
+  const variantOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const v = (r.variant_label || '').trim();
+      if (v) set.add(v);
+    }
+    return [...set].sort().map((v) => ({ value: v, label: v }));
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (deptFilter && (r.department_name || '').trim() !== deptFilter) return false;
+      if (fanFilter && r.subject_code !== fanFilter && r.subject_name !== fanFilter) return false;
+      if (variantFilter && (r.variant_label || '').trim() !== variantFilter) return false;
+      if (q) {
+        const hay = `${r.topic} ${r.author_display_name} ${r.subject_name} ${r.department_name || ''} ${r.variant_label} ${r.topic_code}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [rows, search, deptFilter, fanFilter, variantFilter]);
+
   return (
     <div className="w-full space-y-6 pb-16 px-3 sm:px-5 lg:px-6 py-4">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -85,6 +137,61 @@ export default function AdminCasesLibrary() {
 
       {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
 
+      {!loading && rows.length > 0 && (
+        <AdminSmartFilter
+          search={search}
+          onSearch={setSearch}
+          searchPlaceholder={t('admin.casesSearchPlaceholder')}
+          selects={[
+            {
+              id: 'dept',
+              label: t('admin.filterByKafedra'),
+              value: deptFilter,
+              onChange: (v) => {
+                setDeptFilter(v);
+                setFanFilter('');
+              },
+              options: deptOptions,
+              placeholder: t('admin.filterAllDepartments'),
+            },
+            {
+              id: 'fan',
+              label: t('admin.filterSubject'),
+              value: fanFilter,
+              onChange: setFanFilter,
+              options: fanOptions,
+              placeholder: t('admin.filterAllSubjects'),
+            },
+          ]}
+          chips={
+            variantOptions.length
+              ? [
+                  {
+                    id: 'variant',
+                    label: t('admin.filterVariant'),
+                    value: variantFilter,
+                    onChange: setVariantFilter,
+                    options: [
+                      { value: '', label: t('admin.filterAllVariants') },
+                      ...variantOptions,
+                    ],
+                  },
+                ]
+              : []
+          }
+          resultText={t('admin.filterResultCases', { count: String(filtered.length) })}
+          resetLabel={t('admin.clearFilters')}
+          noMatchText={t('admin.noResults')}
+          canReset={Boolean(search || deptFilter || fanFilter || variantFilter)}
+          onReset={() => {
+            setSearch('');
+            setDeptFilter('');
+            setFanFilter('');
+            setVariantFilter('');
+          }}
+        />
+      )}
+
       <div className="space-y-3">
         {loading ? (
           <div className="flex justify-center py-16">
@@ -94,8 +201,12 @@ export default function AdminCasesLibrary() {
           <div className="ios-glass rounded-2xl border p-10 text-center text-black/45 text-[14px]">
             {t('admin.noRecordsYet', { action: t('admin.caseCreationAction') })}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="ios-glass rounded-2xl border p-10 text-center text-black/45 text-[14px]">
+            {t('admin.noResults')}
+          </div>
         ) : (
-          rows.map((row) => {
+          filtered.map((row) => {
             const detail = detailById[row.id];
             const payload = detail?.payload as CaseStudySession | undefined;
             return (

@@ -41,6 +41,7 @@ import {
 } from '../../utils/directionCode';
 import type { AppLanguage } from '../../i18n/language';
 import { useUiText } from '../../i18n/useUiText';
+import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import {
   instructionLanguageBadge,
   resolveSyllabusInstructionLanguage,
@@ -54,6 +55,7 @@ import SyllabusUploadPreview, {
   type SyllabusUploadPreviewData,
 } from './SyllabusUploadPreview';
 import SyllabusTranslationsEditor from './SyllabusTranslationsEditor';
+import { matchDepartmentByName } from '../../utils/departmentMatch';
 
 type UploadProgress = {
   current: number;
@@ -92,50 +94,12 @@ function listLoadErrorMessage(err: unknown, t: ReturnType<typeof useUiText>['t']
   return t('admin.error.subjectsLoadFailed');
 }
 
-function softDeptKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function matchAcademicDepartment(
-  catalogName: string,
-  catalogCode: string | null | undefined,
-  academic: DepartmentRow[],
-): DepartmentRow | null {
-  const kn = softDeptKey(catalogName);
-  const kc = softDeptKey(catalogCode || '');
-  return (
-    academic.find((d) => softDeptKey(d.name) === kn || (kc && softDeptKey(d.code) === kc)) ||
-    academic.find(
-      (d) =>
-        softDeptKey(d.name).includes(kn) ||
-        kn.includes(softDeptKey(d.name)) ||
-        (kc && (softDeptKey(d.code).includes(kc) || kc.includes(softDeptKey(d.code)))),
-    ) ||
-    null
-  );
-}
-
 function catalogDirectionsForDept(
   dept: DepartmentRow,
   catalog: CatalogKafedra[] | null,
 ): CatalogDirection[] {
   if (!catalog?.length) return [];
-  const kn = softDeptKey(dept.name);
-  const kc = softDeptKey(dept.code);
-  const hit =
-    catalog.find((k) => softDeptKey(k.name) === kn || (kc && softDeptKey(k.code || '') === kc)) ||
-    catalog.find(
-      (k) =>
-        softDeptKey(k.name).includes(kn) ||
-        kn.includes(softDeptKey(k.name)) ||
-        (kc &&
-          (softDeptKey(k.code || '').includes(kc) || kc.includes(softDeptKey(k.code || '')))),
-    );
+  const hit = matchDepartmentByName(dept.name, dept.code, catalog);
   const seen = new Set<string>();
   const out: CatalogDirection[] = [];
   for (const d of hit?.directions || []) {
@@ -317,7 +281,7 @@ export default function AdminSyllabusCatalog() {
       const used = new Set<number>();
       base = [];
       for (const [idx, k] of catalogKafedralar.entries()) {
-        const hit = matchAcademicDepartment(k.name, k.code, departments);
+        const hit = matchDepartmentByName(k.name, k.code, departments);
         if (hit && !used.has(hit.id)) {
           used.add(hit.id);
           base.push({
@@ -1166,7 +1130,10 @@ export default function AdminSyllabusCatalog() {
                     ) : (
                       variants.map((v) => {
                         const lectures = v.topics.filter((x) => x.type === 'lecture');
-                        const practicals = v.topics.filter((x) => x.type !== 'lecture');
+                        const practicals = v.topics.filter((x) => x.type === 'practical');
+                        const clinicals = v.topics.filter((x) => x.type === 'clinical');
+                        const independents = v.topics.filter((x) => x.type === 'independent');
+                        const labs = v.topics.filter((x) => x.type === 'lab');
                         const counts = countTopicsByType(v.topics);
                         return (
                           <div
@@ -1182,6 +1149,9 @@ export default function AdminSyllabusCatalog() {
                                   total: v.topics.length,
                                   lectures: counts.lectures,
                                   practicals: counts.practicals,
+                                  clinicals: counts.clinicals,
+                                  independents: counts.independents,
+                                  labs: counts.labs,
                                 })}
                               </span>
                               <button
@@ -1206,6 +1176,33 @@ export default function AdminSyllabusCatalog() {
                                 <TopicEditGroup
                                   title={t('admin.practicalsSection')}
                                   topics={practicals}
+                                  onChange={(key, title) =>
+                                    updateDraftTopicTitle(row, v.label, key, title)
+                                  }
+                                />
+                              )}
+                              {clinicals.length > 0 && (
+                                <TopicEditGroup
+                                  title={t('admin.clinicalsSection')}
+                                  topics={clinicals}
+                                  onChange={(key, title) =>
+                                    updateDraftTopicTitle(row, v.label, key, title)
+                                  }
+                                />
+                              )}
+                              {independents.length > 0 && (
+                                <TopicEditGroup
+                                  title={t('admin.independentsSection')}
+                                  topics={independents}
+                                  onChange={(key, title) =>
+                                    updateDraftTopicTitle(row, v.label, key, title)
+                                  }
+                                />
+                              )}
+                              {labs.length > 0 && (
+                                <TopicEditGroup
+                                  title={t('admin.labsSection')}
+                                  topics={labs}
                                   onChange={(key, title) =>
                                     updateDraftTopicTitle(row, v.label, key, title)
                                   }
@@ -1286,20 +1283,28 @@ function TopicEditGroup({
   topics: SyllabusTopic[];
   onChange: (key: string, title: string) => void;
 }) {
+  const { t } = useUiText();
   return (
     <div className="space-y-1.5">
       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{title}</p>
       {topics.map((topic) => {
         const key = `${topic.type}-${topic.id}`;
-        const isLecture = topic.type === 'lecture';
+        const chip =
+          topic.type === 'lecture'
+            ? 'bg-blue-50 text-blue-700'
+            : topic.type === 'clinical'
+              ? 'bg-teal-50 text-teal-700'
+              : topic.type === 'independent'
+                ? 'bg-amber-50 text-amber-800'
+                : topic.type === 'lab'
+                  ? 'bg-slate-100 text-slate-700'
+                  : 'bg-violet-50 text-violet-700';
         return (
           <div key={key} className="flex items-center gap-2">
             <span
-              className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                isLecture ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'
-              }`}
+              className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded max-w-[11rem] leading-tight ${chip}`}
             >
-              {topic.id}
+              {formatTopicLessonLabel(topic.type, topic.id, t)}
             </span>
             <input
               value={topic.title}

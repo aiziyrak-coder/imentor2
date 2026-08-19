@@ -43,6 +43,7 @@ def _pregenerate_preview(rel_path: str) -> None:
 
 HANDOUT_MAX_BYTES = 20 * 1024 * 1024
 PRESENTATION_MAX_BYTES = 50 * 1024 * 1024
+HANDOUT_LANGS = frozenset({"uz", "ru", "en"})
 
 _YT_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:[^&]*&)*v=|embed/|shorts/|v/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})"
@@ -61,6 +62,11 @@ def extract_youtube_id(url: str) -> str:
     return ""
 
 
+def _handout_lang(value: str | None) -> str:
+    s = (value or "uz").strip().lower()
+    return s if s in HANDOUT_LANGS else "uz"
+
+
 def _can_delete(owner_key: str, auth: AuthContext) -> bool:
     if owner_key == auth.user.username:
         return True
@@ -73,6 +79,7 @@ def _handout_out(h: TopicHandout, auth: AuthContext) -> TopicHandoutOut:
         file_name=h.file_name, file_size=h.file_size, author_name=h.author_name,
         created_at=h.created_at, file_url=f"/api/v1/handouts/{h.id}/file/",
         can_delete=_can_delete(h.owner_key, auth), sort_order=h.sort_order,
+        language=_handout_lang(getattr(h, "language", None)),
     )
 
 
@@ -122,6 +129,7 @@ def _resolve_handout_topic_norm(
 def list_handouts(
     request: Request,
     topic_norm: list[str] = Query(default=[]),
+    language: str = Query(""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> list[TopicHandoutOut]:
@@ -131,7 +139,10 @@ def list_handouts(
     cond = tn.topic_norm_query(TopicHandout.topic_norm, norms)
     if cond is None:
         return []
-    rows = db.execute(select(TopicHandout).where(cond).distinct()).scalars().all()
+    stmt = select(TopicHandout).where(cond)
+    if language.strip():
+        stmt = stmt.where(TopicHandout.language == _handout_lang(language))
+    rows = db.execute(stmt.distinct()).scalars().all()
     return [_handout_out(h, auth) for h in rows]
 
 
@@ -144,6 +155,7 @@ async def upload_handout(
     variant_label: str = Form(""),
     topic_code: str = Form(""),
     title: str = Form(""),
+    language: str = Form("uz"),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> TopicHandoutOut:
@@ -156,6 +168,7 @@ async def upload_handout(
     if len(content) > HANDOUT_MAX_BYTES:
         raise HTTPException(status_code=400, detail="Fayl hajmi juda katta.")
 
+    lang = _handout_lang(language)
     rel_path = storage.handout_relative_path(topic_norm, auth.user.username, file.filename or "file")
     storage.save_upload(rel_path, content)
 
@@ -174,6 +187,7 @@ async def upload_handout(
         file=rel_path,
         file_name=(file.filename or "file")[:512],
         file_size=len(content),
+        language=lang,
         sort_order=int(max_order) + 1,
         created_at=dt.datetime.now(dt.timezone.utc),
     )
@@ -241,12 +255,14 @@ async def admin_upload_handout(
     variant_label: str = Form(""),
     topic_code: str = Form(""),
     title: str = Form(""),
+    language: str = Form("uz"),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("admin")),
 ) -> TopicHandoutOut:
     return await upload_handout(
         file, topic=topic, topic_norm=topic_norm, syllabus_id=syllabus_id,
-        variant_label=variant_label, topic_code=topic_code, title=title, db=db, auth=auth,
+        variant_label=variant_label, topic_code=topic_code, title=title,
+        language=language, db=db, auth=auth,
     )
 
 
@@ -277,10 +293,8 @@ def list_presentations(
 ) -> list[TopicPresentationOut]:
     """Mavzu bo'yicha taqdimotlar.
 
-    `mine=1` — faqat shu foydalanuvchi yuklaganlari. O'qituvchining ish
-    sahifasi shu rejimda ishlaydi: u yerda boshqa hodimlarning taqdimotlari
-    chiqib qolsa, o'qituvchi ularni o'chira olmaydi (huquqi yo'q) va ro'yxat
-    begona ishlar bilan to'lib ketadi. Umumiy ro'yxat "Baza" bo'limida qoladi.
+    Standart — shu fan/mavzudagi BARCHA yuklangan fayllar (o'qituvchi
+    sahifasida ham). `mine=1` — faqat joriy foydalanuvchiniki.
     """
     norms = _resolve_norms(request, topic_norm)
     if not norms:
@@ -291,7 +305,9 @@ def list_presentations(
     stmt = select(TopicPresentation).where(cond)
     if mine:
         stmt = stmt.where(TopicPresentation.owner_key == auth.user.username)
-    rows = db.execute(stmt.distinct()).scalars().all()
+    rows = db.execute(
+        stmt.order_by(TopicPresentation.created_at.desc())
+    ).scalars().all()
     return [_presentation_out(p, auth) for p in rows]
 
 
@@ -301,15 +317,14 @@ async def upload_presentation(
     background: BackgroundTasks,
     topic: str = Form(...),
     topic_norm: str = Form(""),
+    syllabus_id: int | None = Form(None),
+    variant_label: str = Form(""),
+    topic_code: str = Form(""),
     title: str = Form(""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> TopicPresentationOut:
-    # Django `TopicPresentationUploadSerializer.validate()` bilan bir xil —
-    # syllabus_id/variant_label/topic_code bu yerda mavjud emas, faqat
-    # topic_norm (yoki topic'dan) ishlatiladi.
-    topic_norm = (topic_norm or "").strip() or topic.strip().lower()
-    topic_norm = topic_norm[:255]
+    topic_norm = _resolve_handout_topic_norm(topic, topic_norm, syllabus_id, variant_label, topic_code)
     if not topic_norm:
         raise HTTPException(status_code=400, detail="Mavzu normallashtirilmadi.")
     if not storage.validate_extension(file.filename or "", presentation=True):

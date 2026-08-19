@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import AcademicDepartment, CourseSyllabus, StaffCourseSelection
+from .models import AcademicDepartment, CourseSyllabus, StaffCourseSelection, StaffProfile
 from .pagination import paginated_response
 from .permissions import HasEducationRole, IsAdminRole, IsHodimRole
 from .phone import normalize_uz_phone_digits
@@ -98,39 +98,72 @@ class AdminCourseSyllabusListCreateView(APIView):
 
 
 def build_syllabus_catalog_stats() -> dict:
-    """Kafedra → fan → yo'nalish → mavzu ierarxiyasi (bazadan)."""
+    """Kafedra → fan → yo'nalish → mavzu ierarxiyasi (faqat haqiqiy kafedralar)."""
+    syl_ids = set(
+        CourseSyllabus.objects.filter(is_active=True, department_id__isnull=False)
+        .values_list("department_id", flat=True)
+        .distinct()
+    )
+    staff_ids = set(
+        StaffProfile.objects.filter(academic_department_id__isnull=False)
+        .values_list("academic_department_id", flat=True)
+        .distinct()
+    )
+    real_ids = syl_ids | staff_ids
+
     by_department = list(
-        AcademicDepartment.objects.filter(is_active=True)
-        .annotate(subjects_count=Count('subjects', filter=Q(subjects__is_active=True)))
-        .order_by('sort_order', 'name')
-        .values('name', 'code', 'subjects_count')
+        AcademicDepartment.objects.filter(is_active=True, id__in=real_ids)
+        .annotate(subjects_count=Count("subjects", filter=Q(subjects__is_active=True)))
+        .order_by("sort_order", "name")
+        .values("id", "name", "code", "subjects_count", "sort_order")
     )
 
-    active_qs = CourseSyllabus.objects.filter(is_active=True).only('variants', 'topics')
+    academic_n = None
+    try:
+        from .online_test_client import fetch_academic_catalog
+
+        catalog = fetch_academic_catalog()
+        academic_n = sum(
+            1 for row in (catalog.get("kafedralar") or []) if str(row.get("name") or "").strip()
+        ) or None
+    except Exception:
+        academic_n = None
+
+    active_qs = CourseSyllabus.objects.filter(is_active=True)
     subjects_count = active_qs.count()
-    variants_count = 0
+    field_names = {f.name for f in CourseSyllabus._meta.get_fields()}
+    if "direction_code" in field_names:
+        variants_count = (
+            active_qs.exclude(direction_code="")
+            .values("direction_code")
+            .distinct()
+            .count()
+        )
+    else:
+        variants_count = 0
+        for variants in active_qs.values_list("variants", flat=True).iterator():
+            if isinstance(variants, list) and variants:
+                variants_count += len(variants)
+            else:
+                variants_count += 1
     topics_count = 0
-    for obj in active_qs.iterator():
-        variants = obj.variants or []
-        if variants:
-            variants_count += len(variants)
-            for variant in variants:
-                topics_count += len(variant.get('topics') or [])
-        elif obj.topics:
-            variants_count += 1
-            topics_count += len(obj.topics)
+    for topics in active_qs.values_list("topics", flat=True).iterator():
+        if isinstance(topics, list):
+            topics_count += len(topics)
 
     return {
-        'departments_count': len(by_department),
-        'subjects_count': subjects_count,
-        'subjects_total': CourseSyllabus.objects.count(),
-        'variants_count': variants_count,
-        'topics_count': topics_count,
-        'by_department': [
+        "departments_count": academic_n or len(by_department),
+        "subjects_count": subjects_count,
+        "subjects_total": CourseSyllabus.objects.count(),
+        "variants_count": variants_count,
+        "topics_count": topics_count,
+        "by_department": [
             {
-                'name': row['name'],
-                'code': row['code'],
-                'subjects_count': row['subjects_count'],
+                "id": row["id"],
+                "name": row["name"],
+                "code": row["code"],
+                "subjects_count": row["subjects_count"],
+                "sort_order": row["sort_order"],
             }
             for row in by_department
         ],

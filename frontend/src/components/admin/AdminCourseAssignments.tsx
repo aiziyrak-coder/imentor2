@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  ChevronLeft,
   ChevronRight,
   FileText,
   GraduationCap,
@@ -23,8 +24,10 @@ import {
 import { fetchAcademicCatalog } from '../../utils/academicCatalogApi';
 import { fetchStaffDirectory, type StaffDirectoryEntry } from '../../utils/staffDirectoryApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
+import { backendErrorMessage } from '../../utils/apiError';
 import { useUiText } from '../../i18n/useUiText';
 import SearchableSelect from './SearchableSelect';
+import { matchDepartmentByName, namesSoftMatch } from '../../utils/departmentMatch';
 
 type FanBucket = {
   fanId: number;
@@ -46,22 +49,6 @@ type DeptOption = {
   code: string;
   academicId: number | null;
 };
-
-function softDeptKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function namesSoftMatch(a: string, b: string): boolean {
-  const ka = softDeptKey(a);
-  const kb = softDeptKey(b);
-  if (!ka || !kb) return false;
-  return ka === kb || ka.includes(kb) || kb.includes(ka);
-}
 
 function syllabusPdfNames(row: CourseSyllabusRow | AdminStaffCourseSelectionRow['syllabus']): string[] {
   const fromVariants = resolveSyllabusVariants(row)
@@ -93,6 +80,8 @@ export default function AdminCourseAssignments() {
   const [deptFilter, setDeptFilter] = useState('');
   const [fanFilter, setFanFilter] = useState('');
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,17 +108,7 @@ export default function AdminCourseAssignments() {
         // OnlineTest academic-catalog — 28 kafedra (asosiy manba).
         setDepartments(
           kafedralar.map((k, idx) => {
-            const kn = softDeptKey(k.name);
-            const kc = softDeptKey(k.code || '');
-            const hit =
-              academic.find((d) => softDeptKey(d.name) === kn || (kc && softDeptKey(d.code) === kc)) ||
-              academic.find(
-                (d) =>
-                  softDeptKey(d.name).includes(kn) ||
-                  kn.includes(softDeptKey(d.name)) ||
-                  (kc && (softDeptKey(d.code).includes(kc) || kc.includes(softDeptKey(d.code)))),
-              ) ||
-              null;
+            const hit = matchDepartmentByName(k.name, k.code, academic);
             return {
               key: `catalog:${k.id || idx}`,
               name: k.name,
@@ -302,6 +281,17 @@ export default function AdminCourseAssignments() {
     });
   }, [teacherGroups, search, teacherFilter, deptFilter, fanFilter]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, teacherFilter, deptFilter, fanFilter]);
+
+  const groupPageCount = Math.max(1, Math.ceil(visibleGroups.length / PAGE_SIZE));
+  const groupSafePage = Math.min(page, groupPageCount);
+  const pagedGroups = useMemo(() => {
+    const start = (groupSafePage - 1) * PAGE_SIZE;
+    return visibleGroups.slice(start, start + PAGE_SIZE);
+  }, [visibleGroups, groupSafePage]);
+
   const detailGroup = useMemo(
     () => (detailKey ? teacherGroups.find((g) => g.ownerKey === detailKey) ?? null : null),
     [detailKey, teacherGroups],
@@ -318,8 +308,8 @@ export default function AdminCourseAssignments() {
       setDeptKey('');
       setFanIds([]);
       setSelections(await fetchAllStaffCourseSelections());
-    } catch {
-      setError(t('admin.error.assignFailed'));
+    } catch (err) {
+      setError(backendErrorMessage(err) || t('admin.error.assignFailed'));
     } finally {
       setAssigning(false);
     }
@@ -569,8 +559,9 @@ export default function AdminCourseAssignments() {
               {t('admin.noResults')}
             </div>
           ) : (
+            <div className="space-y-3">
             <ul className="space-y-2">
-              {visibleGroups.map((g) => (
+              {pagedGroups.map((g) => (
                 <li key={g.ownerKey}>
                   <button
                     type="button"
@@ -591,6 +582,34 @@ export default function AdminCourseAssignments() {
                 </li>
               ))}
             </ul>
+            {visibleGroups.length > PAGE_SIZE ? (
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  disabled={groupSafePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 h-9 px-3 rounded-xl border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 disabled:opacity-40"
+                >
+                  <ChevronLeft size={16} /> {t('common.prev')}
+                </button>
+                <span className="text-[12px] text-slate-500 font-medium">
+                  {t('admin.pageStatus', {
+                    from: String((groupSafePage - 1) * PAGE_SIZE + 1),
+                    to: String(Math.min(groupSafePage * PAGE_SIZE, visibleGroups.length)),
+                    total: String(visibleGroups.length),
+                  })}
+                </span>
+                <button
+                  type="button"
+                  disabled={groupSafePage >= groupPageCount}
+                  onClick={() => setPage((p) => Math.min(groupPageCount, p + 1))}
+                  className="inline-flex items-center gap-1 h-9 px-3 rounded-xl border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 disabled:opacity-40"
+                >
+                  {t('common.next')} <ChevronRight size={16} />
+                </button>
+              </div>
+            ) : null}
+            </div>
           )}
         </div>
       )}

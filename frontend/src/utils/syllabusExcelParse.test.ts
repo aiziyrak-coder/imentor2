@@ -57,7 +57,7 @@ function inline(ref: string, text: string): string {
 }
 
 describe('parseSyllabusExcel', () => {
-  it('oladi ma\'ruza va amaliy, laboratoriya tashlaydi', () => {
+  it('oladi ma\'ruza, amaliy va laboratoriya', () => {
     const rows = [
       ['', 'Ekologiya 6-s BM'],
       ['#', 'Nomi', '', '', '', '', '', '', '', '', 'Mashg\'ul', 'Yuklama'],
@@ -68,14 +68,53 @@ describe('parseSyllabusExcel', () => {
       ['25', 'Laboratoriya №2 Havo tarkibini aniqlash', '', '', '', '', '', '', '', '', 'Laboratoriya', '4'],
     ];
     const parsed = parseSyllabusExcel(rows);
-    expect(parsed.skippedLabCount).toBe(2);
+    expect(parsed.skippedLabCount).toBe(0);
     expect(parsed.topics.map((t) => `${t.id}:${t.type}`)).toEqual([
       'L1:lecture',
       'L2:lecture',
       'A1:practical',
+      'B1:lab',
+      'B2:lab',
     ]);
     expect(parsed.topics[0].title).toContain('Zamonaviy gigiyena');
-    expect(parsed.topics.some((t) => /laboratori/i.test(t.title))).toBe(false);
+    expect(parsed.topics.some((t) => /laboratori/i.test(t.title))).toBe(true);
+  });
+
+  it("mustaqil ta'limni ham oladi, bir xil nomli ma'ruza va amaliyni ikkalasini saqlaydi", () => {
+    const rows = [
+      ['Pediatriya ishi 2024-2025 (Milliy) 3-semestr Sog\'lom turmush tarzi'],
+      ['#', 'Nomi º', "Mashg'ulot", 'Yuklama', 'Semestr'],
+      ['1', 'Valeologiyaga kirish', "Ma'ruza", '2', '3-semestr'],
+      ['2', 'Ovqatlanish gigiyenasi', "Ma'ruza", '2', '3-semestr'],
+      ['3', 'Valeologiyaga kirish', 'Amaliy', '2', '3-semestr'],
+      ['4', 'Mustaqil ish: referat', "Mustaqil ta'lim", '2', '3-semestr'],
+      ['5', 'Klinik ko\'rik', "Klinik mashg'ulot", '4', '3-semestr'],
+    ];
+    const parsed = parseSyllabusExcel(rows);
+    expect(parsed.skippedIndependentCount).toBe(0);
+    expect(parsed.topics.map((t) => `${t.id}:${t.type}:${t.title}`)).toEqual([
+      'L1:lecture:Valeologiyaga kirish',
+      'L2:lecture:Ovqatlanish gigiyenasi',
+      'A1:practical:Valeologiyaga kirish',
+      "K1:clinical:Klinik ko'rik",
+      "I1:independent:Mustaqil ish: referat",
+    ]);
+  });
+
+  it('Seminar qatorlarini amaliy mashg\'ulot qiladi, ma\'ruza emas', () => {
+    const rows = [
+      ['#', 'Nomi', "Mashg'ulot"],
+      ['1', 'Falsafaning mohiyati', "Ma'ruza"],
+      ['2', 'Sharq falsafasi', 'Seminar'],
+      ['3', 'Ontologiya', 'SEMINAR'],
+    ];
+    const parsed = parseSyllabusExcel(rows);
+    expect(parsed.topics.map((t) => `${t.id}:${t.type}`)).toEqual([
+      'L1:lecture',
+      'A1:practical',
+      'A2:practical',
+    ]);
+    expect(parsed.topics[1].title).toBe('Sharq falsafasi');
   });
 
   it('sarlavha ustuni Nomi bo\'lmasa ham ishlaydi', () => {
@@ -91,7 +130,7 @@ describe('parseSyllabusExcel', () => {
 });
 
 describe('readXlsxRows + parseSyllabusExcel', () => {
-  it('xlsx zip dan mavzularni o\'qiydi va lab ni tashlaydi', async () => {
+  it('xlsx zip dan mavzularni o\'qiydi va lab ni ham oladi', async () => {
     const sheet = `<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
@@ -104,9 +143,10 @@ describe('readXlsxRows + parseSyllabusExcel', () => {
     const buffer = zipStore({ 'xl/worksheets/sheet1.xml': sheet });
     const rows = await readXlsxRows(buffer);
     const parsed = parseSyllabusExcel(rows);
-    expect(parsed.topics).toHaveLength(2);
-    expect(parsed.skippedLabCount).toBe(1);
+    expect(parsed.topics).toHaveLength(3);
+    expect(parsed.skippedLabCount).toBe(0);
     expect(parsed.topics[0].type).toBe('lecture');
     expect(parsed.topics[1].type).toBe('practical');
+    expect(parsed.topics[2].type).toBe('lab');
   });
 });

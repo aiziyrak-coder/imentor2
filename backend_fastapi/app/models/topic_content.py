@@ -21,6 +21,7 @@ class TopicHandout(Base):
     file: Mapped[str] = mapped_column(String(512))
     file_name: Mapped[str] = mapped_column(String(512))
     file_size: Mapped[int] = mapped_column(Integer, default=0)
+    language: Mapped[str] = mapped_column(String(8), default="uz")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 

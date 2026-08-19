@@ -101,7 +101,7 @@ export default function TopicVideos() {
   const topicCode = globalTopic?.id;
 
   const loadVideos = useCallback(async () => {
-    if (!topicKey || !syllabusId || !variantLabel || !topicCode) {
+    if (!topicKey || !syllabusId || !topicCode) {
       setVideos([]);
       setLoading(false);
       return;
@@ -109,7 +109,11 @@ export default function TopicVideos() {
     const seq = ++requestSeq.current;
     setLoading(true);
     try {
-      const rows = await fetchTopicVideos({ syllabusId, variantLabel, topicCode });
+      const rows = await fetchTopicVideos({
+        syllabusId,
+        variantLabel: variantLabel || 'asosiy',
+        topicCode,
+      });
       if (seq !== requestSeq.current) return;
       setVideos(rows);
       setActiveId(null);

@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from sqlalchemy.exc import IntegrityError
+
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
 from app.core.security import hash_password, verify_password
@@ -112,7 +114,14 @@ def admin_provision_staff(
         )
         profile.updated_at = dt.datetime.now(dt.timezone.utc)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Kafedra yoki xodim ma'lumotini saqlab bo'lmadi. Boshqa kafedra tanlab qayta urinib ko'ring.",
+        ) from exc
     return {"username": username, "role": role, "created": created}
 
 

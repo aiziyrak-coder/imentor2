@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react';
 import { GraduationCap } from 'lucide-react';
+import type { SyllabusTopicType } from '../../services/aiService';
+import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import { useUiText } from '../../i18n/useUiText';
 import { staffCardLg, staffChip, staffChipAccent, staffEyebrow, STAFF_HEADING } from './staffUi';
 
 export type StaffTopicInfo = {
   id: string;
   title: string;
-  type: 'lecture' | 'practical';
+  type: SyllabusTopicType;
   subjectName?: string;
   variantLabel?: string;
 };
@@ -21,8 +23,7 @@ type Props = {
 
 export default function StaffTopicHeader({ moduleLabel, topic, hint, actions, children }: Props) {
   const { t } = useUiText();
-  const typeLabel =
-    topic?.type === 'practical' ? t('lecture.typePractical') : t('lecture.typeLecture');
+  const lessonLabel = topic ? formatTopicLessonLabel(topic.type, topic.id, t) : '';
 
   return (
     <div className={`${staffCardLg} p-5 sm:p-6 space-y-4`}>
@@ -38,8 +39,7 @@ export default function StaffTopicHeader({ moduleLabel, topic, hint, actions, ch
                     {topic.subjectName}
                   </span>
                 )}
-                <span className={staffChipAccent}>{topic.id}</span>
-                <span className={staffChip}>{typeLabel}</span>
+                <span className={staffChipAccent}>{lessonLabel}</span>
               </div>
               <h1 className={`text-[17px] sm:text-[19px] font-bold leading-snug ${STAFF_HEADING}`}>
                 {topic.title}

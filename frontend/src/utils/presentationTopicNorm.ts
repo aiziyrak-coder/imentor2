@@ -1,7 +1,6 @@
 import {
   isTopicContextComplete,
   topicNormForStorage,
-  topicNormLegacy,
   topicNormLookupKeys,
   type SyllabusTopicContext,
 } from './syllabusTopicContext';
@@ -12,33 +11,26 @@ export function resolvePresentationTopicNorms(
 ): string[] {
   if (typeof topic === 'string') {
     const k = normTopicKey(topic);
-    return k ? [k] : [];
+    return k.includes('::') ? [k] : [];
   }
-  if (!topic?.title) return [];
   if (isTopicContextComplete(topic)) {
-    const keys = new Set<string>(topicNormLookupKeys(topic));
-    try {
-      keys.add(topicNormForStorage(topic));
-    } catch {
-      /* id yo'q */
-    }
-    return [...keys].filter(Boolean);
+    return topicNormLookupKeys(topic);
   }
-  const fallbackTitle =
-    typeof topic === 'object' && topic && 'title' in topic
-      ? String((topic as { title?: string }).title || '')
-      : '';
-  return [topicNormLegacy(fallbackTitle)];
+  return [];
 }
 
 export function primaryPresentationTopicNorm(
   topic: string | SyllabusTopicContext,
 ): string {
+  if (typeof topic !== 'string' && isTopicContextComplete(topic)) {
+    try {
+      return topicNormForStorage(topic);
+    } catch {
+      /* fall through */
+    }
+  }
   const norms = resolvePresentationTopicNorms(topic);
-  if (norms.length) return norms[0];
-  if (typeof topic === 'string') return normTopicKey(topic);
-  const title = 'title' in topic ? String(topic.title || '') : '';
-  return topicNormLegacy(title);
+  return norms[0] || '';
 }
 
 export async function extractPdfTextFromBlob(blob: Blob): Promise<string> {

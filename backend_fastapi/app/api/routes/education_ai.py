@@ -225,7 +225,7 @@ def education_ai_case_context(
 
     if subject_code and api_key:
         try:
-            chunks = rag.retrieve_book_context(db, subject_code, topic, top_k=6)
+            chunks = rag.retrieve_book_context(db, subject_code, topic, top_k=8)
         except Exception:
             chunks = []
         for c in chunks:
@@ -250,13 +250,11 @@ def education_ai_case_context(
     if api_key:
         keywords = _english_search_keywords(api_key, settings.openai_fast_model, topic)
 
-    # Kitob (ichki) manbalar bilan bir qatorda tashqi internetdan ham (PubMed,
-    # Semantic Scholar, Wikipedia) REAL manbalar yig'iladi — foydalanuvchi
-    # so'roviga ko'ra endi faqat "ichki adabiyot" bilan cheklanmaydi.
-    pubmed = extlit.search_pubmed(keywords, retmax=5)
-    scholar = extlit.search_semantic_scholar(keywords, limit=5)
-    wikipedia = extlit.search_wikipedia(keywords, limit=3)
-    external = extlit.dedupe_external_sources(pubmed + scholar + wikipedia)
+    # Kitob (yuklangan darslik) + xalqaro jurnallar (PubMed Lancet/NEJM/JAMA/BMJ/Cochrane).
+    # Wikipedia keys uchun olinmaydi — saviya past va mavzuga mos kelmasligi mumkin.
+    pubmed = extlit.search_pubmed(keywords, retmax=8, prefer_core=True)
+    scholar = extlit.search_semantic_scholar(keywords, limit=4)
+    external = extlit.dedupe_external_sources(pubmed + scholar)
 
     for e in external:
         if e["type"] == "pubmed":
