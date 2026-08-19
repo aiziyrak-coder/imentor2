@@ -159,6 +159,8 @@ async def upload_handout(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> TopicHandoutOut:
+    topic = (topic or "")[:255]
+    title = (title or "")[:255]
     topic_norm = _resolve_handout_topic_norm(topic, topic_norm, syllabus_id, variant_label, topic_code)
     if not topic_norm:
         raise HTTPException(status_code=400, detail="Mavzu normallashtirilmadi.")

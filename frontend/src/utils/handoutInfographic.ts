@@ -397,17 +397,24 @@ export async function generateHandoutInfographicPack(params: {
   subjectName: string;
   subjectCode?: string;
 }): Promise<HandoutInfographicPack> {
+  const fallback = () =>
+    ensureHandoutPackFilled(normalizeHandoutPack({}, params.topicTitle), params.topicTitle);
   const attempts: Array<{ model: string; maxTokens: number }> = [
     { model: OPENAI_CHAT, maxTokens: 4200 },
     { model: OPENAI_FAST, maxTokens: 3200 },
   ];
   for (const attempt of attempts) {
     try {
-      const raw = await requestHandoutJson({ ...params, ...attempt });
+      const raw = await Promise.race([
+        requestHandoutJson({ ...params, ...attempt }),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error('handout-ai-timeout')), 40000);
+        }),
+      ]);
       return ensureHandoutPackFilled(normalizeHandoutPack(raw, params.topicTitle), params.topicTitle);
     } catch {
-      /* keyingi urinish */
+      /* keyingi urinish yoki lokal poster */
     }
   }
-  return ensureHandoutPackFilled(normalizeHandoutPack({}, params.topicTitle), params.topicTitle);
+  return fallback();
 }

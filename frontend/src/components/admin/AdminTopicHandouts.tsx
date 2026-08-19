@@ -305,6 +305,7 @@ export default function AdminTopicHandouts() {
     if (!selectedFan || !topic || !variantLabel) return;
     setGenerating(true);
     setError(null);
+    setSaveOk('');
     setGenProgress(t('handout.progressAi'));
     try {
       await generateAndUploadTopicHandouts({
@@ -323,9 +324,16 @@ export default function AdminTopicHandouts() {
           else setGenProgress(t('handout.progressUpload', { lang: (lang || '').toUpperCase() }));
         },
       });
-      setHandouts(await fetchAdminHandouts());
+      setSaveOk(t('handout.generatedOk'));
+      try {
+        setHandouts(await fetchAdminHandouts());
+      } catch {
+        /* poster saqlandi — ro'yxat yangilanmasa ham xato ko'rsatilmasin */
+      }
     } catch (err) {
-      setError(backendErrorMessage(err) || t('handout.errorGenerate'));
+      const detail = backendErrorMessage(err);
+      const raw = err instanceof Error ? err.message : '';
+      setError(detail || (raw && !raw.startsWith('HTTP') ? raw : '') || t('handout.errorGenerate'));
     } finally {
       setGenerating(false);
       setGenProgress('');
