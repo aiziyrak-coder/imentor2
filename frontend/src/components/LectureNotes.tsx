@@ -40,6 +40,7 @@ import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffLoading from './staff/StaffLoading';
 import StaffPanel from './staff/StaffPanel';
+import { resolveSubjectDomain } from '../utils/subjectDomain';
 import {
   staffBtnGhost,
   staffBtnPrimary,
@@ -151,12 +152,18 @@ export default function LectureNotes() {
     setStreamingContent('');
     try {
       const contentLanguage = language;
+      const domain = resolveSubjectDomain({
+        departmentName: globalTopic?.departmentName,
+        subjectName: globalTopic?.subjectName,
+        topic,
+      });
       const data = await aiService.generateLectureNotes(
         topic,
         description,
         contentLanguage,
         globalTopic?.subjectCode,
         (textSoFar) => setStreamingContent(textSoFar),
+        domain,
       );
       setLectureSession(data);
       setEditedContent(data.content);

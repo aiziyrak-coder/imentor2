@@ -1886,19 +1886,39 @@ export const aiService = {
     /** Matn generatsiya bo'lgan sari chaqiriladi — foydalanuvchi darhol
      * ko'rishi uchun (kutish tuyg'usini yo'qotadi, umumiy vaqt bir xil). */
     onProgress?: (textSoFar: string) => void,
+    domain: SubjectDomain = 'clinical',
   ): Promise<LectureNote> {
     try {
       assertOpenAiApiKey();
       const outLang = languageName(language);
       const bookContext: BookContext | undefined = subjectCode ? { subjectCode, topicQuery: topic } : undefined;
+      const applyBlock = domain === 'academic' ? '## Amaliy qo\'llash' : '## Klinik / amaliy qo\'llash';
+      const domainGuard =
+        domain === 'academic'
+          ? 'DOMEN: klinik BO\'LMAGAN fan (informatika, matematika, elektronika, til, ijtimoiy fan va h.k.). ' +
+            'BEMOR, kasallik, tashxis, dori-darmon, KROK/USMLE uslubidagi klinik misollar TAQIQLANADI — ' +
+            'faqat shu fanga xos amaliy misol va qo\'llanmalar keltiring. '
+          : '';
       const requestLecture = () => openaiTextStream({
         model: OPENAI_CHAT,
-        system: `${SYS_MEDICAL} Ma'ruza faqat Markdown. HAJM: qisqa konspekt EMAS — real 60-90 daqiqalik ` +
+        system: `${sysRole(domain)} DARAJA: bu OLIY TA'LIM (universitet, 3-6 kurs yoki rezidentura) ma\'ruzasi — ` +
+          'maktab yoki 1-kurs kirish darsi EMAS. O\'quvchi allaqachon asosiy fanlarni bilishini hisobga oling: ' +
+          'soddalashtirilgan ta\'riflar bilan boshlamang, darhol chuqur ilmiy-nazariy tahlilga o\'ting. ' +
+          domainGuard +
+          'Ma\'ruza faqat Markdown. HAJM: qisqa konspekt EMAS — real 60-90 daqiqalik ' +
           'universitet ma\'ruzasi (taxminan 3500-6000 so\'z yoki undan ko\'p). ' +
           'Tuzilma majburiy: # sarlavha; ## Kirish (ahamiyat, maqsad, reja — kamida 3-4 paragraf); ' +
           'kamida 7-9 ta ## asosiy bo\'lim (har birida kamida 4-6 to\'liq paragraf + kerak bo\'lsa ### ' +
-          'va ro\'yxatlar; ta\'rif, mexanizm, tasnif, misol); ## Klinik / amaliy qo\'llash (kamida 3-4 ' +
-          'paragraf); ## Xulosa (asosiy xulosalar). Sayoz umumiy gaplar bilan cheklanmang — chuqur ' +
+          `va ro\'yxatlar; ta\'rif, mexanizm, tasnif, misol); ${applyBlock} (kamida 3-4 ` +
+          'paragraf); ## Xulosa (asosiy xulosalar). ' +
+          'CHUQURLIK MAJBURIY (bu eng muhim talab): har bir tushuncha uchun NIMA emas, NEGA va QANDAY ' +
+          'ekanini tushuntiring — molekulyar/hujayraviy/fiziologik mexanizmlarni bosqichma-bosqich ' +
+          'yoritilsin (masalan reseptor→signal yo\'li→hujayra javobi, yoki sabab→patofiziologik ' +
+          'zanjir→klinik natija), aniq raqamlar/qiymatlar/tasniflar (masalan ICD, WHO, standart ' +
+          'shkalalar) keltiring, o\'xshash holatlarni bir-biridan farqlang (differensial jihatlar), ' +
+          'ziddiyatli/munozarali qarashlar bo\'lsa ularni ham ko\'rsating. HAR BIR paragrafda kamida ' +
+          'bitta aniq dalil, mexanizm, raqam yoki misol bo\'lsin — umumiy ta\'riflarni qayta ' +
+          'ifodalovchi "suvli" jumlalar taqiqlanadi. Sayoz umumiy gaplar bilan cheklanmang — chuqur ' +
           'tushuntiring, ta\'rif va misollarni ochib yozing. ' +
           (bookContext
             ? 'Berilgan darslik parchalaridagi BARCHA tegishli tafsilotlardan to\'liq foydalaning — ' +
@@ -1910,8 +1930,11 @@ export const aiService = {
           ) + ` ${textReferencesRule(Boolean(bookContext), language)} Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
           `Mavzu: "${topic}". Qo'shimcha: ${description || '—'}. ` +
-          'UZUN va BATAFSIL ma\'ruza matni yozing — qisqa xulosa yoki tezislar emas. ' +
-          'Kamida 7 ta asosiy bo\'lim, har biri bir necha to\'liq paragraf. ' +
+          'UZUN va BATAFSIL, OLIY TA\'LIM darajasidagi ma\'ruza matni yozing — qisqa xulosa, ' +
+          'tezislar yoki maktab darsligidagi soddalashtirilgan bayon emas. Universitet talabasi ' +
+          'darsdan keyin mustaqil o\'qib, mexanizmni to\'liq tushunib olishi kerak bo\'lgan darajada ' +
+          'yozing. Kamida 7 ta asosiy bo\'lim, har biri bir necha to\'liq paragraf, har bir paragrafda ' +
+          'aniq mexanizm/raqam/misol. ' +
           (bookContext
             ? `Darslik manbalarini matn ichida (${sourceWords(language).label}: ...) ko'rsating va ` +
               `oxirida "## ${sourceWords(language).heading}" bo'limini qo'shing.`
