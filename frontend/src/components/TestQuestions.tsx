@@ -61,6 +61,12 @@ import {
   createLiveTestSessionOnServer,
   type StudentTestQuestion,
 } from '../utils/liveTestApi';
+import { postActivityEvents } from '../utils/analyticsApi';
+import {
+  bindLiveTestVisibilityTracking,
+  flushLiveTestEvents,
+  pushLiveTestEvent,
+} from '../utils/liveTestAnticheat';
 import QRCode from 'qrcode';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
 import MedicalReferencesList from './staff/MedicalReferencesList';
@@ -72,7 +78,7 @@ import { gradeBadgeClass, scoreToGrade } from '../utils/testGrading';
 import { stripOptionLetterPrefix } from '../utils/testOptionText';
 import { DEFAULT_TEST_DIFFICULTY, DEFAULT_TEST_QUESTION_COUNT } from '../utils/testDifficulty';
 import { loadLatestLectureText } from '../utils/lectureExcerpt';
-import { makeGenerationScope } from '../utils/subjectDomain';
+import { hydrateGenerationScope, makeGenerationScope } from '../utils/subjectDomain';
 
 interface LiveTestSessionDoc {
   topic: string;
@@ -227,6 +233,17 @@ export default function TestQuestions() {
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [viewLang, setViewLang] = useState<AppLanguage>(language);
 
+  const generationDomain = useMemo(
+    () =>
+      makeGenerationScope({
+        topic,
+        subjectName: globalTopic?.subjectName,
+        departmentName: globalTopic?.departmentName,
+        subjectCode: globalTopic?.subjectCode,
+      }).domain,
+    [topic, globalTopic?.subjectName, globalTopic?.departmentName, globalTopic?.subjectCode],
+  );
+
   useEffect(() => {
     setViewLang(language);
   }, [language]);
@@ -329,6 +346,7 @@ export default function TestQuestions() {
   const [sessionLoading, setSessionLoading] = useState(isStudentMode && !!studentSessionId);
   const serverSessionSyncedRef = useRef<string | null>(null);
   const participantKeyRef = useRef('');
+  const testStartedAtRef = useRef<number | null>(null);
   const enrichTokenRef = useRef<symbol | null>(null);
   // Variant izohlari va tarjimalar test ko'ringandan KEYIN, fonda keladi.
   // Bu ko'rsatkichsiz o'qituvchi bo'sh izohlarni ko'rib "ishlamayapti" deb
@@ -414,6 +432,8 @@ export default function TestQuestions() {
           saveStudentSession(studentSessionId, doc);
           setStudentTest(doc);
           setStudentAnswers(new Array(doc.questions.length).fill(-1));
+          testStartedAtRef.current = Date.now();
+          void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
           void upsertLiveTestDraftOnServer(studentSessionId, {
             participantKey: participantKeyRef.current,
@@ -437,6 +457,8 @@ export default function TestQuestions() {
           };
           setStudentTest(safe);
           setStudentAnswers(new Array(local.questions.length).fill(-1));
+          testStartedAtRef.current = Date.now();
+          void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
           void upsertLiveTestDraftOnServer(studentSessionId, {
             participantKey: participantKeyRef.current,
@@ -483,6 +505,11 @@ export default function TestQuestions() {
     studentLastName,
     studentAnswers,
   ]);
+
+  useEffect(() => {
+    if (!isStudentMode || !studentSessionId || !studentTest || studentSubmitted || sessionClosed) return;
+    return bindLiveTestVisibilityTracking(studentSessionId);
+  }, [isStudentMode, studentSessionId, studentTest, studentSubmitted, sessionClosed]);
 
   useEffect(() => {
     if (isStudentMode || !teacherSessionId) return;
@@ -730,10 +757,9 @@ export default function TestQuestions() {
       // Asosiy til = UI tili (header dagi uz/ru/en). Qolgan 2 til — fonda tarjima.
       const contentLanguage = language;
       const lectureText = await loadLatestLectureText(globalTopic ?? topic);
-      const scope = makeGenerationScope({
+      const scope = await hydrateGenerationScope({
         topic,
-        subjectName: globalTopic.subjectName,
-        departmentName: globalTopic.departmentName,
+        context: globalTopic,
         lectureText,
       });
       const data = await aiService.generateTests(
@@ -800,6 +826,14 @@ export default function TestQuestions() {
 
   const handleStudentAnswer = (questionIndex: number, optionIndex: number) => {
     if (studentSubmitted) return;
+    const prev = studentAnswers[questionIndex];
+    if (studentSessionId) {
+      pushLiveTestEvent(studentSessionId, {
+        event_type: prev >= 0 && prev !== optionIndex ? 'answer_change' : 'answer_select',
+        question_index: questionIndex,
+        option_index: optionIndex,
+      });
+    }
     const next = [...studentAnswers];
     next[questionIndex] = optionIndex;
     setStudentAnswers(next);
@@ -909,11 +943,15 @@ export default function TestQuestions() {
     setStudentLoading(true);
     setError(null);
     try {
+      await flushLiveTestEvents(studentSessionId, participantKeyRef.current);
+      const started = testStartedAtRef.current ?? Date.now();
       await submitLiveTestOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
         firstName: studentFirstName.trim(),
         lastName: studentLastName.trim(),
         answers: studentAnswers,
+        started_at_ms: started,
+        duration_sec: Math.max(0, Math.round((Date.now() - started) / 1000)),
       });
       const item: TestSubmissionDoc = {
         sessionId: studentSessionId,
@@ -1103,7 +1141,7 @@ export default function TestQuestions() {
         loading={loading}
         onCreate={() => void handleGenerate()}
         lockTopicFromSyllabus={Boolean(staffTopic)}
-        hint={t('test.heroSubtitle')}
+        hint={`${t('test.heroSubtitle')} ${t(generationDomain === 'academic' ? 'test.modeAcademic' : 'test.modeClinical')}`}
         versions={versions}
         activeVersionId={activeVersionId}
         onSelectVersion={handleSelectVersion}

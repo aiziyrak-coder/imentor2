@@ -5,12 +5,27 @@ import { HttpError } from '../api/httpClient';
  * `{"detail": "..."}` yoki DRF field xatolari (`{"file": ["..."]}`) qo'llab-quvvatlanadi.
  */
 export function backendErrorMessage(err: unknown): string {
-  if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') {
+    if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') {
     return "So'rov vaqti tugadi. Biroz kutib qayta urinib ko'ring.";
+  }
+  if (err instanceof Error && (err.message === 'request-timeout' || err.message === 'AbortError')) {
+    return "So'rov vaqti tugadi. Biroz kutib qayta urinib ko'ring.";
+  }
+  if (err instanceof HttpError && err.status === 413) {
+    return 'Fayl hajmi juda katta.';
   }
   if (err instanceof HttpError && err.body && typeof err.body === 'object') {
     const body = err.body as Record<string, unknown>;
     if (typeof body.detail === 'string') return body.detail;
+    if (Array.isArray(body.detail) && body.detail.length) {
+      const first = body.detail[0];
+      if (typeof first === 'string') return first;
+      if (first && typeof first === 'object') {
+        const rec = first as Record<string, unknown>;
+        if (typeof rec.msg === 'string') return rec.msg;
+        if (typeof rec.detail === 'string') return rec.detail;
+      }
+    }
     for (const value of Object.values(body)) {
       if (typeof value === 'string') return value;
       if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
@@ -26,6 +41,9 @@ export function backendErrorMessage(err: unknown): string {
     if (err.message === 'no-backend-token') {
       return 'Sessiya tugagan. Qayta kiring.';
     }
+  }
+  if (err instanceof HttpError && err.status) {
+    return `Server xatosi (${err.status}). Qayta urinib ko'ring.`;
   }
   return '';
 }

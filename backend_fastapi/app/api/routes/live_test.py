@@ -19,6 +19,7 @@ from app.schemas.live_test import (
     LiveTestUpsertRequest,
 )
 from app.services import live_test_service as svc
+from app.services.analytics_service import create_student_attempt_from_submission
 from app.services.pagination import paginate
 
 router = APIRouter()
@@ -215,6 +216,21 @@ def submit_answer(
     )
     db.add(sub)
     try:
+        db.flush()
+        started_at = None
+        if payload.started_at_ms:
+            try:
+                started_at = dt.datetime.fromtimestamp(int(payload.started_at_ms) / 1000.0, tz=dt.timezone.utc)
+            except (TypeError, ValueError, OSError):
+                started_at = None
+        duration = int(payload.duration_sec or 0)
+        create_student_attempt_from_submission(
+            db,
+            session=obj,
+            submission=sub,
+            started_at=started_at,
+            duration_sec=duration,
+        )
         db.commit()
     except Exception:
         db.rollback()

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     openai_reasoner_model: str = "gpt-4o"
 
     online_test_api_base_url: str = ""
+    online_test_api_fallback_url: str = "https://online-imtixon.uz"
     online_test_consumer_api_key: str = ""
 
     django_media_root: str = ""

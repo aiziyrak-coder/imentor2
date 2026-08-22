@@ -15,6 +15,7 @@ from app.schemas.auth_extra import OnlineTestStudentLoginRequest
 from app.services import auth_service
 from app.services import online_test_client as otc
 from app.services import staff_profile as sp
+from app.services.analytics_service import record_activity_event
 
 router = APIRouter()
 settings = get_settings()
@@ -71,6 +72,7 @@ def local_login(
         )
         auth_service.set_user_role_group(db, user, reg_role)
         role = reg_role
+        record_activity_event(db, owner_key=user.username, role=role, event_type="register")
         db.commit()
         db.refresh(user)
         return _login_response(db, user, role)
@@ -82,6 +84,7 @@ def local_login(
 
     role = auth_service.resolve_login_role(db, user, payload.role)
     auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role=role, event_type="login")
     db.commit()
     return _login_response(db, user, role)
 
@@ -145,6 +148,7 @@ def online_test_student_login(
         user.last_name = last_name
     auth_service.set_user_role_group(db, user, "student")
     auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role="student", event_type="login")
     db.commit()
     db.refresh(user)
 

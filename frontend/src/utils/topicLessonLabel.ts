@@ -31,3 +31,37 @@ export function formatTopicLessonLabel(
   const n = topicNumberFromId(id) || 1;
   return t('syllabus.lessonItem', { type: t(topicTypeLabelKey(type)), n });
 }
+
+/** Sillabus title dagi "3-mavzu." prefiksini olib tashlaydi — label allaqachon raqamni ko'rsatadi. */
+export function stripRedundantTopicNumber(title: string, topicId: string): string {
+  const raw = String(title || '').trim();
+  if (!raw) return raw;
+  const n = topicNumberFromId(topicId);
+  if (!n) return raw;
+
+  const patterns = [
+    new RegExp(`^${n}\\s*[-–—]?\\s*mavzu\\s*[.:;\\-–—]?\\s*`, 'iu'),
+    new RegExp(`^mavzu\\s*${n}\\s*[.:;\\-–—]?\\s*`, 'iu'),
+    new RegExp(`^(?:тема\\s*${n}|${n}\\s*[-–—]?\\s*тема)\\s*[.:;\\-–—]?\\s*`, 'iu'),
+    new RegExp(`^topic\\s*${n}\\s*[.:;\\-–—]?\\s*`, 'iu'),
+  ];
+
+  for (const re of patterns) {
+    const next = raw.replace(re, '').trim();
+    if (next && next !== raw) return next;
+  }
+  return raw;
+}
+
+/** Dropdown va xabarlar: "Mar'uza 1-mavzu · Ortopedik stomatologiyada…" */
+export function formatTopicDisplayLabel(
+  type: SyllabusTopicType,
+  id: string,
+  title: string,
+  t: (key: UiTextKey, vars?: Record<string, string | number>) => string,
+): string {
+  const head = formatTopicLessonLabel(type, id, t);
+  const body = stripRedundantTopicNumber(title, id);
+  if (!body || body === head) return head;
+  return `${head} · ${body}`;
+}

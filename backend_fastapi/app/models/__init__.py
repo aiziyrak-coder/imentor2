@@ -2,6 +2,7 @@
 autogenerate va `Base.metadata` to'liq sxemani ko'rishi uchun shart."""
 
 from app.models import (  # noqa: F401
+    analytics,
     book,
     clinical_group,
     content,

@@ -135,9 +135,14 @@ def finalize_live_test_session(db: Session, session: LiveTestSession) -> int:
             last_name=last_name,
             answers=answers,
             participant_key=draft.participant_key,
+            student_id=draft.participant_key if draft.participant_key.isdigit() else "",
             submitted_at=dt.datetime.now(dt.timezone.utc),
         )
         db.add(sub)
+        db.flush()
+        from app.services.analytics_service import create_student_attempt_from_submission
+
+        create_student_attempt_from_submission(db, session=locked, submission=sub)
         submitted_keys.add(draft.participant_key)
         auto_count += 1
 

@@ -68,6 +68,26 @@ export function topicNormLegacyTitleKey(
   return `${ctx.syllabusId}::${variant}::${title}`;
 }
 
+export function parseTopicNormParts(value: string): { syllabusId: string; topicCode: string } | null {
+  const parts = (value || '').trim().toLowerCase().split('::');
+  if (parts.length < 3 || !/^\d+$/.test(parts[0] || '')) return null;
+  const topicCode = (parts[parts.length - 1] || '').trim();
+  if (!topicCode) return null;
+  return { syllabusId: parts[0], topicCode };
+}
+
+export function topicNormsOverlap(rowNorm: string, wanted: string[]): boolean {
+  const r = (rowNorm || '').trim().toLowerCase();
+  const keys = wanted.map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (keys.includes(r)) return true;
+  const rp = parseTopicNormParts(r);
+  if (!rp) return false;
+  return keys.some((w) => {
+    const wp = parseTopicNormParts(w);
+    return Boolean(wp && wp.syllabusId === rp.syllabusId && wp.topicCode === rp.topicCode);
+  });
+}
+
 /** Faqat tuzilmali kalitlar. Sarlavha bo'yicha qidiruv fanlarni aralashtiradi. */
 export function topicNormLookupKeys(topic: SyllabusTopic | SyllabusTopicContext | string): string[] {
   if (typeof topic === 'string') {
@@ -83,8 +103,12 @@ export function topicNormLookupKeys(topic: SyllabusTopic | SyllabusTopicContext 
   }
   const variant = normTopicSegment(topic.variantLabel, 48);
   const code = normTopicSegment(topic.id.replace(/\s+/g, ''), 16);
-  if (code && (!variant || variant === 'asosiy')) {
+  if (code) {
+    keys.add(`${topic.syllabusId}::asosiy::${code}`);
     keys.add(`${topic.syllabusId}::::${code}`);
+    if (variant && variant !== 'asosiy') {
+      keys.add(`${topic.syllabusId}::${variant}::${code}`);
+    }
   }
   return [...keys];
 }
@@ -94,7 +118,7 @@ export function handoutMatchesTopic(
   topic: SyllabusTopic | SyllabusTopicContext | string,
 ): boolean {
   const allowed = new Set(topicNormLookupKeys(topic).map((k) => k.toLowerCase()));
-  return allowed.has((row.topic_norm || '').trim().toLowerCase());
+  return topicNormsOverlap(row.topic_norm, [...allowed]);
 }
 
 /** Eski mavzular bilan moslik — kontekstsiz title */

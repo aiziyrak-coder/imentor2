@@ -43,15 +43,18 @@ function fileExtension(name: string): string {
 
 export function isAllowedHandoutFile(file: File): boolean {
   const ext = fileExtension(file.name);
-  if (!HANDOUT_ALLOWED_EXTENSIONS.includes(ext as (typeof HANDOUT_ALLOWED_EXTENSIONS)[number])) {
-    return false;
-  }
   const mime = (file.type || '').toLowerCase().split(';')[0].trim();
-  if (!mime || mime === 'application/octet-stream') return true;
   if (BLOCKED_MIME.has(mime)) return false;
-  if (ext === '.pdf') return mime === 'application/pdf';
-  if (mime === 'application/pdf') return false;
-  return mime.startsWith('image/');
+  const allowedExt = HANDOUT_ALLOWED_EXTENSIONS.includes(ext as (typeof HANDOUT_ALLOWED_EXTENSIONS)[number]);
+  if (allowedExt) {
+    if (!mime || mime === 'application/octet-stream' || mime === 'application/force-download') return true;
+    if (ext === '.pdf') return mime === 'application/pdf' || mime === 'application/octet-stream';
+    if (mime.startsWith('image/')) return true;
+    return ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.webp' || ext === '.gif' || ext === '.bmp';
+  }
+  if (mime.startsWith('image/')) return true;
+  if (mime === 'application/pdf') return true;
+  return false;
 }
 
 export function handoutFileTypeLabel(): string {

@@ -3,7 +3,7 @@ import { Loader2, Plus, RefreshCw, Search, Trash2, Youtube } from 'lucide-react'
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
-import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
+import { formatTopicDisplayLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import {
   createAdminTopicVideo,
@@ -261,7 +261,7 @@ export default function AdminTopicVideos() {
               <option value="">{t('admin.selectTopicPlaceholder')}</option>
               {topics.map((tp) => (
                 <option key={`${tp.type}-${tp.id}`} value={tp.id}>
-                  {formatTopicLessonLabel(tp.type, tp.id, t)} · {tp.title}
+                  {formatTopicDisplayLabel(tp.type, tp.id, tp.title, t)}
                 </option>
               ))}
             </select>

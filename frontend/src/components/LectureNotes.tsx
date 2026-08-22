@@ -22,7 +22,8 @@ import {
 } from '../App';
 import { useUiText } from '../i18n/useUiText';
 import { formatTopicLessonLabel } from '../utils/topicLessonLabel';
-import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
+import { isTopicContextComplete, topicContextKey, resolveTopicNorm } from '../utils/syllabusTopicContext';
+import { readLectureForTopic, writeLectureForTopic } from '../utils/lectureLocalCache';
 import {
   listPreparedForTopicSynced,
   loadPreparedByIdSynced,
@@ -40,6 +41,7 @@ import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffLoading from './staff/StaffLoading';
 import StaffPanel from './staff/StaffPanel';
+import { resolveSubjectDomain } from '../utils/subjectDomain';
 import {
   staffBtnGhost,
   staffBtnPrimary,
@@ -100,7 +102,6 @@ export default function LectureNotes() {
   }, [globalTopic]);
 
   // Mavzu ochilganda shu fan/mavzudagi OXIRGI ma'ruza avtomatik chiqadi.
-  // Qayta generatsiya qilinmaguncha yangi matn yaratilmaydi.
   useEffect(() => {
     let cancelled = false;
     const lookup = globalTopic ?? topic;
@@ -113,11 +114,19 @@ export default function LectureNotes() {
       setOpeningSaved(false);
       return;
     }
+    const cachedNorm = resolveTopicNorm(globalTopic);
+    const cached = cachedNorm ? readLectureForTopic(cachedNorm) : '';
+    if (cached) {
+      setLectureSession({ topic: globalTopic?.title || topic, content: cached });
+      setEditedContent(cached);
+      setLectureContent(cached);
+    } else {
+      setLectureSession(null);
+      setEditedContent('');
+      setLectureContent('');
+      setActiveVersionId(null);
+    }
     setOpeningSaved(true);
-    setLectureSession(null);
-    setEditedContent('');
-    setLectureContent('');
-    setActiveVersionId(null);
     void (async () => {
       const rows = await listPreparedForTopicSynced('lecture', lookup, { shared: true });
       if (cancelled) return;
@@ -128,11 +137,12 @@ export default function LectureNotes() {
       }
       const session = await loadPreparedByIdSynced<LectureNote>('lecture', rows[0].id);
       if (cancelled) return;
-      if (session) {
+      if (session?.content) {
         setActiveVersionId(rows[0].id);
         setLectureSession(session);
         setEditedContent(session.content);
         setLectureContent(session.content);
+        if (cachedNorm) writeLectureForTopic(cachedNorm, session.content);
       }
       setOpeningSaved(false);
     })();
@@ -151,16 +161,24 @@ export default function LectureNotes() {
     setStreamingContent('');
     try {
       const contentLanguage = language;
+      const domain = resolveSubjectDomain({
+        departmentName: globalTopic?.departmentName,
+        subjectName: globalTopic?.subjectName,
+        topic,
+      });
       const data = await aiService.generateLectureNotes(
         topic,
         description,
         contentLanguage,
         globalTopic?.subjectCode,
         (textSoFar) => setStreamingContent(textSoFar),
+        domain,
       );
       setLectureSession(data);
       setEditedContent(data.content);
       setLectureContent(data.content);
+      const cacheNorm = resolveTopicNorm(globalTopic);
+      if (cacheNorm) writeLectureForTopic(cacheNorm, data.content);
       // Kalit sifatida SARLAVHA emas, tuzilmali topicNorm ishlatiladi
       // (sillabus::yo'nalish::mavzu kodi) — aks holda mavzu nomi tarjima
       // qilinganda saqlangan ma'ruza topilmay qolardi.

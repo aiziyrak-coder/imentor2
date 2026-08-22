@@ -48,7 +48,7 @@ import { messageFromAiError } from '../utils/aiErrors';
 import { parseKeywordsInput } from '../utils/generationVariety';
 import { downloadCaseAnswerKeyPdf, downloadCaseScenariosPdf } from '../utils/buildCasePdf';
 import { loadLatestLectureText } from '../utils/lectureExcerpt';
-import { makeGenerationScope } from '../utils/subjectDomain';
+import { hydrateGenerationScope, makeGenerationScope } from '../utils/subjectDomain';
 import {
   caseFocusAccentBorderClass,
   caseFocusBadgeClass,
@@ -168,9 +168,17 @@ export default function CaseStudies() {
   };
 
   const parsedKeywords = useMemo(() => parseKeywordsInput(keywords), [keywords]);
-  // Ma'ruza va Taqdimot bilan bir xil: kontent INTERFEYS tilida yaratiladi
-  // (ilgari sillabusning o'qitish tili olinardi va bo'limlar mos kelmasdi).
   const contentLanguage = language;
+  const generationDomain = useMemo(
+    () =>
+      makeGenerationScope({
+        topic,
+        subjectName: globalTopic?.subjectName,
+        departmentName: globalTopic?.departmentName,
+        subjectCode: globalTopic?.subjectCode,
+      }).domain,
+    [topic, globalTopic?.subjectName, globalTopic?.departmentName, globalTopic?.subjectCode],
+  );
 
   const handleGenerate = async (currentTopic: string = topic) => {
     if (!currentTopic.trim()) return;
@@ -179,10 +187,9 @@ export default function CaseStudies() {
     setError(null);
     try {
       const lectureText = await loadLatestLectureText(globalTopic ?? currentTopic);
-      const scope = makeGenerationScope({
+      const scope = await hydrateGenerationScope({
         topic: currentTopic,
-        subjectName: globalTopic?.subjectName,
-        departmentName: globalTopic?.departmentName,
+        context: globalTopic,
         lectureText,
       });
       const data = await aiService.generateCaseStudy(
@@ -333,6 +340,7 @@ export default function CaseStudies() {
         onSelectVersion={(id) => void handleSelectVersion(id)}
         onDeleteVersion={handleDeleteVersion}
         versionsTitle={t('case.savedVersions')}
+        hint={t(generationDomain === 'academic' ? 'case.modeAcademic' : 'case.modeClinical')}
         extra={
           <div className="space-y-2">
             <label className={`flex items-center gap-2 ${staffLabel}`}>
@@ -360,7 +368,11 @@ export default function CaseStudies() {
           actionBusy={retryingSave}
         />
       )}
-      {loading && <StaffLoading label={t('case.generating')} />}
+      {loading && (
+        <StaffLoading
+          label={t(generationDomain === 'academic' ? 'case.generatingAcademic' : 'case.generating')}
+        />
+      )}
 
       {!loading && !caseSession && topic.trim() && (
         <StaffPanel className="p-10 text-center print:hidden">
@@ -441,7 +453,7 @@ export default function CaseStudies() {
                           <span
                             className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide ${caseFocusBadgeClass(q.focus)}`}
                           >
-                            {caseFocusLabel(q.focus, language)}
+                            {caseFocusLabel(q.focus, language, caseSession.domain)}
                           </span>
                         )}
                       </div>

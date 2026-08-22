@@ -249,7 +249,7 @@ function PublicCatalogDetail({
                     <span
                       className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase ${caseFocusBadgeClass(q.focus)}`}
                     >
-                      {caseFocusLabel(q.focus, language)}
+                      {caseFocusLabel(q.focus, language, session.domain)}
                     </span>
                   )}
                 </div>

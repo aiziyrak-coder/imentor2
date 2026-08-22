@@ -31,6 +31,7 @@ import {
   Youtube,
   Monitor,
   Loader2,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -57,6 +58,8 @@ import { navLabel, navMobileLabel, roleLabel, translate, type UiTextKey } from '
 import { type AppNotificationEventDetail } from './utils/notifications';
 import AppToastHost from './components/AppToastHost';
 import { isPublicStudentTestUrl } from './utils/liveTestApi';
+import { useActivityTelemetry } from './hooks/useActivityTelemetry';
+import { postActivityEvents } from './utils/analyticsApi';
 
 // Components
 import DesktopHodimQrLogin from './components/auth/DesktopHodimQrLogin';
@@ -84,6 +87,7 @@ import AdminStaffManagement from './components/admin/AdminStaffManagement';
 import AdminCasesLibrary from './components/admin/AdminCasesLibrary';
 import AdminTestsLibrary from './components/admin/AdminTestsLibrary';
 import AdminLiveTestResultsPage from './components/admin/AdminLiveTestResultsPage';
+import AdminSuperAiReport from './components/admin/AdminSuperAiReport';
 import AdminStaffLocationConsole from './components/admin/AdminStaffLocationConsole';
 import AdminLiveTeachingBoard from './components/admin/AdminLiveTeachingBoard';
 import AdminCampusBuildingsPage from './components/admin/AdminCampusBuildingsPage';
@@ -102,11 +106,13 @@ import {
   resolveTopicNorm,
   type SyllabusTopicContext,
 } from './utils/syllabusTopicContext';
+import { readLectureForTopic, writeLectureForTopic } from './utils/lectureLocalCache';
 
 export type { SyllabusTopic };
 
 type View =
   | 'admin-dashboard'
+  | 'admin-super-ai-report'
   | 'admin-staff'
   | 'admin-staff-location'
   | 'admin-live-teaching'
@@ -134,6 +140,7 @@ type NavItemDef = { id: View; label: string; icon: LucideIcon };
 
 const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-dashboard': LayoutDashboard,
+  'admin-super-ai-report': Sparkles,
   'admin-staff': Users,
   'admin-staff-location': MapPin,
   'admin-live-teaching': Monitor,
@@ -170,6 +177,7 @@ const HODIM_NAV_IDS: View[] = [
 ];
 const ADMIN_NAV_IDS: View[] = [
   'admin-dashboard',
+  'admin-super-ai-report',
   'admin-staff',
   'admin-staff-location',
   'admin-live-teaching',
@@ -190,31 +198,6 @@ function navItemsForRole(role: UserRole, lang: AppLanguage): NavItemDef[] {
   const ids =
     role === 'admin' ? ADMIN_NAV_IDS : role === 'student' ? STUDENT_NAV_IDS : HODIM_NAV_IDS;
   return ids.map((id) => ({ id, label: navLabel(lang, id), icon: NAV_ICONS[id] }));
-}
-
-const LECTURE_BY_TOPIC_KEY = 'imentor-lecture-by-topic-v2';
-
-function readLectureForTopic(topicNorm: string): string {
-  if (!topicNorm) return '';
-  try {
-    const raw = localStorage.getItem(LECTURE_BY_TOPIC_KEY);
-    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    return map[topicNorm] ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function writeLectureForTopic(topicNorm: string, content: string): void {
-  if (!topicNorm) return;
-  try {
-    const raw = localStorage.getItem(LECTURE_BY_TOPIC_KEY);
-    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    map[topicNorm] = content;
-    localStorage.setItem(LECTURE_BY_TOPIC_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore quota */
-  }
 }
 
 export const GlobalTopicContext = createContext<SyllabusTopicContext | null>(null);
@@ -451,7 +434,13 @@ export default function App() {
     };
   }, [user?.uid]);
 
+  const userRole = user ? normalizeUserRole(user) : null;
+  useActivityTelemetry(!!user && !!userRole, activeView);
+
   const handleLogout = async () => {
+    if (user && userRole) {
+      await postActivityEvents([{ event_type: 'logout' }], activeView).catch(() => undefined);
+    }
     clearBackendAuthTokens();
     clearDesktopPairedSession(user?.uid);
     logoutLocalStaff();
@@ -459,7 +448,6 @@ export default function App() {
     // Tanlangan interfeys tili saqlanib qoladi (qurilma sozlamasi).
   };
 
-  const userRole = user ? normalizeUserRole(user) : null;
   const navItems = useMemo(
     () => (userRole ? navItemsForRole(userRole, language) : []),
     [userRole, language],
@@ -543,6 +531,8 @@ export default function App() {
     switch (view) {
       case 'admin-dashboard':
         return <AdminDashboardHome />;
+      case 'admin-super-ai-report':
+        return <AdminSuperAiReport />;
       case 'admin-staff':
         return <AdminStaffManagement />;
       case 'admin-staff-location':

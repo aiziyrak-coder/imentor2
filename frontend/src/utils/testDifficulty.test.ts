@@ -40,6 +40,8 @@ describe('testDifficulty', () => {
     expect(testStemInstruction('medium')).toMatch(/2–3 qatorlik/);
     expect(testStemInstruction('hard')).toMatch(/3 zich jumla/);
     expect(testStemInstruction('hard')).toMatch(/ABG=tashxis/);
+    expect(testStemInstruction('hard', 'academic')).toMatch(/Klinik bemor/i);
+    expect(buildTestDifficultyPrompt('hard', 'academic')).toMatch(/klinik vignette EMAS/i);
     expect(testExplanationInstruction('easy')).toMatch(/3-5/);
   });
 });

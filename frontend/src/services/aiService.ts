@@ -71,6 +71,7 @@ import {
 import {
   emptyScope,
   buildScopePrompt,
+  academicBundleHasClinicalLeak,
   type GenerationScope,
   type SubjectDomain,
 } from '../utils/subjectDomain';
@@ -81,8 +82,12 @@ const SYS_MEDICAL =
   'Siz FJSTI tibbiyot professori va klinik ta\'lim metodistisiz. Javoblar ilmiy, aniq, darsga tayyor.';
 
 const SYS_ACADEMIC =
-  'Siz FJSTI professori va berilgan FAN bo\'yicha metodistsiz. Klinik bemor kartasi, kasallik vignette, ' +
-  'KROK/USMLE ssenariysi YARATILMASIN — faqat shu fan, kafedra va mavzu (ma\'ruza bo\'lsa — u).';
+  'Siz FJSTI professori va berilgan FAN bo\'yicha metodistsiz. Klinik bemor kartasi, kasallik, lab, dori, ' +
+  'KROK/USMLE ssenariysi YARATILMASIN — faqat shu kafedra, fan, mavzu va ma\'ruza.';
+
+const ACADEMIC_CLINICAL_RETRY_BAN =
+  'OLDINGI NATIJA YAROQSIZ: klinik bemor, diabet, HbA1c, metformin yoki shifokor aralashgan. ' +
+  'Butunlay qayta yozing — faqat fan/mavzu/ma\'ruza. Bemor yo\'q.';
 
 function sysRole(domain: SubjectDomain): string {
   return domain === 'academic' ? SYS_ACADEMIC : SYS_MEDICAL;
@@ -549,9 +554,9 @@ const CASE_SCENARIO_TITLES: Record<AppLanguage, string[]> = {
 };
 
 const CASE_SCENARIO_TITLES_ACADEMIC: Record<AppLanguage, string[]> = {
-  uz: ['Ishtirokchi', 'Muammo', 'Shartlar', 'Muhit va vositalar', "Kuzatuv va o'lchov", "Ma'lumotlar"],
-  ru: ['Участник', 'Задача', 'Условия', 'Среда и средства', 'Наблюдения', 'Данные'],
-  en: ['Actor', 'Problem', 'Constraints', 'Environment', 'Observations', 'Data'],
+  uz: ['Kim ishtirok etadi', 'Muammo', 'Berilgan shartlar', 'Muhit va vositalar', 'Nima kuzatildi', 'Ma\'lumotlar'],
+  ru: ['Кто участвует', 'Проблема', 'Условия', 'Среда и средства', 'Что видно', 'Данные'],
+  en: ['Who is involved', 'Problem', 'Given conditions', 'Setting and tools', 'What was observed', 'Data'],
 };
 
 /** Vaziyatni klinik karta qatorlariga birlashtiradi (`### Sarlavha`). */
@@ -604,9 +609,9 @@ const CASE_SECTION_TITLES: Record<AppLanguage, string[]> = {
 };
 
 const CASE_SECTION_TITLES_ACADEMIC: Record<AppLanguage, string[]> = {
-  uz: ['Xulosa', 'Muqobil tahlil', 'Tekshirish qadamlari', 'Yechim', 'Oldini olish'],
-  ru: ['Вывод', 'Альтернативы', 'Проверка', 'Решение', 'Профилактика ошибки'],
-  en: ['Conclusion', 'Alternatives', 'Verification', 'Solution', 'Prevention'],
+  uz: ['Asosiy xulosa', 'Boshqa tushuntirishlar', 'Qanday tekshirish', 'Qanday yechish', 'Xatolikni oldini olish'],
+  ru: ['Главный вывод', 'Другие объяснения', 'Как проверить', 'Как решить', 'Как не допустить ошибку'],
+  en: ['Main conclusion', 'Other explanations', 'How to check', 'How to solve', 'How to prevent the mistake'],
 };
 
 const CASE_ACADEMIC_FIELDS =
@@ -689,7 +694,7 @@ async function generateSingleCaseQuestion(
   const scopeBlock = buildScopePrompt(scope);
   const focusHint = domain === 'academic' ? CASE_FOCUS_HINTS_ACADEMIC[focus] : CASE_FOCUS_HINTS[focus];
   const personaHint = domain === 'academic' ? CASE_PERSONA_HINTS_ACADEMIC[focus] : CASE_PERSONA_HINTS[focus];
-  const request = (strict: boolean) =>
+  const request = (strict: boolean, banClinicalLeak = false) =>
     openaiJson<CaseSections>({
       model: OPENAI_CHAT,
       system:
@@ -715,6 +720,7 @@ async function generateSingleCaseQuestion(
               '"Foydalanilgan adabiyotlar" yozmang — dastur qo\'shadi.'
             : 'Hech qanday manba berilmagan — hech qanday raqamli iqtibos [n], link yoki "Manba:" degan matn yozmang, faqat umumiy klinik bilim asosida yozing.'),
       user:
+        `${banClinicalLeak ? `${ACADEMIC_CLINICAL_RETRY_BAN}\n\n` : ''}` +
         `${scopeBlock}\n\n${structure}${keywordFocus}${avoid}\n\n` +
         `${clinicalRules}\n\n` +
         `Generate ONE case with focus="${focus}" (${focusHint}). ` +
@@ -746,6 +752,17 @@ async function generateSingleCaseQuestion(
       }
     } catch (err) {
       console.warn('Case til bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
+    }
+  }
+
+  if (domain === 'academic' && academicBundleHasClinicalLeak(Object.values(raw).map((v) => String(v || '')))) {
+    try {
+      const retry = await request(true, true);
+      if (!academicBundleHasClinicalLeak(Object.values(retry).map((v) => String(v || '')))) {
+        raw = retry;
+      }
+    } catch (err) {
+      console.warn('Case klinik sizib chiqish bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
     }
   }
 
@@ -905,7 +922,7 @@ async function attachPerQuestionBookReferences(
 ): Promise<TestSession> {
   const code = (subjectCode || '').trim();
   const questions = session.questions || [];
-  if (!code || !questions.length) return session;
+  if (!code || !questions.length || session.domain === 'academic') return session;
   try {
     await ensureBackendAccessToken();
     const token = getBackendAccessToken();
@@ -1189,9 +1206,10 @@ async function attachOptionExplanations(
   // MUHIM: eng uzun matn (klinik tahlil) aynan shu yerda yoziladi, shuning
   // uchun DARSLIK parchalari ham shu so'rovga ulanadi. Avval bu chaqiruvda
   // bookContext yo'q edi va tahlil manbasiz, faqat model xotirasidan chiqardi.
-  const bookContext: BookContext | undefined = subjectCode?.trim()
-    ? { subjectCode: subjectCode.trim(), topicQuery: session.topic }
-    : undefined;
+  const bookContext: BookContext | undefined =
+    session.domain === 'academic' || !subjectCode?.trim()
+      ? undefined
+      : { subjectCode: subjectCode.trim(), topicQuery: session.topic };
   const merged = [...questions];
   const chunks: number[][] = [];
   for (let start = 0; start < pendingIdx.length; start += OPTION_EXPLANATION_CHUNK) {
@@ -1753,16 +1771,17 @@ export const aiService = {
     const scopeBlock = buildScopePrompt(scope);
     const safeCount = Math.min(90, Math.max(10, Math.round(count) || 10));
     const outLang = languageName(language);
-    const bookContext: BookContext | undefined = subjectCode?.trim()
-      ? { subjectCode: subjectCode.trim(), topicQuery: topic }
-      : undefined;
+    const bookContext: BookContext | undefined =
+      domain === 'academic' || !subjectCode?.trim()
+        ? undefined
+        : { subjectCode: subjectCode.trim(), topicQuery: topic };
     // Avoid-list ixtiyoriy — timeout bilan, generate’ni ushlab turmasin
     const avoid = await Promise.race([
       previousTestAvoidBlock(topic),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 800)),
     ]);
 
-    const generate = async (requestedCount: number): Promise<TestSession> => {
+    const generate = async (requestedCount: number, extraUser = ''): Promise<TestSession> => {
       const variety = buildTestVarietyPrompt(topic, requestedCount, difficulty, domain);
       const levelBlock = buildTestDifficultyPrompt(difficulty, domain);
       // ~640 token/savol: 3 zich jumla + 5–7 gaplik klinik explanation.
@@ -1788,7 +1807,7 @@ export const aiService = {
           'optionExplanations YOZMANG. ' +
           `Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
-          `${scopeBlock}\n\n${variety}${avoid}\n\n${requestedCount} ta NOYOB, QIYIN, ZICH savol. ${testStemInstruction(difficulty, domain)} ` +
+          `${extraUser}${scopeBlock}\n\n${variety}${avoid}\n\n${requestedCount} ta NOYOB, QIYIN, ZICH savol. ${testStemInstruction(difficulty, domain)} ` +
           (domain === 'academic'
             ? 'Klinik vignette (yoshli bemor + kasallik + lab) yozilsa — butunlay almashtiring. ' +
               'Har savolni yozishdan oldin: "to\'g\'ri javob shu fan/mavzu/ma\'ruzadami? Bemor yo\'qmi?" — yo\'q bo\'lsa almashtiring. ' +
@@ -1812,6 +1831,11 @@ export const aiService = {
     const sessionLanguageWrong = (s: TestSession): boolean =>
       outputLanguageLooksWrong((s.questions || []).map((q) => q.question).join(' '), language);
 
+    const sessionHasClinicalLeak = (s: TestSession): boolean =>
+      academicBundleHasClinicalLeak(
+        (s.questions || []).flatMap((q) => [q.question, q.explanation, ...(q.options || [])]),
+      );
+
     try {
       let data = await generate(safeCount);
       // Faqat juda buzilgan bo‘lsa qayta urin (kam savol) — weak sifat uchun ikkinchi to‘liq generate yo‘q
@@ -1827,6 +1851,14 @@ export const aiService = {
           if (retry.questions?.length && !sessionLanguageWrong(retry)) data = retry;
         } catch (err) {
           console.warn('Test tili bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
+        }
+      }
+      if (domain === 'academic' && sessionHasClinicalLeak(data)) {
+        try {
+          const retry = await generate(safeCount, `${ACADEMIC_CLINICAL_RETRY_BAN}\n\n`);
+          if (retry.questions?.length && !sessionHasClinicalLeak(retry)) data = retry;
+        } catch (err) {
+          console.warn('Test klinik sizib chiqish bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
         }
       }
       return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
@@ -1886,19 +1918,39 @@ export const aiService = {
     /** Matn generatsiya bo'lgan sari chaqiriladi — foydalanuvchi darhol
      * ko'rishi uchun (kutish tuyg'usini yo'qotadi, umumiy vaqt bir xil). */
     onProgress?: (textSoFar: string) => void,
+    domain: SubjectDomain = 'clinical',
   ): Promise<LectureNote> {
     try {
       assertOpenAiApiKey();
       const outLang = languageName(language);
       const bookContext: BookContext | undefined = subjectCode ? { subjectCode, topicQuery: topic } : undefined;
+      const applyBlock = domain === 'academic' ? '## Amaliy qo\'llash' : '## Klinik / amaliy qo\'llash';
+      const domainGuard =
+        domain === 'academic'
+          ? 'DOMEN: klinik BO\'LMAGAN fan (informatika, matematika, elektronika, til, ijtimoiy fan va h.k.). ' +
+            'BEMOR, kasallik, tashxis, dori-darmon, KROK/USMLE uslubidagi klinik misollar TAQIQLANADI — ' +
+            'faqat shu fanga xos amaliy misol va qo\'llanmalar keltiring. '
+          : '';
       const requestLecture = () => openaiTextStream({
         model: OPENAI_CHAT,
-        system: `${SYS_MEDICAL} Ma'ruza faqat Markdown. HAJM: qisqa konspekt EMAS — real 60-90 daqiqalik ` +
+        system: `${sysRole(domain)} DARAJA: bu OLIY TA'LIM (universitet, 3-6 kurs yoki rezidentura) ma\'ruzasi — ` +
+          'maktab yoki 1-kurs kirish darsi EMAS. O\'quvchi allaqachon asosiy fanlarni bilishini hisobga oling: ' +
+          'soddalashtirilgan ta\'riflar bilan boshlamang, darhol chuqur ilmiy-nazariy tahlilga o\'ting. ' +
+          domainGuard +
+          'Ma\'ruza faqat Markdown. HAJM: qisqa konspekt EMAS — real 60-90 daqiqalik ' +
           'universitet ma\'ruzasi (taxminan 3500-6000 so\'z yoki undan ko\'p). ' +
           'Tuzilma majburiy: # sarlavha; ## Kirish (ahamiyat, maqsad, reja — kamida 3-4 paragraf); ' +
           'kamida 7-9 ta ## asosiy bo\'lim (har birida kamida 4-6 to\'liq paragraf + kerak bo\'lsa ### ' +
-          'va ro\'yxatlar; ta\'rif, mexanizm, tasnif, misol); ## Klinik / amaliy qo\'llash (kamida 3-4 ' +
-          'paragraf); ## Xulosa (asosiy xulosalar). Sayoz umumiy gaplar bilan cheklanmang — chuqur ' +
+          `va ro\'yxatlar; ta\'rif, mexanizm, tasnif, misol); ${applyBlock} (kamida 3-4 ` +
+          'paragraf); ## Xulosa (asosiy xulosalar). ' +
+          'CHUQURLIK MAJBURIY (bu eng muhim talab): har bir tushuncha uchun NIMA emas, NEGA va QANDAY ' +
+          'ekanini tushuntiring — molekulyar/hujayraviy/fiziologik mexanizmlarni bosqichma-bosqich ' +
+          'yoritilsin (masalan reseptor→signal yo\'li→hujayra javobi, yoki sabab→patofiziologik ' +
+          'zanjir→klinik natija), aniq raqamlar/qiymatlar/tasniflar (masalan ICD, WHO, standart ' +
+          'shkalalar) keltiring, o\'xshash holatlarni bir-biridan farqlang (differensial jihatlar), ' +
+          'ziddiyatli/munozarali qarashlar bo\'lsa ularni ham ko\'rsating. HAR BIR paragrafda kamida ' +
+          'bitta aniq dalil, mexanizm, raqam yoki misol bo\'lsin — umumiy ta\'riflarni qayta ' +
+          'ifodalovchi "suvli" jumlalar taqiqlanadi. Sayoz umumiy gaplar bilan cheklanmang — chuqur ' +
           'tushuntiring, ta\'rif va misollarni ochib yozing. ' +
           (bookContext
             ? 'Berilgan darslik parchalaridagi BARCHA tegishli tafsilotlardan to\'liq foydalaning — ' +
@@ -1910,8 +1962,11 @@ export const aiService = {
           ) + ` ${textReferencesRule(Boolean(bookContext), language)} Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
           `Mavzu: "${topic}". Qo'shimcha: ${description || '—'}. ` +
-          'UZUN va BATAFSIL ma\'ruza matni yozing — qisqa xulosa yoki tezislar emas. ' +
-          'Kamida 7 ta asosiy bo\'lim, har biri bir necha to\'liq paragraf. ' +
+          'UZUN va BATAFSIL, OLIY TA\'LIM darajasidagi ma\'ruza matni yozing — qisqa xulosa, ' +
+          'tezislar yoki maktab darsligidagi soddalashtirilgan bayon emas. Universitet talabasi ' +
+          'darsdan keyin mustaqil o\'qib, mexanizmni to\'liq tushunib olishi kerak bo\'lgan darajada ' +
+          'yozing. Kamida 7 ta asosiy bo\'lim, har biri bir necha to\'liq paragraf, har bir paragrafda ' +
+          'aniq mexanizm/raqam/misol. ' +
           (bookContext
             ? `Darslik manbalarini matn ichida (${sourceWords(language).label}: ...) ko'rsating va ` +
               `oxirida "## ${sourceWords(language).heading}" bo'limini qo'shing.`

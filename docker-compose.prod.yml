@@ -36,6 +36,7 @@ x-backend-env: &backend-env
   DJANGO_JWT_REFRESH_DAYS: ${DJANGO_JWT_REFRESH_DAYS:-14}
   IMENTOR_EXTERNAL_API_KEYS: ${IMENTOR_EXTERNAL_API_KEYS:-}
   ONLINE_TEST_API_BASE_URL: ${ONLINE_TEST_API_BASE_URL:-}
+  ONLINE_TEST_API_FALLBACK_URL: ${ONLINE_TEST_API_FALLBACK_URL:-https://online-imtixon.uz}
   ONLINE_TEST_CONSUMER_API_KEY: ${ONLINE_TEST_CONSUMER_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ADMIN_PHONE: ${ADMIN_PHONE:-998907863888}
@@ -173,6 +174,10 @@ services:
       GUNICORN_WORKERS: ${GUNICORN_WORKERS_FASTAPI:-4}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT_FASTAPI:-300}
       APP_THREAD_LIMIT: ${APP_THREAD_LIMIT:-48}
+    # appi.online-imtixon.uz DNS → 87.192.230.208 (tashqi IP). Server ichidan
+    # shu IP:443 ga NAT loopback yo'q — faqat LAN IP orqali nginx ishlaydi.
+    extra_hosts:
+      - "appi.online-imtixon.uz:192.168.0.101"
     volumes:
       - media_data:/app/media
     depends_on:

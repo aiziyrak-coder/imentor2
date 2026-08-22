@@ -1,7 +1,7 @@
 import { getCurrentLocalUser } from './localStaffAuth';
 import { HttpError, httpJson } from '../api/httpClient';
 import { getBackendAccessToken } from './backendAuth';
-import { topicNormLookupKeys } from './syllabusTopicContext';
+import { topicNormLookupKeys, topicNormsOverlap } from './syllabusTopicContext';
 import type { SyllabusTopic } from '../services/aiService';
 import type { SyllabusTopicContext } from './syllabusTopicContext';
 
@@ -215,7 +215,12 @@ const MINE_MAX_PAGES = 20;
 async function fetchMineRows(
   kind: PreparedContentKind,
   topicNorms?: string[],
-  options?: { shared?: boolean },
+  options?: {
+    shared?: boolean;
+    syllabusId?: number;
+    topicCode?: string;
+    variantLabel?: string;
+  },
 ): Promise<PreparedContentSummary[]> {
   const token = await getBackendAccessToken();
   if (!token) return [];
@@ -228,6 +233,9 @@ async function fetchMineRows(
       page_size: String(MINE_PAGE_SIZE),
     });
     if (options?.shared) params.set('shared', '1');
+    if (options?.syllabusId) params.set('syllabus_id', String(options.syllabusId));
+    if (options?.topicCode) params.set('topic_code', options.topicCode);
+    if (options?.variantLabel) params.set('variant_label', options.variantLabel);
     for (const norm of topicNorms || []) params.append('topic_norm', norm);
     const data = await httpJson<{ results?: MineRow[]; count?: number }>(
       `${apiBaseUrl()}/v1/prepared-content/mine/?${params.toString()}`,
@@ -279,11 +287,24 @@ export async function listPreparedForTopicSynced(
   )
     .map((k) => k.trim().toLowerCase())
     .filter((k) => k.includes('::'));
-  if (!wantedKeys.length) return [];
+  const syllabusId =
+    typeof topic === 'object' && topic && 'syllabusId' in topic ? topic.syllabusId : undefined;
+  const topicCode =
+    typeof topic === 'object' && topic?.id
+      ? topic.id.trim().toLowerCase().replace(/\s+/g, '')
+      : '';
+  const variantLabel =
+    typeof topic === 'object' && topic && 'variantLabel' in topic ? topic.variantLabel || '' : '';
+  if (!wantedKeys.length && !(syllabusId && topicCode)) return [];
   try {
-    const rows = await fetchMineRows(kind, wantedKeys, options);
-    const wanted = new Set(wantedKeys);
-    return rows.filter((r) => wanted.has((r.topicNorm || '').trim().toLowerCase()));
+    const rows = await fetchMineRows(kind, wantedKeys, {
+      ...options,
+      syllabusId,
+      topicCode,
+      variantLabel,
+    });
+    if (!wantedKeys.length) return rows;
+    return rows.filter((r) => topicNormsOverlap(r.topicNorm || '', wantedKeys));
   } catch {
     return [];
   }
@@ -336,25 +357,31 @@ export async function loadLatestPreparedContent<T>(
   )
     .map((k) => k.toLowerCase())
     .filter((k) => k.includes('::'));
-  if (!lookupKeys.length) return null;
+  const syllabusId =
+    typeof topic === 'object' && topic && 'syllabusId' in topic ? topic.syllabusId : undefined;
+  const topicCode =
+    typeof topic === 'object' && topic?.id
+      ? topic.id.trim().toLowerCase().replace(/\s+/g, '')
+      : '';
+  if (!lookupKeys.length && !(syllabusId && topicCode)) return null;
 
   try {
     const token = await getBackendAccessToken();
     if (!token) return null;
-    for (const wantedTopic of lookupKeys) {
-      const data = await httpJson<{
-        id?: number;
-        payload?: unknown;
-        created_at?: string;
-      } & CloudRow>(
-        `${apiBaseUrl()}/v1/prepared-content/?kind=${encodeURIComponent(kind)}&topic_norm=${encodeURIComponent(wantedTopic)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      // FastAPI LatestOut: { payload } | Django full row — ikkalasi ham
-      if (data.payload == null) continue;
-      return data.payload as T;
-    }
-    return null;
+    const params = new URLSearchParams({ kind });
+    if (lookupKeys[0]) params.set('topic_norm', lookupKeys[0]);
+    if (syllabusId) params.set('syllabus_id', String(syllabusId));
+    if (topicCode) params.set('topic_code', topicCode);
+    const data = await httpJson<{
+      id?: number;
+      payload?: unknown;
+      created_at?: string;
+    } & CloudRow>(
+      `${apiBaseUrl()}/v1/prepared-content/?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (data.payload == null) return null;
+    return data.payload as T;
   } catch {
     return null;
   }

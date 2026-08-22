@@ -19,6 +19,7 @@ import { backendErrorMessage } from '../utils/apiError';
 import {
   fetchHandoutsForTopic,
   getHandoutFileBlobUrl,
+  handoutLanguage,
   resolveHandoutFileUrl,
   uploadHandout,
   HANDOUT_FILE_ACCEPT,
@@ -246,12 +247,17 @@ export default function HandoutMaterials() {
     setLoading(true);
     setError(null);
     try {
-      const list = await fetchHandoutsForTopic(globalTopic, language);
+      const list = await fetchHandoutsForTopic(globalTopic);
       if (seq !== requestSeq.current) return;
+      const prefer = language;
+      list.sort((a, b) => {
+        const ap = handoutLanguage(a) === prefer ? 0 : 1;
+        const bp = handoutLanguage(b) === prefer ? 0 : 1;
+        return ap - bp;
+      });
       setItems(list);
     } catch (e) {
       if (seq !== requestSeq.current) return;
-      setItems([]);
       setError(
         e instanceof Error && e.message === 'no-backend-token'
           ? t('handout.errorLogin')

@@ -7,7 +7,7 @@ export async function loadLatestLectureText(
   topic: SyllabusTopic | SyllabusTopicContext | string,
 ): Promise<string> {
   try {
-    const list = await listPreparedForTopicSynced('lecture', topic);
+    const list = await listPreparedForTopicSynced('lecture', topic, { shared: true });
     const first = list[0];
     if (!first?.id) return '';
     const payload = await loadPreparedByIdSynced<{ content?: string } | string>('lecture', first.id);

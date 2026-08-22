@@ -11,6 +11,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.admin import register_admin
 from app.api.routes import (
+    admin_reports,
+    analytics,
     auth,
     clinic_admin,
     clinical_group,
@@ -84,6 +86,8 @@ app.include_router(topic_content.router, prefix="/api/v1", tags=["topic-content"
 app.include_router(education_ai.router, prefix="/api/v1", tags=["education-ai"])
 app.include_router(external_api.router, prefix="/api/v1", tags=["external-api"])
 app.include_router(prepared_content.router, prefix="/api/v1", tags=["prepared-content"])
+app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
+app.include_router(admin_reports.router, prefix="/api/v1", tags=["admin-reports"])
 app.include_router(legacy.router, prefix="/api/v1", tags=["legacy"])
 app.include_router(legacy.root_router, prefix="/api", tags=["legacy"])
 

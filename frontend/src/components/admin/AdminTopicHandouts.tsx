@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, FileText, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
-import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
+import { formatTopicDisplayLabel, formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import AdminSmartFilter from './AdminSmartFilter';
 import {
@@ -80,17 +80,24 @@ export default function AdminTopicHandouts() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const [fanRows, rows] = await Promise.all([fetchAdminCourseSyllabuses(), fetchAdminHandouts()]);
-      setFans(fanRows);
-      setHandouts(rows);
-    } catch {
-      setError(t('admin.error.loadFailed'));
-      setFans([]);
-      setHandouts([]);
-    } finally {
-      setLoading(false);
-    }
+    const tasks: Promise<void>[] = [
+      fetchAdminCourseSyllabuses()
+        .then((fanRows) => {
+          setFans(fanRows);
+        })
+        .catch(() => {
+          setError((prev) => prev || t('admin.error.loadFailed'));
+        }),
+      fetchAdminHandouts()
+        .then((rows) => {
+          setHandouts(rows);
+        })
+        .catch(() => {
+          setError((prev) => prev || t('admin.error.loadFailed'));
+        }),
+    ];
+    await Promise.allSettled(tasks);
+    setLoading(false);
   }, [t]);
 
   useEffect(() => {
@@ -131,17 +138,21 @@ export default function AdminTopicHandouts() {
 
   useEffect(() => {
     setFanId('');
-    setTopicCode('');
   }, [deptId]);
 
   useEffect(() => {
-    setVariantLabel(variants[0]?.label ?? '');
-    setTopicCode('');
+    const first = variants[0]?.label ?? '';
+    setVariantLabel((cur) => (cur && variants.some((v) => v.label === cur) ? cur : first));
   }, [variants]);
 
+  const topicResetKey = `${fanId}::${variantLabel}`;
+  const prevTopicResetKey = useRef('');
   useEffect(() => {
-    setTopicCode('');
-  }, [variantLabel]);
+    if (prevTopicResetKey.current && prevTopicResetKey.current !== topicResetKey) {
+      setTopicCode('');
+    }
+    prevTopicResetKey.current = topicResetKey;
+  }, [topicResetKey]);
 
   const fanById = useMemo(() => {
     const m = new Map<number, CourseSyllabusRow>();
@@ -201,12 +212,17 @@ export default function AdminTopicHandouts() {
       if (lessonFilter && topicLessonKind(h.topic_norm || '') !== lessonFilter) return false;
       if (q) {
         const fanName = fanNameById.get(Number(sid)) || '';
-        const hay = `${h.topic} ${h.title} ${h.file_name} ${fanName} ${handoutLanguage(h)}`.toLowerCase();
+        const code = ((h.topic_norm || '').split('::')[2] || '').toLowerCase();
+        const lesson = code
+          ? formatTopicLessonLabel(topicLessonKind(h.topic_norm || '') || 'practical', code.toUpperCase(), t)
+          : '';
+        const hay =
+          `${h.topic} ${h.title} ${h.file_name} ${fanName} ${handoutLanguage(h)} ${h.topic_norm} ${code} ${lesson}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [handouts, search, deptFilter, fanFilter, langFilter, kindFilter, lessonFilter, fanNameById, fanById]);
+  }, [handouts, search, deptFilter, fanFilter, langFilter, kindFilter, lessonFilter, fanNameById, fanById, t]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, { fanName: string; topic: string; rows: TopicHandoutItem[] }>();
@@ -237,10 +253,15 @@ export default function AdminTopicHandouts() {
       return;
     }
     const topic = topics.find((tp) => tp.id === topicCode);
-    if (!topic || !fanId || !variantLabel) return;
+    if (!topic || !fanId || !variantLabel) {
+      setError(t('admin.handoutNeedTopic'));
+      return;
+    }
     setSavingAll(true);
     setError(null);
     setSaveOk('');
+    const failures: string[] = [];
+    const added: TopicHandoutItem[] = [];
     try {
       let uploaded = 0;
       for (const lang of HANDOUT_LANGS) {
@@ -249,30 +270,48 @@ export default function AdminTopicHandouts() {
           setSaveProgress(
             t('admin.handoutSavingProgress', {
               lang: languageLabel(lang),
-              current: String(uploaded + 1),
+              current: String(uploaded + failures.length + 1),
               total: String(pendingCount),
             }),
           );
-          await uploadAdminHandout({
-            syllabusId: Number(fanId),
-            variantLabel,
-            topicCode,
-            topic: topic.title,
-            language: lang,
-            file: files[i],
-          });
-          uploaded += 1;
+          try {
+            const row = await uploadAdminHandout({
+              syllabusId: Number(fanId),
+              variantLabel,
+              topicCode: topic.id,
+              topic: String(topic.title || ''),
+              language: lang,
+              file: files[i],
+            });
+            added.push(row);
+            uploaded += 1;
+          } catch (err) {
+            failures.push(
+              `${languageLabel(lang)}: ${backendErrorMessage(err) || t('admin.error.handoutAddFailed')}`,
+            );
+          }
         }
       }
-      setFilesByLang({ uz: [], ru: [], en: [] });
-      setHandouts(await fetchAdminHandouts());
-      setSaveOk(
-        t('admin.handoutSavedToTopic', {
-          count: String(uploaded),
-          topic: `${formatTopicLessonLabel(topic.type, topic.id, t)} · ${topic.title}`,
-          subject: selectedFan?.subject_name || '',
-        }),
-      );
+      if (uploaded > 0) {
+        setFilesByLang({ uz: [], ru: [], en: [] });
+        setHandouts((prev) => {
+          const seen = new Set(added.map((r) => Number(r.id)));
+          return [...added, ...prev.filter((h) => !seen.has(Number(h.id)))];
+        });
+        void fetchAdminHandouts()
+          .then(setHandouts)
+          .catch(() => undefined);
+        setSaveOk(
+          t('admin.handoutSavedToTopic', {
+            count: String(uploaded),
+            topic: formatTopicDisplayLabel(topic.type, topic.id, topic.title, t),
+            subject: selectedFan?.subject_name || '',
+          }),
+        );
+      }
+      if (failures.length && uploaded === 0) {
+        setError(failures.join(' '));
+      }
     } catch (err) {
       setError(backendErrorMessage(err) || t('admin.error.handoutAddFailed'));
     } finally {
@@ -299,6 +338,14 @@ export default function AdminTopicHandouts() {
   const topicReady = Boolean(fanId && variantLabel && topicCode);
   const busy = savingAll || generating;
   const selectedTopic = topics.find((tp) => tp.id === topicCode) || null;
+  const existingForSelected = useMemo(() => {
+    if (!fanId || !topicCode) return [];
+    const code = topicCode.trim().toLowerCase();
+    return handouts.filter((h) => {
+      const parts = (h.topic_norm || '').toLowerCase().split('::');
+      return parts[0] === String(fanId) && (parts[2] || '') === code;
+    });
+  }, [handouts, fanId, topicCode]);
 
   const generateHandouts = async () => {
     const topic = topics.find((tp) => tp.id === topicCode);
@@ -396,7 +443,7 @@ export default function AdminTopicHandouts() {
               <option value="">{t('admin.selectTopicPlaceholder')}</option>
               {topics.map((tp) => (
                 <option key={`${tp.type}-${tp.id}`} value={tp.id}>
-                  {formatTopicLessonLabel(tp.type, tp.id, t)} · {tp.title}
+                  {formatTopicDisplayLabel(tp.type, tp.id, tp.title, t)}
                 </option>
               ))}
             </select>
@@ -485,13 +532,18 @@ export default function AdminTopicHandouts() {
             {selectedTopic && selectedFan
               ? t('admin.handoutAttachTarget', {
                   subject: selectedFan.subject_name,
-                  topic: `${formatTopicLessonLabel(selectedTopic.type, selectedTopic.id, t)} · ${selectedTopic.title}`,
+                  topic: formatTopicDisplayLabel(selectedTopic.type, selectedTopic.id, selectedTopic.title, t),
                 })
               : t('admin.handoutNeedTopic')}
             {pendingCount > 0
               ? ` · ${t('admin.handoutPendingCount', { count: String(pendingCount) })}`
               : ''}
           </p>
+          {existingForSelected.length > 0 ? (
+            <p className="text-[12px] text-amber-900 font-medium">
+              {t('admin.handoutExistingOnTopic', { count: String(existingForSelected.length) })}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={() => void saveAllHandouts()}

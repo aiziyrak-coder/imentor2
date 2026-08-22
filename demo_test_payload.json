@@ -1,0 +1,28 @@
+{
+  "kind": "test",
+  "topic": "Tish ekstraksiyasi asoratlari",
+  "topic_norm": "demo-stomatologiya-test-1",
+  "author_display_name": "Dr. Demo Stomatolog",
+  "subject_name": "Xirurgik Stomatologiya",
+  "subject_code": "stomatologiya-va-otorinolaringologiya__xirurgik-stomatologiya",
+  "variant_label": "Asosiy",
+  "topic_code": "m1",
+  "payload": {
+    "topic": "Tish ekstraksiyasi asoratlari",
+    "questions": [
+      {
+        "question": "Tish olib tashlash jarayonida qanday asorat eng ko'p uchraydi?",
+        "options": ["Og'riq va noqulaylik", "Nafas olish qiyinligi", "Ko'ngil aynishi", "Quloq og'rig'i", "Qon ketishi"],
+        "correctOptionIndex": 0,
+        "explanation": "Tish olib tashlash jarayonida og'riq va noqulaylik eng keng tarqalgan asoratlardan biridir (Manba: Contemporary Oral and Maxillofacial Surgery, 197-bet).",
+        "optionExplanations": [
+          "To'g'ri — og'riq va noqulaylik eng keng tarqalgan asorat (Manba: Contemporary Oral and Maxillofacial Surgery, 197-bet).",
+          "Xato — nafas olish qiyinligi odatda tish olib tashlash bilan bog'liq emas.",
+          "Xato — ko'ngil aynishi bevosita bog'liq emas.",
+          "Xato — quloq og'rig'i odatda kuzatilmaydi.",
+          "Qisman to'g'ri — qon ketishi ham yuzaga kelishi mumkin, lekin kamroq uchraydi (Manba: Contemporary Oral and Maxillofacial Surgery, 197-bet)."
+        ]
+      }
+    ]
+  }
+}

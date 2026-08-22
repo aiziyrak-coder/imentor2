@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import DataError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
@@ -44,6 +45,8 @@ def _pregenerate_preview(rel_path: str) -> None:
 HANDOUT_MAX_BYTES = 20 * 1024 * 1024
 PRESENTATION_MAX_BYTES = 50 * 1024 * 1024
 HANDOUT_LANGS = frozenset({"uz", "ru", "en"})
+TOPIC_TEXT_MAX = 1024
+_TOPIC_CODE_RE = re.compile(r"(?i)\b([lmakibp]\d{1,3})\b")
 
 _YT_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:[^&]*&)*v=|embed/|shorts/|v/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})"
@@ -67,6 +70,21 @@ def _handout_lang(value: str | None) -> str:
     return s if s in HANDOUT_LANGS else "uz"
 
 
+def _clip_topic_text(value: str) -> str:
+    return (value or "").strip()[:TOPIC_TEXT_MAX]
+
+
+def _clean_topic_code(topic_code: str) -> str:
+    s = (topic_code or "").strip()
+    if not s:
+        return ""
+    compact = re.sub(r"\s+", "", s.lower())
+    if re.fullmatch(r"[lmakibp]\d{1,3}", compact):
+        return compact
+    m = _TOPIC_CODE_RE.search(s)
+    return (m.group(1) if m else s)
+
+
 def _can_delete(owner_key: str, auth: AuthContext) -> bool:
     if owner_key == auth.user.username:
         return True
@@ -74,11 +92,15 @@ def _can_delete(owner_key: str, auth: AuthContext) -> bool:
 
 
 def _handout_out(h: TopicHandout, auth: AuthContext) -> TopicHandoutOut:
+    created = h.created_at or dt.datetime.now(dt.timezone.utc)
+    if getattr(created, "tzinfo", None) is None:
+        created = created.replace(tzinfo=dt.timezone.utc)
     return TopicHandoutOut(
-        id=h.id, owner_key=h.owner_key, topic=h.topic, topic_norm=h.topic_norm, title=h.title, kind=h.kind,
-        file_name=h.file_name, file_size=h.file_size, author_name=h.author_name,
-        created_at=h.created_at, file_url=f"/api/v1/handouts/{h.id}/file/",
-        can_delete=_can_delete(h.owner_key, auth), sort_order=h.sort_order,
+        id=h.id, owner_key=h.owner_key, topic=h.topic or "", topic_norm=h.topic_norm or "",
+        title=h.title or "", kind=h.kind or "image",
+        file_name=h.file_name or "", file_size=int(h.file_size or 0), author_name=h.author_name or "",
+        created_at=created, file_url=f"/api/v1/handouts/{h.id}/file/",
+        can_delete=_can_delete(h.owner_key, auth), sort_order=int(h.sort_order or 0),
         language=_handout_lang(getattr(h, "language", None)),
     )
 
@@ -116,7 +138,7 @@ def _resolve_handout_topic_norm(
     syllabus_id+variant_label+topic_code hammasi berilgan bo'lsa shulardan
     quriladi, aks holda berilgan topic_norm (yoki topic'dan) olinadi."""
     if syllabus_id and variant_label.strip() and topic_code.strip():
-        built = tn.build_topic_norm(syllabus_id, variant_label, topic_code)
+        built = tn.build_topic_norm(syllabus_id, variant_label, _clean_topic_code(topic_code))
         if built:
             return built
     return tn.canonical_topic_norm(topic_norm or "", topic)
@@ -159,44 +181,77 @@ async def upload_handout(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> TopicHandoutOut:
-    topic = (topic or "")[:255]
-    title = (title or "")[:255]
+    topic = _clip_topic_text(topic)
+    title = _clip_topic_text(title)
     topic_norm = _resolve_handout_topic_norm(topic, topic_norm, syllabus_id, variant_label, topic_code)
     if not topic_norm:
         raise HTTPException(status_code=400, detail="Mavzu normallashtirilmadi.")
-    if not storage.validate_extension(file.filename or ""):
-        raise HTTPException(status_code=400, detail="Fayl turi qo'llab-quvvatlanmaydi.")
-    content = await file.read()
+    try:
+        content = await file.read()
+    except Exception as exc:
+        logger.exception("Tarqatma fayl o'qilmadi: %s", exc)
+        raise HTTPException(status_code=400, detail="Fayl o'qilmadi. Qayta tanlab saqlang.") from exc
     if len(content) > HANDOUT_MAX_BYTES:
         raise HTTPException(status_code=400, detail="Fayl hajmi juda katta.")
+    if not content:
+        raise HTTPException(status_code=400, detail="Fayl bo'sh.")
+    ctype = file.content_type or ""
+    raw_name = file.filename or "file"
+    if not storage.validate_extension(raw_name, content=content, content_type=ctype):
+        raise HTTPException(status_code=400, detail="Fayl turi qo'llab-quvvatlanmaydi. JPG, PNG yoki PDF yuklang.")
+    ext = storage.detect_extension(raw_name, content, ctype) or ".jpg"
+    if not raw_name.lower().endswith(ext):
+        raw_name = f"{raw_name}{ext}"
 
     lang = _handout_lang(language)
-    rel_path = storage.handout_relative_path(topic_norm, auth.user.username, file.filename or "file")
-    storage.save_upload(rel_path, content)
+    rel_path = storage.handout_relative_path(topic_norm, auth.user.username, raw_name, language=lang)
+    try:
+        storage.save_upload(rel_path, content)
+    except OSError as exc:
+        logger.exception("Tarqatma diskka yozilmadi: %s", exc)
+        raise HTTPException(status_code=400, detail="Fayl saqlanmadi. Qayta urinib ko'ring.") from exc
 
     display = f"{auth.user.first_name} {auth.user.last_name}".strip() or auth.user.username
     max_order = db.execute(
         select(func.max(TopicHandout.sort_order)).where(TopicHandout.topic_norm == topic_norm)
     ).scalar_one() or 0
 
+    created = dt.datetime.now(dt.timezone.utc)
     obj = TopicHandout(
         owner_key=auth.user.username,
         author_name=display[:255],
         topic=topic,
-        topic_norm=topic_norm,
-        title=(title or file.filename or "")[:255],
-        kind=storage.detect_handout_kind(file.filename or "", file.content_type or ""),
-        file=rel_path,
-        file_name=(file.filename or "file")[:512],
+        topic_norm=topic_norm[:255],
+        title=_clip_topic_text(title or raw_name),
+        kind=storage.detect_handout_kind(raw_name, ctype, content),
+        file=rel_path[:512],
+        file_name=raw_name[:512],
         file_size=len(content),
         language=lang,
         sort_order=int(max_order) + 1,
-        created_at=dt.datetime.now(dt.timezone.utc),
+        created_at=created,
     )
     db.add(obj)
-    db.commit()
-    db.refresh(obj)
-    return _handout_out(obj, auth)
+    try:
+        db.commit()
+        db.refresh(obj)
+    except (DataError, IntegrityError) as exc:
+        db.rollback()
+        logger.exception("Tarqatma DB xatosi: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Tarqatma saqlanmadi. Mavzu nomi juda uzun bo'lishi mumkin — qayta urinib ko'ring.",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Tarqatma saqlash xatosi: %s", exc)
+        raise HTTPException(status_code=400, detail="Tarqatma saqlanmadi. Faylni tekshiring.") from exc
+    try:
+        return _handout_out(obj, auth)
+    except Exception:
+        logger.exception("Tarqatma javobini yig'ishda xato")
+        obj.created_at = created
+        return _handout_out(obj, auth)
 
 
 @router.get("/handouts/{pk}/file/")
@@ -245,7 +300,7 @@ def admin_list_handouts(
         stmt = stmt.where(cond) if cond is not None else stmt.where(False)
     rows = db.execute(stmt).scalars().all()
     out = [_handout_out(h, auth).model_dump() for h in rows]
-    return paginate(out, request, default_page_size=100, max_page_size=500)
+    return paginate(out, request, default_page_size=100, max_page_size=2000)
 
 
 @router.post("/admin/handouts/", response_model=TopicHandoutOut, status_code=201)
@@ -326,6 +381,8 @@ async def upload_presentation(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> TopicPresentationOut:
+    topic = _clip_topic_text(topic)
+    title = _clip_topic_text(title)
     topic_norm = _resolve_handout_topic_norm(topic, topic_norm, syllabus_id, variant_label, topic_code)
     if not topic_norm:
         raise HTTPException(status_code=400, detail="Mavzu normallashtirilmadi.")
@@ -348,7 +405,7 @@ async def upload_presentation(
         author_name=display[:255],
         topic=topic,
         topic_norm=topic_norm,
-        title=(title or file.filename or "")[:255],
+        title=_clip_topic_text(title or file.filename or ""),
         kind=storage.detect_presentation_kind(file.filename or ""),
         file=rel_path,
         file_name=(file.filename or "file")[:512],
@@ -475,8 +532,10 @@ def admin_create_topic_video(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("admin")),
 ) -> TopicVideoOut:
-    topic = payload.topic.strip()
-    topic_norm = tn.build_topic_norm(payload.syllabus_id, payload.variant_label, payload.topic_code)
+    topic = _clip_topic_text(payload.topic)
+    topic_norm = tn.build_topic_norm(
+        payload.syllabus_id, payload.variant_label, _clean_topic_code(payload.topic_code),
+    )
     if not topic_norm:
         topic_norm = tn.canonical_topic_norm("", topic)
     if not topic_norm:
@@ -496,7 +555,7 @@ def admin_create_topic_video(
         author_name=display[:255],
         topic=topic,
         topic_norm=topic_norm,
-        title=(payload.title or "").strip()[:255],
+        title=_clip_topic_text(payload.title or ""),
         youtube_url=payload.youtube_url.strip()[:512],
         youtube_id=youtube_id,
         sort_order=int(max_order) + 1,

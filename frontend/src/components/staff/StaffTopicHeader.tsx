@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { GraduationCap } from 'lucide-react';
 import type { SyllabusTopicType } from '../../services/aiService';
-import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
+import { formatTopicLessonLabel, stripRedundantTopicNumber } from '../../utils/topicLessonLabel';
 import { useUiText } from '../../i18n/useUiText';
 import { staffCardLg, staffChip, staffChipAccent, staffEyebrow, STAFF_HEADING } from './staffUi';
 
@@ -42,7 +42,7 @@ export default function StaffTopicHeader({ moduleLabel, topic, hint, actions, ch
                 <span className={staffChipAccent}>{lessonLabel}</span>
               </div>
               <h1 className={`text-[17px] sm:text-[19px] font-bold leading-snug ${STAFF_HEADING}`}>
-                {topic.title}
+                {stripRedundantTopicNumber(topic.title, topic.id)}
               </h1>
             </>
           ) : null}

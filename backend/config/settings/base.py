@@ -232,8 +232,11 @@ ALLOW_LEGACY_PREPARED_CONTENT_API = env_bool("DJANGO_ALLOW_LEGACY_PREPARED_CONTE
 # Tashqi servislar uchun API kalitlari (vergul bilan). Masalan: key1,key2
 EXTERNAL_API_KEYS = (os.getenv("IMENTOR_EXTERNAL_API_KEYS") or os.getenv("EXTERNAL_API_KEYS") or "").strip()
 
-# OnlineTest — talaba auth (bitta login manbai). Masalan: https://onlinetest.example.com
+# OnlineTest — talaba auth (bitta login manbai). Asosiy: appi; zaxira: eski domen.
 ONLINE_TEST_API_BASE_URL = (os.getenv("ONLINE_TEST_API_BASE_URL") or "").strip().rstrip("/")
+ONLINE_TEST_API_FALLBACK_URL = (
+    os.getenv("ONLINE_TEST_API_FALLBACK_URL") or "https://online-imtixon.uz"
+).strip().rstrip("/")
 
 # OnlineTest — Kafedra/Yo'nalish/Guruh katalogini o'qish uchun X-Api-Key
 # (OnlineTest tomonidagi ONLINE_TEST_PUBLIC_API_KEYS ro'yxatiga mos bo'lishi kerak)

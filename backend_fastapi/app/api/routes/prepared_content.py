@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
@@ -73,6 +73,60 @@ def _can_view_item(item: PreparedContent, db: Session, auth: AuthContext) -> boo
     return _teaches_syllabus(db, auth, sid)
 
 
+def _topic_lookup_filter(
+    wanted_norms: list[str],
+    syllabus_id: int | None = None,
+    topic_code: str = "",
+    variant_label: str = "",
+):
+    """Ma'ruza kaliti: aniq topic_norm YOKI shu fan + mavzu kodi (variant farqi e'tiborsiz)."""
+    clauses = []
+    norms: set[str] = set()
+
+    def add_structured(sid: int, variant: str, code: str) -> None:
+        if not sid or not code:
+            return
+        for alias in tn.structured_aliases(sid, variant, code):
+            if alias:
+                norms.add(alias)
+        clauses.append(
+            and_(
+                PreparedContent.syllabus_id == sid,
+                func.lower(PreparedContent.topic_code) == code[:32],
+            )
+        )
+
+    for raw in wanted_norms:
+        w = (raw or "").strip().lower()
+        if not w:
+            continue
+        norms.add(w)
+        parsed = cc.parse_topic_norm(w)
+        sid = 0
+        try:
+            sid = int(parsed.get("syllabus_id") or 0)
+        except (TypeError, ValueError):
+            sid = 0
+        if not sid:
+            sid = _syllabus_id_from_norm(w) or 0
+        code = (parsed.get("topic_code") or "").strip().lower().replace(" ", "")
+        if not code:
+            parts = w.split("::")
+            code = parts[-1].strip() if len(parts) >= 3 else ""
+        variant = (parsed.get("variant_label") or variant_label or "").strip()
+        add_structured(sid, variant, code)
+
+    code_q = (topic_code or "").strip().lower().replace(" ", "")
+    if syllabus_id and code_q:
+        add_structured(int(syllabus_id), variant_label, code_q)
+
+    if norms:
+        clauses.append(PreparedContent.topic_norm.in_(list(norms)))
+    if not clauses:
+        return None
+    return or_(*clauses)
+
+
 def _can_delete_item(item: PreparedContent, auth: AuthContext) -> bool:
     return item.owner_key == auth.user.username or auth.role == "admin"
 
@@ -96,45 +150,44 @@ def list_my_prepared_content(
     kind: str,
     topic_norm: list[str] = Query(default=[]),
     shared: bool = Query(default=False),
+    syllabus_id: int | None = Query(default=None),
+    topic_code: str = Query(default=""),
+    variant_label: str = Query(default=""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> dict:
     """Saqlangan yozuvlar ro'yxati.
 
     Standart: faqat joriy foydalanuvchiniki (keys/test).
-    `shared=1` + `topic_norm`: ma'ruza/taqdimot — shu fan/mavzuni o'tadigan
-    barcha o'qituvchilarniki (muallif filtri yo'q).
+    `shared=1` + `topic_norm` yoki syllabus_id+topic_code: ma'ruza/taqdimot —
+    shu fan/mavzuni o'tadigan barcha o'qituvchilarniki.
     """
     if not kind.strip():
         raise HTTPException(status_code=400, detail="kind majburiy.")
     kind_value = kind.strip()
     wanted = [t.strip().lower() for t in topic_norm if t and t.strip()]
-    structured = [w for w in wanted if tn.is_structured_topic_norm(w)]
-    wanted = structured or wanted
+    lookup = _topic_lookup_filter(wanted, syllabus_id, topic_code, variant_label)
 
     if shared:
         if kind_value not in SHARED_KINDS:
             raise HTTPException(status_code=400, detail="shared faqat lecture/presentation uchun.")
-        if not wanted:
-            raise HTTPException(status_code=400, detail="shared=1 uchun topic_norm kerak.")
-        stmt = select(PreparedContent).where(
-            PreparedContent.kind == kind_value,
-            PreparedContent.topic_norm.in_(wanted),
-        )
+        if lookup is None:
+            raise HTTPException(status_code=400, detail="shared=1 uchun topic_norm yoki syllabus_id+topic_code kerak.")
+        stmt = select(PreparedContent).where(PreparedContent.kind == kind_value, lookup)
         if not _is_privileged(auth):
             taught = _taught_syllabus_ids(db, auth)
-            allowed = [w for w in wanted if _syllabus_id_from_norm(w) in taught]
-            owner_or_shared = [PreparedContent.owner_key == auth.user.username]
-            if allowed:
-                owner_or_shared.append(PreparedContent.topic_norm.in_(allowed))
-            stmt = stmt.where(or_(*owner_or_shared))
+            owner = PreparedContent.owner_key == auth.user.username
+            if taught:
+                stmt = stmt.where(or_(owner, PreparedContent.syllabus_id.in_(list(taught))))
+            else:
+                stmt = stmt.where(owner)
     else:
         stmt = select(PreparedContent).where(
             PreparedContent.owner_key == auth.user.username,
             PreparedContent.kind == kind_value,
         )
-        if wanted:
-            stmt = stmt.where(PreparedContent.topic_norm.in_(wanted))
+        if lookup is not None:
+            stmt = stmt.where(lookup)
 
     rows = db.execute(stmt.order_by(PreparedContent.created_at.desc())).scalars().all()
     out = [_summary(r, auth) for r in rows]
@@ -176,24 +229,30 @@ def _out(item: PreparedContent) -> PreparedContentOut:
 @router.get("/prepared-content/", response_model=PreparedContentLatestOut)
 def get_latest_prepared_content(
     kind: str,
-    topic_norm: str,
+    topic_norm: str = "",
+    syllabus_id: int | None = Query(default=None),
+    topic_code: str = Query(default=""),
+    variant_label: str = Query(default=""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentLatestOut:
-    if not kind.strip() or not topic_norm.strip():
-        raise HTTPException(status_code=400, detail="kind, topic_norm are required.")
+    if not kind.strip():
+        raise HTTPException(status_code=400, detail="kind majburiy.")
     kind_value = kind.strip()
-    norm = topic_norm.strip().lower()
-    stmt = select(PreparedContent).where(
-        PreparedContent.kind == kind_value,
-        PreparedContent.topic_norm == norm,
-    )
+    wanted = [topic_norm.strip().lower()] if topic_norm.strip() else []
+    lookup = _topic_lookup_filter(wanted, syllabus_id, topic_code, variant_label)
+    if lookup is None:
+        raise HTTPException(status_code=400, detail="kind, topic_norm yoki syllabus_id+topic_code kerak.")
+    stmt = select(PreparedContent).where(PreparedContent.kind == kind_value, lookup)
     if kind_value not in SHARED_KINDS:
         stmt = stmt.where(PreparedContent.owner_key == auth.user.username)
     elif not _is_privileged(auth):
-        sid = _syllabus_id_from_norm(norm)
-        if not _teaches_syllabus(db, auth, sid):
-            stmt = stmt.where(PreparedContent.owner_key == auth.user.username)
+        taught = _taught_syllabus_ids(db, auth)
+        owner = PreparedContent.owner_key == auth.user.username
+        if taught:
+            stmt = stmt.where(or_(owner, PreparedContent.syllabus_id.in_(list(taught))))
+        else:
+            stmt = stmt.where(owner)
     item = db.execute(
         stmt.order_by(PreparedContent.created_at.desc()).limit(1)
     ).scalar_one_or_none()
