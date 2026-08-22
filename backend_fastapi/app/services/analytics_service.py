@@ -211,6 +211,17 @@ def create_student_attempt_from_submission(
     return attempt
 
 
+def _bounded_meta(raw: object, *, max_keys: int = 20, max_len: int = 512) -> dict:
+    """JSONB meta cheksiz o'smasin — mijoz yuboradigan qiymat ishonchsiz."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key, value in list(raw.items())[:max_keys]:
+        k = str(key)[:64]
+        out[k] = value[:max_len] if isinstance(value, str) else value
+    return out
+
+
 def attach_live_test_events(
     db: Session,
     *,
@@ -223,7 +234,9 @@ def attach_live_test_events(
     for raw in events[:200]:
         if not isinstance(raw, dict):
             continue
-        et = str(raw.get("event_type") or "").strip()
+        # Ustunlar String(64) — mijoz uzunroq qiymat yuborsa Postgres butun
+        # partiyani rad etardi (500). Yozishdan oldin qirqamiz.
+        et = str(raw.get("event_type") or "").strip()[:64]
         if not et:
             continue
         when_ms = raw.get("client_ts_ms")
@@ -237,14 +250,14 @@ def attach_live_test_events(
             StudentTestAttemptEvent(
                 attempt_id=None,
                 session_id=session_id,
-                student_id=student_id,
-                participant_key=participant_key,
+                student_id=student_id[:64],
+                participant_key=participant_key[:64],
                 event_type=et,
                 question_index=raw.get("question_index"),
                 option_index=raw.get("option_index"),
                 occurred_at=occurred,
                 client_ts_ms=when_ms,
-                meta=raw.get("meta") if isinstance(raw.get("meta"), dict) else {},
+                meta=_bounded_meta(raw.get("meta")),
             )
         )
         count += 1
