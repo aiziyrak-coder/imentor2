@@ -13,6 +13,7 @@ import {
 } from '../../utils/topicVideoApi';
 import { useUiText } from '../../i18n/useUiText';
 import { useYoutubeTitle } from '../../utils/youtubeTitle';
+import TopicUploadStatusList from './TopicUploadStatusList';
 
 function VideoRow({
   video,
@@ -301,6 +302,18 @@ export default function AdminTopicVideos() {
           {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
         </div>
       </div>
+
+      {selectedFan && topics.length > 0 && (
+        <TopicUploadStatusList
+          topics={topics}
+          rows={videos}
+          syllabusId={selectedFan.id}
+          subjectName={selectedFan.subject_name}
+          variantLabel={variantLabel}
+          selectedTopicCode={topicCode}
+          onPick={setTopicCode}
+        />
+      )}
 
       {/* Qidiruv + fan filtri */}
       {!loading && videos.length > 0 && (

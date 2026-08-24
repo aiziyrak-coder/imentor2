@@ -6,6 +6,7 @@ import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
 import { formatTopicDisplayLabel, formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import AdminSmartFilter from './AdminSmartFilter';
+import TopicUploadStatusList from './TopicUploadStatusList';
 import {
   deleteAdminHandout,
   fetchAdminHandouts,
@@ -560,6 +561,19 @@ export default function AdminTopicHandouts() {
         ) : null}
         {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
       </div>
+
+      {selectedFan && topics.length > 0 && (
+        <TopicUploadStatusList
+          topics={topics}
+          rows={handouts}
+          syllabusId={selectedFan.id}
+          subjectName={selectedFan.subject_name}
+          variantLabel={variantLabel}
+          selectedTopicCode={topicCode}
+          onPick={setTopicCode}
+          showLanguages
+        />
+      )}
 
       {!loading && handouts.length > 0 && (
         <AdminSmartFilter
