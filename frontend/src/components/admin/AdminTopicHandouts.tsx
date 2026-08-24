@@ -3,7 +3,12 @@ import { Check, FileText, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Tras
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
-import { buildTopicCoverage, subjectCoverage, topicHasMaterial } from '../../utils/topicCoverage';
+import {
+  buildTopicCoverage,
+  subjectLangDots,
+  topicLangDots,
+  HANDOUT_LANGS as COVERAGE_LANGS,
+} from '../../utils/topicCoverage';
 import { formatTopicDisplayLabel, formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import AdminSmartFilter from './AdminSmartFilter';
@@ -341,30 +346,34 @@ export default function AdminTopicHandouts() {
   /** Qaysi mavzuga tarqatma yuklangani — bir marta indekslanadi. */
   const coverage = useMemo(() => buildTopicCoverage(handouts), [handouts]);
 
-  /** Fan ro'yxati: barcha mavzusi to'la bo'lsa yashil, kamchiligi bo'lsa qizil. */
+  /** Chiroqchalar izohi: UZ / RU / EN. */
+  const dotLabels = useMemo(() => COVERAGE_LANGS.map((l) => l.toUpperCase()), []);
+
+  /** Fan ro'yxati: til yashil bo'lishi uchun HAMMA mavzusida o'sha til bo'lishi kerak. */
   const fanOptions = useMemo(
     () =>
       fansForDept.map((f) => {
         const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
-        const cov = subjectCoverage(coverage, f.id, tps);
         return {
           value: String(f.id),
           label: f.subject_name,
-          dot: tps.length === 0 ? undefined : cov.complete ? ('green' as const) : ('red' as const),
+          dots: subjectLangDots(coverage, f.id, tps),
+          dotLabels,
         };
       }),
-    [fansForDept, coverage],
+    [fansForDept, coverage, dotLabels],
   );
 
-  /** Mavzu ro'yxati: tarqatma bor bo'lsa yashil, yo'q bo'lsa qizil. */
+  /** Mavzu ro'yxati: har bir til uchun alohida chiroqcha. */
   const topicOptions = useMemo(
     () =>
       topics.map((tp) => ({
         value: tp.id,
         label: formatTopicDisplayLabel(tp.type, tp.id, tp.title, t),
-        dot: topicHasMaterial(coverage, fanId, tp.id) ? ('green' as const) : ('red' as const),
+        dots: topicLangDots(coverage, fanId, tp.id),
+        dotLabels,
       })),
-    [topics, coverage, fanId, t],
+    [topics, coverage, fanId, t, dotLabels],
   );
 
   const selectedTopic = topics.find((tp) => tp.id === topicCode) || null;
