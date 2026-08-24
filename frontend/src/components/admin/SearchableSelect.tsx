@@ -10,13 +10,16 @@ export type Option = {
   value: string;
   label: string;
   searchText?: string;
-  dot?: 'green' | 'red';
-  dots?: Array<'green' | 'red'>;
+  dot?: DotTone;
+  dots?: DotTone[];
   dotLabels?: string[];
 };
 
-const DOT_CLASS: Record<'green' | 'red', string> = {
+export type DotTone = 'green' | 'amber' | 'red';
+
+const DOT_CLASS: Record<DotTone, string> = {
   green: 'bg-emerald-500',
+  amber: 'bg-amber-500',
   red: 'bg-rose-500',
 };
 

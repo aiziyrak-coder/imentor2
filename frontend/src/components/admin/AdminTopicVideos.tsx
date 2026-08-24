@@ -3,7 +3,7 @@ import { Loader2, Plus, RefreshCw, Search, Trash2, Youtube } from 'lucide-react'
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
-import { buildTopicCoverage, subjectCoverage, topicHasMaterial } from '../../utils/topicCoverage';
+import { buildTopicCoverage, subjectDot, topicHasMaterial } from '../../utils/topicCoverage';
 import { formatTopicDisplayLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import {
@@ -129,16 +129,17 @@ export default function AdminTopicVideos() {
   /** Qaysi mavzuga video yuklangani — bir marta indekslanadi. */
   const coverage = useMemo(() => buildTopicCoverage(videos), [videos]);
 
-  /** Fan ro'yxati: barcha mavzusi to'la bo'lsa yashil, kamchiligi bo'lsa qizil. */
+  /** Fan ro'yxati: bitta chiroqcha (bo'sh / qisman / to'liq) va yonida hisob. */
   const fanOptions = useMemo(
     () =>
       fans.map((f) => {
         const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
-        const cov = subjectCoverage(coverage, f.id, tps);
+        const info = subjectDot(coverage, f.id, tps);
         return {
           value: String(f.id),
-          label: f.subject_name,
-          dot: tps.length === 0 ? undefined : cov.complete ? ('green' as const) : ('red' as const),
+          label: info ? `${f.subject_name} · ${info.done}/${info.total}` : f.subject_name,
+          searchText: f.subject_name,
+          dot: info?.dot,
         };
       }),
     [fans, coverage],

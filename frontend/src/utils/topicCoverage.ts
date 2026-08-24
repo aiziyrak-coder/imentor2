@@ -72,19 +72,24 @@ export function topicLangDots(
 }
 
 /**
- * Fan uchun uchta chiroqcha: til yashil bo'lishi uchun fanning HAMMA
- * mavzusida o'sha tilda material bo'lishi kerak — bitta mavzu yetishmasa
- * ham kamchilik ko'rinib tursin.
+ * Fan uchun bitta chiroqcha, uch holatli:
+ *   qizil  — hech bir mavzuga material yuklanmagan
+ *   sariq  — bir qismi yuklangan, kamchiligi bor
+ *   yashil — hamma mavzusi to'la
+ *
+ * Faqat qizil/yashil bo'lsa deyarli hamma fan qizil bo'lib qolardi (amalda
+ * bironta fan 100% to'ldirilmagan), shunda chiroqcha hech narsa ajratmaydi.
+ * Sariq holat "ish boshlangan" fanni "umuman tegilmagan" fandan farqlaydi.
  */
-export function subjectLangDots(
+export function subjectDot(
   coverage: TopicCoverage,
   syllabusId: number | string,
   topics: SyllabusTopic[],
-): Array<'green' | 'red'> | undefined {
+): { dot: 'green' | 'amber' | 'red'; done: number; total: number } | undefined {
   if (topics.length === 0) return undefined;
-  return HANDOUT_LANGS.map((l) =>
-    topics.every((tp) => topicHasLang(coverage, syllabusId, tp.id, l)) ? 'green' : 'red',
-  );
+  const { done, total } = subjectCoverage(coverage, syllabusId, topics);
+  const dot = done === 0 ? 'red' : done === total ? 'green' : 'amber';
+  return { dot, done, total };
 }
 
 /** Fan bo'yicha (tilsiz): nechta mavzuga yuklangan va jami nechta mavzu bor. */

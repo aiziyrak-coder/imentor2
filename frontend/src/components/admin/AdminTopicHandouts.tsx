@@ -5,7 +5,7 @@ import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
 import {
   buildTopicCoverage,
-  subjectLangDots,
+  subjectDot,
   topicLangDots,
   HANDOUT_LANGS as COVERAGE_LANGS,
 } from '../../utils/topicCoverage';
@@ -349,19 +349,20 @@ export default function AdminTopicHandouts() {
   /** Chiroqchalar izohi: UZ / RU / EN. */
   const dotLabels = useMemo(() => COVERAGE_LANGS.map((l) => l.toUpperCase()), []);
 
-  /** Fan ro'yxati: til yashil bo'lishi uchun HAMMA mavzusida o'sha til bo'lishi kerak. */
+  /** Fan ro'yxati: bitta chiroqcha (bo'sh / qisman / to'liq) va yonida hisob. */
   const fanOptions = useMemo(
     () =>
       fansForDept.map((f) => {
         const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
+        const info = subjectDot(coverage, f.id, tps);
         return {
           value: String(f.id),
-          label: f.subject_name,
-          dots: subjectLangDots(coverage, f.id, tps),
-          dotLabels,
+          label: info ? `${f.subject_name} · ${info.done}/${info.total}` : f.subject_name,
+          searchText: f.subject_name,
+          dot: info?.dot,
         };
       }),
-    [fansForDept, coverage, dotLabels],
+    [fansForDept, coverage],
   );
 
   /** Mavzu ro'yxati: har bir til uchun alohida chiroqcha. */
