@@ -1,7 +1,18 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, X } from 'lucide-react';
 
-export type Option = { value: string; label: string; searchText?: string };
+/** `dot` — yonidagi holat chiroqchasi: yashil = to'liq, qizil = kamchiligi bor. */
+export type Option = {
+  value: string;
+  label: string;
+  searchText?: string;
+  dot?: 'green' | 'red';
+};
+
+const DOT_CLASS: Record<'green' | 'red', string> = {
+  green: 'bg-emerald-500',
+  red: 'bg-rose-500',
+};
 
 /** Yozib qidirish + tanlash (typeahead) — native select o'rniga. */
 export default function SearchableSelect({
@@ -92,8 +103,16 @@ export default function SearchableSelect({
               setOpen(true);
             }
           }}
-          className="w-full h-11 pl-3 pr-16 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50"
+          className={`w-full h-11 pr-16 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50 ${
+            selected?.dot && !open ? 'pl-8' : 'pl-3'
+          }`}
         />
+        {selected?.dot && !open ? (
+          <span
+            className={`absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ${DOT_CLASS[selected.dot]}`}
+            aria-hidden
+          />
+        ) : null}
         <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
           {value && !disabled ? (
             <button
@@ -150,11 +169,17 @@ export default function SearchableSelect({
                     setOpen(false);
                     setQuery('');
                   }}
-                  className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 ${
+                  className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 flex items-center gap-2 ${
                     o.value === value ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-slate-700'
                   }`}
                 >
-                  {o.label}
+                  {o.dot ? (
+                    <span
+                      className={`shrink-0 w-2.5 h-2.5 rounded-full ${DOT_CLASS[o.dot]}`}
+                      aria-hidden
+                    />
+                  ) : null}
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 </button>
               </li>
             ))

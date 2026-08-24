@@ -3,6 +3,7 @@ import { Loader2, Plus, RefreshCw, Search, Trash2, Youtube } from 'lucide-react'
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
+import { buildTopicCoverage, subjectCoverage, topicHasMaterial } from '../../utils/topicCoverage';
 import { formatTopicDisplayLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import {
@@ -13,7 +14,6 @@ import {
 } from '../../utils/topicVideoApi';
 import { useUiText } from '../../i18n/useUiText';
 import { useYoutubeTitle } from '../../utils/youtubeTitle';
-import TopicUploadStatusList from './TopicUploadStatusList';
 
 function VideoRow({
   video,
@@ -125,6 +125,35 @@ export default function AdminTopicVideos() {
   useEffect(() => {
     setTopicCode('');
   }, [variantLabel]);
+
+  /** Qaysi mavzuga video yuklangani — bir marta indekslanadi. */
+  const coverage = useMemo(() => buildTopicCoverage(videos), [videos]);
+
+  /** Fan ro'yxati: barcha mavzusi to'la bo'lsa yashil, kamchiligi bo'lsa qizil. */
+  const fanOptions = useMemo(
+    () =>
+      fans.map((f) => {
+        const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
+        const cov = subjectCoverage(coverage, f.id, tps);
+        return {
+          value: String(f.id),
+          label: f.subject_name,
+          dot: tps.length === 0 ? undefined : cov.complete ? ('green' as const) : ('red' as const),
+        };
+      }),
+    [fans, coverage],
+  );
+
+  /** Mavzu ro'yxati: video bor bo'lsa yashil, yo'q bo'lsa qizil. */
+  const topicOptions = useMemo(
+    () =>
+      topics.map((tp) => ({
+        value: tp.id,
+        label: formatTopicDisplayLabel(tp.type, tp.id, tp.title, t),
+        dot: topicHasMaterial(coverage, fanId, tp.id) ? ('green' as const) : ('red' as const),
+      })),
+    [topics, coverage, fanId, t],
+  );
 
   const fanNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -248,24 +277,19 @@ export default function AdminTopicVideos() {
               disabled={adding}
               placeholder={t('admin.selectSubjectPlaceholder')}
               noMatchText={t('admin.noResults')}
-              options={fans.map((f) => ({ value: String(f.id), label: f.subject_name }))}
+              options={fanOptions}
             />
           </label>
           <label className="space-y-1">
             <span className="text-[12px] font-semibold text-slate-600">2 · {t('admin.topicLabel')}</span>
-            <select
+            <SearchableSelect
               value={topicCode}
-              onChange={(e) => setTopicCode(e.target.value)}
+              onChange={setTopicCode}
               disabled={adding || !fanId || topics.length === 0}
-              className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50"
-            >
-              <option value="">{t('admin.selectTopicPlaceholder')}</option>
-              {topics.map((tp) => (
-                <option key={`${tp.type}-${tp.id}`} value={tp.id}>
-                  {formatTopicDisplayLabel(tp.type, tp.id, tp.title, t)}
-                </option>
-              ))}
-            </select>
+              placeholder={t('admin.selectTopicPlaceholder')}
+              noMatchText={t('admin.noResults')}
+              options={topicOptions}
+            />
           </label>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -302,18 +326,6 @@ export default function AdminTopicVideos() {
           {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
         </div>
       </div>
-
-      {selectedFan && topics.length > 0 && (
-        <TopicUploadStatusList
-          topics={topics}
-          rows={videos}
-          syllabusId={selectedFan.id}
-          subjectName={selectedFan.subject_name}
-          variantLabel={variantLabel}
-          selectedTopicCode={topicCode}
-          onPick={setTopicCode}
-        />
-      )}
 
       {/* Qidiruv + fan filtri */}
       {!loading && videos.length > 0 && (

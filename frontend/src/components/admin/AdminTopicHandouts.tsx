@@ -3,10 +3,10 @@ import { Check, FileText, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Tras
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
+import { buildTopicCoverage, subjectCoverage, topicHasMaterial } from '../../utils/topicCoverage';
 import { formatTopicDisplayLabel, formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import AdminSmartFilter from './AdminSmartFilter';
-import TopicUploadStatusList from './TopicUploadStatusList';
 import {
   deleteAdminHandout,
   fetchAdminHandouts,
@@ -338,6 +338,35 @@ export default function AdminTopicHandouts() {
 
   const topicReady = Boolean(fanId && variantLabel && topicCode);
   const busy = savingAll || generating;
+  /** Qaysi mavzuga tarqatma yuklangani — bir marta indekslanadi. */
+  const coverage = useMemo(() => buildTopicCoverage(handouts), [handouts]);
+
+  /** Fan ro'yxati: barcha mavzusi to'la bo'lsa yashil, kamchiligi bo'lsa qizil. */
+  const fanOptions = useMemo(
+    () =>
+      fansForDept.map((f) => {
+        const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
+        const cov = subjectCoverage(coverage, f.id, tps);
+        return {
+          value: String(f.id),
+          label: f.subject_name,
+          dot: tps.length === 0 ? undefined : cov.complete ? ('green' as const) : ('red' as const),
+        };
+      }),
+    [fansForDept, coverage],
+  );
+
+  /** Mavzu ro'yxati: tarqatma bor bo'lsa yashil, yo'q bo'lsa qizil. */
+  const topicOptions = useMemo(
+    () =>
+      topics.map((tp) => ({
+        value: tp.id,
+        label: formatTopicDisplayLabel(tp.type, tp.id, tp.title, t),
+        dot: topicHasMaterial(coverage, fanId, tp.id) ? ('green' as const) : ('red' as const),
+      })),
+    [topics, coverage, fanId, t],
+  );
+
   const selectedTopic = topics.find((tp) => tp.id === topicCode) || null;
   const existingForSelected = useMemo(() => {
     if (!fanId || !topicCode) return [];
@@ -430,24 +459,19 @@ export default function AdminTopicHandouts() {
               disabled={busy || !deptId}
               placeholder={t('admin.selectSubjectPlaceholder')}
               noMatchText={t('admin.noResults')}
-              options={fansForDept.map((f) => ({ value: String(f.id), label: f.subject_name }))}
+              options={fanOptions}
             />
           </label>
           <label className="space-y-1">
             <span className="text-[12px] font-semibold text-slate-600">3 · {t('admin.topicLabel')}</span>
-            <select
+            <SearchableSelect
               value={topicCode}
-              onChange={(e) => setTopicCode(e.target.value)}
+              onChange={setTopicCode}
               disabled={busy || !fanId || topics.length === 0}
-              className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50"
-            >
-              <option value="">{t('admin.selectTopicPlaceholder')}</option>
-              {topics.map((tp) => (
-                <option key={`${tp.type}-${tp.id}`} value={tp.id}>
-                  {formatTopicDisplayLabel(tp.type, tp.id, tp.title, t)}
-                </option>
-              ))}
-            </select>
+              placeholder={t('admin.selectTopicPlaceholder')}
+              noMatchText={t('admin.noResults')}
+              options={topicOptions}
+            />
           </label>
         </div>
 
@@ -561,19 +585,6 @@ export default function AdminTopicHandouts() {
         ) : null}
         {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
       </div>
-
-      {selectedFan && topics.length > 0 && (
-        <TopicUploadStatusList
-          topics={topics}
-          rows={handouts}
-          syllabusId={selectedFan.id}
-          subjectName={selectedFan.subject_name}
-          variantLabel={variantLabel}
-          selectedTopicCode={topicCode}
-          onPick={setTopicCode}
-          showLanguages
-        />
-      )}
 
       {!loading && handouts.length > 0 && (
         <AdminSmartFilter
