@@ -349,12 +349,18 @@ export default function AdminTopicHandouts() {
   /** Chiroqchalar izohi: UZ / RU / EN. */
   const dotLabels = useMemo(() => COVERAGE_LANGS.map((l) => l.toUpperCase()), []);
 
-  /** Fan ro'yxati: bitta chiroqcha (bo'sh / qisman / to'liq) va yonida hisob. */
+  /**
+   * Fan ro'yxati: hisob FAQAT amaliy mashg'ulotlar bo'yicha — tarqatma
+   * boshqa tur mavzularga yuklanmaydi, ularni hisobga olsak fan hech qachon
+   * to'liq ko'rinmasdi.
+   */
   const fanOptions = useMemo(
     () =>
       fansForDept.map((f) => {
-        const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
-        const info = subjectDot(coverage, f.id, tps);
+        const practicals = (resolveSyllabusVariants(f)[0]?.topics ?? []).filter(
+          (tp) => tp.type === 'practical',
+        );
+        const info = subjectDot(coverage, f.id, practicals);
         return {
           value: String(f.id),
           label: info ? `${f.subject_name} · ${info.done}/${info.total}` : f.subject_name,
@@ -365,13 +371,13 @@ export default function AdminTopicHandouts() {
     [fansForDept, coverage],
   );
 
-  /** Mavzu ro'yxati: har bir til uchun alohida chiroqcha. */
+  /** Mavzu ro'yxati: chiroqcha faqat amaliy mashg'ulotlarda. */
   const topicOptions = useMemo(
     () =>
       topics.map((tp) => ({
         value: tp.id,
         label: formatTopicDisplayLabel(tp.type, tp.id, tp.title, t),
-        dots: topicLangDots(coverage, fanId, tp.id),
+        dots: tp.type === 'practical' ? topicLangDots(coverage, fanId, tp.id) : undefined,
         dotLabels,
       })),
     [topics, coverage, fanId, t, dotLabels],
