@@ -45,6 +45,19 @@ def _syllabus_id_from_norm(topic_norm: str) -> int | None:
     return sid or None
 
 
+def _existing_syllabus_id(db: Session, sid: int | None) -> int | None:
+    """Sillabus katalogi qayta import qilinganda eski id'lar yo'qoladi, lekin
+    o'qituvchining brauzeridagi `topic_norm` hamon eski id bilan keladi.
+    O'sha id'ni tekshirmasdan yozsak FK buziladi va tayyor bo'lgan test/keys
+    butunlay yo'qoladi. Topilmasa NULL qoldiramiz — ustun nullable va
+    yozuvlarning katta qismi allaqachon shunday saqlangan."""
+    if not sid:
+        return None
+    return db.execute(
+        select(CourseSyllabus.id).where(CourseSyllabus.id == sid)
+    ).scalar_one_or_none()
+
+
 def _taught_syllabus_ids(db: Session, auth: AuthContext) -> set[int]:
     rows = db.execute(
         select(StaffCourseSelection.syllabus_id).where(
@@ -321,7 +334,9 @@ def create_prepared_content(
         variant_label=variant_label[:128],
         topic_code=topic_code[:32],
         syllabus_id=(
-            syllabus.id if syllabus else _syllabus_id_from_norm(topic_norm)
+            syllabus.id
+            if syllabus
+            else _existing_syllabus_id(db, _syllabus_id_from_norm(topic_norm))
         ),
         payload=payload.payload,
         created_at=dt.datetime.now(dt.timezone.utc),
