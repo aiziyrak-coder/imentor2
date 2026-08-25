@@ -12,6 +12,7 @@ import {
 import { formatTopicDisplayLabel, formatTopicLessonLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import AdminSmartFilter from './AdminSmartFilter';
+import HandoutGapsTable from './HandoutGapsTable';
 import {
   deleteAdminHandout,
   fetchAdminHandouts,
@@ -76,6 +77,8 @@ export default function AdminTopicHandouts() {
   const [genProgress, setGenProgress] = useState('');
 
   const [search, setSearch] = useState('');
+  const [listMode, setListMode] = useState<'uploaded' | 'gaps'>('uploaded');
+  const [listPage, setListPage] = useState(1);
   const [deptFilter, setDeptFilter] = useState('');
   const [fanFilter, setFanFilter] = useState('');
   const [langFilter, setLangFilter] = useState('');
@@ -238,7 +241,10 @@ export default function AdminTopicHandouts() {
       const code = (parts[2] || '').toUpperCase();
       const fanName = fanNameById.get(syllabusId) || t('catalog.otherTopics');
       const key = h.topic_norm || `${fanName}||${h.topic}`;
-      const label = code ? `${code} · ${h.topic}` : h.topic;
+      // Ochiladigan ro'yxatda "Amaliy mashg'ulot 3-mavzu" deb yozilgani uchun
+      // bu yerda ham xuddi shunday bo'lsin — "A3" boshqa narsadek ko'rinardi.
+      const kind = topicLessonKind(h.topic_norm || '') || 'practical';
+      const label = code ? `${formatTopicLessonLabel(kind, code, t)} · ${h.topic}` : h.topic;
       if (!map.has(key)) map.set(key, { fanName, topic: label, rows: [] });
       map.get(key)!.rows.push(h);
     }
@@ -246,6 +252,17 @@ export default function AdminTopicHandouts() {
       .map(([key, g]) => ({ key, ...g }))
       .sort((a, b) => a.fanName.localeCompare(b.fanName) || a.topic.localeCompare(b.topic));
   }, [filtered, fanNameById, t]);
+
+  /** Ro'yxat 20 tadan bo'linadi — 937 ta mavzuni bir sahifada chizish
+   *  brauzerni ham, o'qiyotgan odamni ham qiynardi. */
+  const LIST_PAGE_SIZE = 20;
+  const listTotalPages = Math.max(1, Math.ceil(grouped.length / LIST_PAGE_SIZE));
+  const pagedGroups = grouped.slice((listPage - 1) * LIST_PAGE_SIZE, listPage * LIST_PAGE_SIZE);
+
+  // Filtr o'zgarsa birinchi sahifaga qaytamiz — aks holda bo'sh sahifada qolinadi.
+  useEffect(() => {
+    setListPage(1);
+  }, [search, deptFilter, fanFilter, langFilter, kindFilter, lessonFilter]);
 
   const pendingCount = HANDOUT_LANGS.reduce((n, lang) => n + filesByLang[lang].length, 0);
 
@@ -602,7 +619,44 @@ export default function AdminTopicHandouts() {
         {error && <p className="text-[13px] text-rose-600 font-medium">{error}</p>}
       </div>
 
-      {!loading && handouts.length > 0 && (
+      {!loading && (
+        <div className="flex gap-2">
+          {(
+            [
+              ['uploaded', t('admin.gapsTabUploaded')],
+              ['gaps', t('admin.gapsTabMissing')],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setListMode(id)}
+              className={`rounded-xl px-4 py-2 text-[13px] font-semibold transition-colors ${
+                listMode === id
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'bg-white/80 border border-black/10 text-black/70'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!loading && listMode === 'gaps' && (
+        <HandoutGapsTable
+          fans={fans}
+          rows={handouts}
+          onPick={(fid, code) => {
+            setFanId(String(fid));
+            setTopicCode(code);
+            setListMode('uploaded');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
+
+      {!loading && listMode === 'uploaded' && handouts.length > 0 && (
         <AdminSmartFilter
           search={search}
           onSearch={setSearch}
@@ -686,7 +740,7 @@ export default function AdminTopicHandouts() {
       )}
 
       {/* Ro'yxat */}
-      {loading ? (
+      {listMode === 'gaps' ? null : loading ? (
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-indigo-600" size={40} />
         </div>
@@ -700,7 +754,7 @@ export default function AdminTopicHandouts() {
         </div>
       ) : (
         <ul className="space-y-3">
-          {grouped.map((g) => (
+          {pagedGroups.map((g) => (
             <li key={g.key} className="ios-glass rounded-2xl border border-white/70 overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60">
                 <span className="font-bold text-slate-900">{g.topic}</span>
@@ -742,6 +796,45 @@ export default function AdminTopicHandouts() {
             </li>
           ))}
         </ul>
+      )}
+
+      {listMode === 'uploaded' && grouped.length > LIST_PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[12px] text-black/50 tabular-nums">
+            {t('admin.gapsPageInfo', {
+              from: (listPage - 1) * LIST_PAGE_SIZE + 1,
+              to: Math.min(listPage * LIST_PAGE_SIZE, grouped.length),
+              total: grouped.length,
+            })}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setListPage((p) => Math.max(1, p - 1));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              disabled={listPage <= 1}
+              className="px-3 h-9 rounded-xl border border-black/10 bg-white text-[13px] font-semibold disabled:opacity-40"
+            >
+              ‹
+            </button>
+            <span className="text-[13px] font-semibold text-black/70 tabular-nums">
+              {listPage} / {listTotalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setListPage((p) => Math.min(listTotalPages, p + 1));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              disabled={listPage >= listTotalPages}
+              className="px-3 h-9 rounded-xl border border-black/10 bg-white text-[13px] font-semibold disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
