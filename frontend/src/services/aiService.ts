@@ -97,6 +97,18 @@ function sysRole(domain: SubjectDomain): string {
 // bular ko'pincha AI tomonidan o'ylab topiladi (haqiqiy maqolaga bog'lanmasligi mumkin). Kitob
 // konteksti bo'lsa — manba matn ichida (Manba: kitob, sahifa-bet) ko'rinishida ko'rsatiladi;
 // bo'lmasa — hech qanday manba/havola ko'rsatilmaydi, faqat mazmun.
+/** Test va keys uchun murakkablik chegarasi — bitta faktni eslash bilan
+ *  yechiladigan savol oliy ta\'lim darajasiga mos kelmaydi. */
+const DEPTH_RULE =
+  'MURAKKABLIK (majburiy): bitta faktni eslash bilan yechiladigan savol yoki keys YOZILMASIN. ' +
+  'Har biri kamida IKKI bosqichli fikrlash talab qilsin — avval berilgan ma\'lumotni izohlash, ' +
+  'so\'ng undan xulosa chiqarish. Berilgan raqam yoki belgi javobni to\'g\'ridan-to\'g\'ri ' +
+  'aytib qo\'ymasin: bir nechta ma\'lumot birlashtirilgandagina xulosa chiqsin. Chalg\'ituvchi ' +
+  'variantlar tasodifiy emas, HAR BIRI real va ishonarli muqobil bo\'lsin — mavzuni yarim ' +
+  'bilgan talaba aynan o\'shani tanlaydigan darajada. Ochiq-oydin noto\'g\'ri yoki kulgili ' +
+  'variant TAQIQLANADI. Izohda nafaqat to\'g\'ri javob asoslansin, balki har bir noto\'g\'ri ' +
+  'variant NEGA jalb qilishi va NEGA baribir noto\'g\'ri ekani ham ochib berilsin.';
+
 const NO_EXTERNAL_REFS_JSON_RULE_BOOK =
   'MAJBURIY: bu fan uchun rasmiy darslik (kitob) manba sifatida berilgan. Tashqi adabiyot/DOI/PubMed ' +
   'havolalari QO\'SHMANG — "references" maydonini bo\'sh massiv [] qoldiring (manbani tizim ' +
@@ -109,13 +121,12 @@ const NO_EXTERNAL_REFS_JSON_RULE_NOBOOK =
   'mazmunning o\'ziga tayanib yozing.';
 const NO_EXTERNAL_REFS_TEXT_RULE_BOOK =
   'MAJBURIY: bu fan uchun rasmiy darslik (kitob) manba sifatida berilgan. Tashqi (DOI/PubMed/veb) ' +
-  'havolalar QO\'SHMANG. Har bir asosiy bo\'limda kamida 1 marta "(Manba: <HAQIQIY kitob nomi>, ' +
-  '<HAQIQIY sahifa raqami>)" ko\'rsating — bu FORMAT namunasi, matndagi "<...>" belgilarini berilgan ' +
-  'darslik parchasidagi HAQIQIY kitob nomi va sahifa raqami bilan almashtiring. "kitob nomi", ' +
-  '"sahifa-bet" kabi TO\'LDIRILMAGAN/umumiy so\'zlarni hech qachon o\'zgarishsiz qoldirmang — agar ' +
-  'aniq kitob nomi/sahifa nomalum bo\'lsa, manba qatorini butunlay tashlab keting. Oxirida qisqa ' +
-  '"## Manbalar" bo\'limida FAQAT berilgan darsliklardan foydalanilgan kitoblar ro\'yxatini yozing ' +
-  '(tashqi adabiyot qo\'shmang).';
+  'havolalar QO\'SHMANG. Har bir darslik parchasi "[Manba: kitob nomi, N-bet]" sarlavhasi bilan ' +
+  'beriladi — kitob nomi va sahifa raqami sizda ALLAQACHON bor, ularni o\'ylab topish shart emas. ' +
+  'HAR BIR asosiy bo\'limda kamida bitta "(Manba: kitob nomi, N-bet)" ko\'rsating va u yerga ' +
+  'parcha sarlavhasidagi AYNAN o\'sha nom va raqamni ko\'chiring. Manbani tushirib qoldirish yoki ' +
+  'to\'ldirilmagan shablon qoldirish XATO. Oxirida qisqa "## Manbalar" bo\'limida FAQAT shu ' +
+  'parchalarda uchragan kitoblar ro\'yxatini yozing (tashqi adabiyot qo\'shmang).';
 const NO_EXTERNAL_REFS_TEXT_RULE_NOBOOK =
   'MAJBURIY: oxirida "## Foydalanilgan adabiyotlar" / "## Manbalar" bo\'limini YOZMANG, tashqi ' +
   '(DOI/PubMed/veb) havolalar yoki o\'ylab topilgan manbalar qo\'shmang — hech qanday link/manba ' +
@@ -702,7 +713,7 @@ async function generateSingleCaseQuestion(
         (domain === 'academic'
           ? 'Oliy ta\'lim AMALIY keys, klinik bemor EMAS. '
           : 'Oliy tibbiy ta\'lim klinik keysi (KROK / rezidentura), maktab/oson appenditsit EMAS. ') +
-        `${GENERATION_UNIQUENESS_RULE} Return ONLY valid JSON object with EXACTLY ` +
+        `${GENERATION_UNIQUENESS_RULE} ${DEPTH_RULE} Return ONLY valid JSON object with EXACTLY ` +
         'these keys: {"patient","complaints","history","lifestyle","examination","labs",' +
         '"diagnosis","differential","investigations","management","recommendations"}. ' +
         (domain === 'academic'
@@ -1795,7 +1806,7 @@ export const aiService = {
           (domain === 'academic'
             ? 'Oliy ta\'lim testlari SHU FAN bo\'yicha. Klinik bemor, KROK/USMLE vignette YO\'Q. '
             : 'Oliy tibbiy ta\'lim testlari (KROK / USMLE Step 2 CK), maktab/kollej emas. ') +
-          `${GENERATION_UNIQUENESS_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
+          `${GENERATION_UNIQUENESS_RULE} ${DEPTH_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
           `${requestedCount} ta test JSON: ` +
           `{topic, references:[], questions:[{question, options[5], correctOptionIndex, explanation, references:[]}]}. ` +
           `${testExplanationInstruction(difficulty, domain)} ` +
@@ -1954,10 +1965,10 @@ export const aiService = {
           'tushuntiring, ta\'rif va misollarni ochib yozing. ' +
           (bookContext
             ? 'Berilgan darslik parchalaridagi BARCHA tegishli tafsilotlardan to\'liq foydalaning — ' +
-              'qisqartirmasdan, kengaytirib tushuntiring. HAR BIR ## bo\'limda kamida bitta ' +
-              '"(Manba: <HAQIQIY kitob nomi>, <HAQIQIY sahifa raqami>)" ko\'rsating — "<...>" ' +
-              'belgilarini haqiqiy nom/raqam bilan almashtiring, "kitob nomi"/"sahifa-bet" so\'zlarini ' +
-              'o\'zgarishsiz qoldirmang; aniq bilmasangiz manba qatorini butunlay tashlab keting.'
+              'qisqartirmasdan, kengaytirib tushuntiring. Har bir parcha "[Manba: kitob nomi, N-bet]" ' +
+              'sarlavhasi bilan keladi — nom va sahifa sizda bor. HAR BIR ## bo\'limda kamida bitta ' +
+              '"(Manba: kitob nomi, N-bet)" yozing va u yerga o\'sha sarlavhadagi AYNAN o\'sha nom ' +
+              'bilan raqamni ko\'chiring. Manbasiz bo\'lim qoldirmang.'
             : 'Tashqi havola yoki o\'ylab topilgan manba qo\'shmang.'
           ) + ` ${textReferencesRule(Boolean(bookContext), language)} Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
