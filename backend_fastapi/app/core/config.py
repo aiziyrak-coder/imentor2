@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     online_test_api_base_url: str = ""
     online_test_api_fallback_url: str = "https://online-imtixon.uz"
     online_test_consumer_api_key: str = ""
+    # OnlineTest ilovasi Django `ALLOWED_HOSTS` bilan himoyalangan va u yerda
+    # konteyner nomi ro'yxatda yo'q. To'g'ridan-to'g'ri konteynerga murojaat
+    # qilganda Host sarlavhasini ruxsat etilgan qiymatga almashtiramiz —
+    # aks holda ilova 400 qaytaradi.
+    online_test_host_header: str = ""
 
     django_media_root: str = ""
     django_media_url: str = "/media/"

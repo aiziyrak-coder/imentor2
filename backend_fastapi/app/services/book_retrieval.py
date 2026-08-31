@@ -149,6 +149,51 @@ def retrieve_book_context_many(
     return out
 
 
+def retrieve_book_context_by_department_id(
+    db: Session,
+    department_id: int,
+    query_text: str,
+    *,
+    top_k: int = 12,
+) -> list[dict]:
+    """Kafedra id bo'yicha to'g'ridan-to'g'ri RAG (subject_code shart emas)."""
+    try:
+        dept_id = int(department_id)
+    except (TypeError, ValueError):
+        return []
+    if dept_id <= 0:
+        return []
+    q = str(query_text or "").strip()[:2000]
+    if not q:
+        q = "asosiy tushunchalar diagnostika davolash"
+
+    settings = get_settings()
+    api_key = (settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")).strip()
+    if not api_key:
+        logger.warning("book RAG: OPENAI_API_KEY yo'q")
+        return []
+
+    try:
+        vectors = create_embeddings(api_key, [q[:_EMBED_TEXT_MAX] or "."])
+    except OpenAiClientError as e:
+        logger.warning("book RAG embedding xato: %s", e)
+        return []
+    if not vectors:
+        return []
+    vec = vectors[0]
+    chunks = (
+        db.execute(
+            select(BookChunk)
+            .where(BookChunk.department_id == dept_id)
+            .order_by(BookChunk.embedding.cosine_distance(vec))
+            .limit(top_k)
+        )
+        .scalars()
+        .all()
+    )
+    return [_chunk_to_dict(c) for c in chunks]
+
+
 def format_book_context_message(chunks: list[dict]) -> str | None:
     if not chunks:
         return None

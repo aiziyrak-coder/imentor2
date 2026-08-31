@@ -38,6 +38,7 @@ x-backend-env: &backend-env
   ONLINE_TEST_API_BASE_URL: ${ONLINE_TEST_API_BASE_URL:-}
   ONLINE_TEST_API_FALLBACK_URL: ${ONLINE_TEST_API_FALLBACK_URL:-https://online-imtixon.uz}
   ONLINE_TEST_CONSUMER_API_KEY: ${ONLINE_TEST_CONSUMER_API_KEY:-}
+  ONLINE_TEST_HOST_HEADER: ${ONLINE_TEST_HOST_HEADER:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ADMIN_PHONE: ${ADMIN_PHONE:-998907863888}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -56,6 +57,10 @@ x-backend-env: &backend-env
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    # Backend 4 ishchi x (pool 8 + overflow 12) = 80 ulanish ochishi mumkin,
+    # standart chegara esa 100 — zaxira deyarli yo'q edi va ishchilar soni
+    # oshirilsa API butunlay yiqilardi. 94 GB xotirada 200 ulanish arzon.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-imentor}
       POSTGRES_USER: ${POSTGRES_USER:-imentor}
@@ -172,7 +177,7 @@ services:
       # Worker soni oshirilsa, app/core/db.py dagi pool qiymatlarini ham
       # qayta hisoblang: workers x (pool_size + max_overflow) < max_connections.
       GUNICORN_WORKERS: ${GUNICORN_WORKERS_FASTAPI:-4}
-      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT_FASTAPI:-300}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT_FASTAPI:-600}
       APP_THREAD_LIMIT: ${APP_THREAD_LIMIT:-48}
     # appi.online-imtixon.uz DNS → 87.192.230.208 (tashqi IP). Server ichidan
     # shu IP:443 ga NAT loopback yo'q — faqat LAN IP orqali nginx ishlaydi.
@@ -223,6 +228,9 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+    volumes:
+      # Fayllarni nginx to'g'ridan-to'g'ri beradi — backend oqimi band bo'lmasin.
+      - media_data:/var/www/media:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/api/health/"]
       interval: 15s

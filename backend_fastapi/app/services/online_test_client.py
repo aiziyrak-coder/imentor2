@@ -31,6 +31,12 @@ def _online_test_base_urls() -> list[str]:
     return urls
 
 
+def _host_header() -> dict[str, str]:
+    """Sozlangan bo'lsa, Host sarlavhasini majburan belgilaydi."""
+    value = (get_settings().online_test_host_header or "").strip()
+    return {"Host": value} if value else {}
+
+
 def _try_bases(
     call: Callable[[str], tuple[requests.Response, dict[str, Any] | None]],
     *,
@@ -82,7 +88,7 @@ def online_test_login(student_id: str, password: str, *, timeout: float = 12.0) 
             url,
             json={"id": student_id, "password": password},
             timeout=timeout,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            headers={"Accept": "application/json", "Content-Type": "application/json", **_host_header()},
         )
         try:
             body = res.json() if res.content else {}
@@ -124,7 +130,11 @@ def fetch_academic_catalog(*, timeout: float = 12.0, use_cache: bool = True) -> 
 
     def _call(base: str) -> tuple[requests.Response, dict[str, Any] | None]:
         url = urljoin(base + "/", "api/public/academic-catalog/")
-        res = requests.get(url, timeout=timeout, headers={"Accept": "application/json", "X-Api-Key": api_key})
+        res = requests.get(
+            url,
+            timeout=timeout,
+            headers={"Accept": "application/json", "X-Api-Key": api_key, **_host_header()},
+        )
         try:
             body = res.json() if res.content else {}
         except ValueError:
