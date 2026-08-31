@@ -60,6 +60,9 @@ services:
     # Backend 4 ishchi x (pool 8 + overflow 12) = 80 ulanish ochishi mumkin,
     # standart chegara esa 100 — zaxira deyarli yo'q edi va ishchilar soni
     # oshirilsa API butunlay yiqilardi. 94 GB xotirada 200 ulanish arzon.
+    # Standart 64 MB parallel so-rovlar va indeks qurish uchun juda kam —
+    # vektor qidiruvi shu sababli sekin ishlardi.
+    shm_size: 2gb
     command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-imentor}
