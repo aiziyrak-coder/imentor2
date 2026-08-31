@@ -145,6 +145,14 @@ function addSlideImage(
   }
 }
 
+/**
+ * Bulletlar. Ilgari har biri raqamli ko\'k doira bilan chizilardi — tartib
+ * bo\'lmagan ro\'yxatda ham raqam turardi va slayd havaskorona ko\'rinardi.
+ * Endi nozik mis rangli belgi va ajratuvchi chiziq ishlatiladi.
+ *
+ * Shrift ham kattalashtirildi: proyektorda 14-16pt matn orqa qatordan
+ * o\'qilmaydi, shuning uchun asos 19pt va pastki chegara 15pt.
+ */
 function addNumberedBullets(
   s: PptxSlide,
   bullets: string[],
@@ -152,52 +160,87 @@ function addNumberedBullets(
 ): void {
   const items = bullets.slice(0, 5);
   if (!items.length) return;
-  // Bo‘sh joy qolmasin: kam bullet → kattaroq qator balandligi va shrift
-  const rowH = Math.min(1.35, Math.max(0.95, box.h / items.length));
-  const baseFs = items.length <= 3 ? 16 : items.length === 4 ? 15 : 14;
+  const rowH = Math.min(1.5, Math.max(1.0, box.h / items.length));
+  const baseFs = items.length <= 3 ? 21 : items.length === 4 ? 20 : 19;
   items.forEach((text, i) => {
     const y = box.y + i * rowH;
     if (y + 0.4 > box.y + box.h) return;
-    s.addShape('ellipse', {
+    // Kichik mis to'rtburchak — raqamsiz, xotirjam urg'u.
+    s.addShape('rect', {
       x: box.x,
-      y: y + 0.12,
-      w: 0.4,
-      h: 0.4,
-      fill: { color: C.primary },
+      y: y + 0.26,
+      w: 0.14,
+      h: 0.14,
+      fill: { color: C.accent },
       line: { type: 'none' },
     });
-    s.addText(String(i + 1), {
-      x: box.x,
-      y: y + 0.12,
-      w: 0.4,
-      h: 0.4,
-      fontSize: 13,
-      bold: true,
-      color: C.textLight,
-      align: 'center',
-      valign: 'middle',
-    });
-    // Tor ustunda (rasmli layout) bir xil matn ko'proq qator egallaydi —
-    // shuning uchun "sig'ish chegarasi" quti kengligiga bog'liq.
-    const softMaxChars = Math.max(60, Math.round(box.w * 22));
-    const fs = autofitFontSize(text, {
-      base: baseFs,
-      min: 11,
-      softMaxChars,
-    });
+    // Qatorlar orasidagi ingichka ajratuvchi — birinchisidan tashqari.
+    if (i > 0) {
+      s.addShape('rect', {
+        x: box.x,
+        y: y - 0.04,
+        w: box.w - 0.1,
+        h: 0.008,
+        fill: { color: C.soft },
+        line: { type: 'none' },
+      });
+    }
+    const softMaxChars = Math.max(52, Math.round(box.w * 17));
+    const fs = autofitFontSize(text, { base: baseFs, min: 15, softMaxChars });
     s.addText(text, {
-      x: box.x + 0.55,
-      y: y + 0.06,
-      w: box.w - 0.6,
-      h: rowH - 0.12,
+      x: box.x + 0.42,
+      y: y + 0.1,
+      w: box.w - 0.5,
+      h: rowH - 0.18,
       fontSize: fs,
       color: C.textDark,
       fontFace: F.body,
+      lineSpacingMultiple: 1.08,
       valign: 'top',
-      // Oxirgi himoya: hisob-kitob adashsa ham matn qutidan toshib ketmasin.
       fit: 'shrink',
     });
   });
+}
+
+/** Sarlavha + ostidagi qisqa mis chiziq — slaydga aniq boshlanish beradi. */
+function addSlideTitle(
+  s: PptxSlide,
+  title: string,
+  subtitle: string | undefined,
+  w: number,
+): number {
+  s.addText(title, {
+    x: M,
+    y: 0.72,
+    w,
+    h: 0.78,
+    fontSize: autofitFontSize(title, { base: 30, min: 20, softMaxChars: 46 }),
+    bold: true,
+    color: C.primary,
+    fontFace: F.heading,
+    valign: 'top',
+  });
+  s.addShape('rect', {
+    x: M,
+    y: 1.54,
+    w: 1.1,
+    h: 0.045,
+    fill: { color: C.accent },
+    line: { type: 'none' },
+  });
+  const sub = (subtitle || '').trim();
+  if (!sub) return 1.85;
+  s.addText(sub, {
+    x: M,
+    y: 1.68,
+    w,
+    h: 0.42,
+    fontSize: 15,
+    color: C.muted,
+    fontFace: F.body,
+    italic: true,
+  });
+  return 2.22;
 }
 
 /* ---------- per-type layouts ---------- */
@@ -336,21 +379,12 @@ function layoutContentBullets(
   addHeaderBadge(s, meta);
   const hasImage = Boolean(slide.imageUrl);
   const titleW = hasImage ? 7.2 : 12.2;
-  s.addText(slide.title, {
-    x: M,
-    y: 0.7,
-    w: titleW,
-    h: 0.55,
-    fontSize: autofitFontSize(slide.title, { base: 22, min: 14, softMaxChars: 40 }),
-    bold: true,
-    color: C.primary,
-    fontFace: F.heading,
-  });
+  const bodyTop = addSlideTitle(s, slide.title, slide.subtitle, titleW);
   addNumberedBullets(s, slide.body.bullets || slidePreviewBullets(slide), {
     x: M,
-    y: 1.4,
+    y: bodyTop,
     w: hasImage ? 6.8 : 12.2,
-    h: 5.25,
+    h: 6.65 - bodyTop,
   });
   if (hasImage) {
     addSlideImage(s, slide, 7.7, 0.85, 5.0, 5.7);
