@@ -173,9 +173,10 @@ function addBleedImage(
       x, y, w, h,
       sizing: { type: 'cover', w, h },
     });
-    // Matn tomonidagi qirrada nozik mis chiziq - rasm va matnni ajratadi.
+    // Mis chiziq matnga qaragan qirrada turadi: `edge` - chiziq qaysi
+    // tomonda ekanini bildiradi (rasm qaysi tomonda emas).
     s.addShape('rect', {
-      x: edge === 'left' ? x + w - 0.055 : x,
+      x: edge === 'left' ? x : x + w - 0.055,
       y, w: 0.055, h,
       fill: { color: C.accent }, line: { type: 'none' },
     });
@@ -198,6 +199,30 @@ function addBleedImage(
 }
 
 /**
+ * Matn berilgan qutiga sig\'adigan eng katta shriftni topadi.
+ *
+ * `fit: 'shrink'` PowerPoint ochilganda qo\'llanadi, lekin PDF ga
+ * o\'girishda va boshqa ko\'ruvchilarda e\'tiborga olinmaydi - shuning uchun
+ * o\'lcham shu yerda oldindan hisoblanadi. Belgi kengligi taxminiy
+ * (o\'rtacha 0.5 x shrift), lekin qator sonini baholash uchun yetarli.
+ */
+function fitTextSize(
+  text: string,
+  w: number,
+  h: number,
+  base: number,
+  min: number,
+): number {
+  const chars = Math.max(1, text.trim().length);
+  for (let fs = base; fs > min; fs -= 1) {
+    const perLine = Math.max(12, Math.floor((w * 72) / (fs * 0.5)));
+    const lines = Math.ceil(chars / perLine);
+    if (lines * fs * 1.22 <= h * 72) return fs;
+  }
+  return min;
+}
+
+/**
  * Bulletlar. Ilgari har biri raqamli ko\'k doira bilan chizilardi — tartib
  * bo\'lmagan ro\'yxatda ham raqam turardi va slayd havaskorona ko\'rinardi.
  * Endi nozik mis rangli belgi va ajratuvchi chiziq ishlatiladi.
@@ -212,21 +237,39 @@ function addNumberedBullets(
 ): void {
   const items = bullets.slice(0, 5);
   if (!items.length) return;
-  const rowH = Math.min(1.5, Math.max(1.0, box.h / items.length));
+  // Qatorlar quti balandligiga ANIQ bo\'linadi. Ilgari qat\'iy 1.0-1.5" ishlatilardi
+  // va beshta uzun bullet slayd tagidan, kolontitul ustiga chiqib ketardi.
+  const rowH = Math.min(1.5, box.h / items.length);
+  const textW = box.w - 0.5;
   const baseFs = items.length <= 3 ? 21 : items.length === 4 ? 20 : 19;
+  // Bitta ro\'yxatdagi bandlar bir xil o\'lchamda bo\'lsin: har birini alohida
+  // moslashtirsak qisqa band kattaroq chiqib, ro\'yxat notekis ko\'rinardi.
+  const textH = rowH - 0.2;
+  const listFs = items.reduce(
+    (fs, text) =>
+      Math.min(
+        fs,
+        autofitFontSize(text, {
+          base: baseFs,
+          min: 14,
+          softMaxChars: Math.max(52, Math.round(box.w * 17)),
+        }),
+        fitTextSize(text, textW, textH, baseFs, 14),
+      ),
+    baseFs,
+  );
   items.forEach((text, i) => {
     const y = box.y + i * rowH;
-    if (y + 0.4 > box.y + box.h) return;
-    // Kichik mis to'rtburchak — raqamsiz, xotirjam urg'u.
+    // Kichik mis to\'rtburchak - raqamsiz, xotirjam urg\'u.
     s.addShape('rect', {
       x: box.x,
-      y: y + 0.26,
+      y: y + Math.min(0.26, rowH * 0.24),
       w: 0.14,
       h: 0.14,
       fill: { color: C.accent },
       line: { type: 'none' },
     });
-    // Qatorlar orasidagi ingichka ajratuvchi — birinchisidan tashqari.
+    // Qatorlar orasidagi ingichka ajratuvchi - birinchisidan tashqari.
     if (i > 0) {
       s.addShape('rect', {
         x: box.x,
@@ -237,14 +280,12 @@ function addNumberedBullets(
         line: { type: 'none' },
       });
     }
-    const softMaxChars = Math.max(52, Math.round(box.w * 17));
-    const fs = autofitFontSize(text, { base: baseFs, min: 15, softMaxChars });
     s.addText(text, {
       x: box.x + 0.42,
-      y: y + 0.1,
-      w: box.w - 0.5,
-      h: rowH - 0.18,
-      fontSize: fs,
+      y: y + 0.08,
+      w: textW,
+      h: textH,
+      fontSize: listFs,
       color: C.textDark,
       fontFace: F.body,
       lineSpacingMultiple: 1.08,
@@ -297,6 +338,11 @@ function addSlideTitle(
 
 /* ---------- per-type layouts ---------- */
 
+/**
+ * Sarlavha slaydi. Pastki yarmi butunlay bo\'sh edi; endi o\'ng tomonda
+ * fon rangidan bir pog\'ona ochroq tibbiy xoch turadi - suv belgisi kabi,
+ * matnni bosmaydi, lekin slaydni tibbiy ta\'lim taqdimotiga o\'xshatadi.
+ */
 function layoutTitle(
   s: PptxSlide,
   slide: ContentSlide,
@@ -305,8 +351,17 @@ function layoutTitle(
   page: number,
   total: number,
 ): void {
-  // Yaxlit bitta fon — ikkinchi "bo‘lak" band yo‘q (BUG 1).
   s.background = { color: C.bgDark };
+  // Suv belgisi - matndan OLDIN chiziladi, aks holda ustiga tushadi.
+  const wx = 11.5;
+  const wy = 3.3;
+  // Yaxlit 'plus' shakli: ikkita shaffof to\'rtburchak kesishgan joyda
+  // quyuqroq chiziq berib, xochni ikki bo\'lakka ajratib ko\'rsatardi.
+  s.addShape('plus', {
+    x: wx - 1.3, y: wy - 1.3, w: 2.6, h: 2.6,
+    fill: { color: C.primary, transparency: 45 },
+    line: { type: 'none' },
+  });
   addHeaderBadge(s, meta, true);
   s.addText('iMentor', {
     x: 10.8,
@@ -319,7 +374,6 @@ function layoutTitle(
     align: 'right',
     fontFace: F.heading,
   });
-  // Yupqa aksent chiziq (fon emas)
   s.addShape('rect', {
     x: M,
     y: 2.15,
@@ -332,7 +386,7 @@ function layoutTitle(
   s.addText(slide.title, {
     x: M,
     y: 2.4,
-    w: 12.2,
+    w: 9.3,
     h: 1.5,
     fontSize: titleFs,
     bold: true,
@@ -343,16 +397,33 @@ function layoutTitle(
     s.addText(slide.subtitle, {
       x: M,
       y: 4.1,
-      w: 12.2,
+      w: 9.3,
       h: 0.55,
       fontSize: 17,
       color: 'B8C8D8',
       fontFace: F.body,
     });
   }
+  // Pastdagi nozik chiziq va kafedra nomi - bo\'sh maydonni yopadi.
+  s.addShape('rect', {
+    x: M, y: 5.6, w: 9.3, h: 0.02,
+    fill: { color: C.primary }, line: { type: 'none' },
+  });
+  s.addText(meta.subjectName || '', {
+    x: M, y: 5.78, w: 9.3, h: 0.4,
+    fontSize: 13,
+    color: '8FA6BA',
+    fontFace: F.body,
+    charSpacing: 1,
+    fit: 'shrink',
+  });
   addFooter(s, deckTitle, page, total, true);
 }
 
+/**
+ * Reja. Qatorlar qat\'iy 0.78" edi, shuning uchun to\'rtta band bo\'lsa slaydning
+ * pastki uchdan biri bo\'sh qolardi. Endi mavjud balandlikka taqsimlanadi.
+ */
 function layoutAgenda(
   s: PptxSlide,
   slide: ContentSlide,
@@ -363,57 +434,61 @@ function layoutAgenda(
 ): void {
   s.background = { color: C.bgLight };
   addHeaderBadge(s, meta);
-  s.addText(slide.title, {
-    x: M,
-    y: 0.7,
-    w: 12.2,
-    h: 0.55,
-    fontSize: 26,
-    bold: true,
-    color: C.primary,
-    fontFace: F.heading,
-  });
+  const top = addSlideTitle(s, slide.title, slide.subtitle, 12.2);
   const bullets = slidePreviewBullets(slide).slice(0, 6);
-  const startY = 1.5;
-  const rowH = 0.78;
+  const bodyH = 6.5 - top;
+  const rowH = bullets.length ? bodyH / bullets.length : bodyH;
+  const cardH = Math.min(1.15, rowH - 0.12);
   bullets.forEach((b, i) => {
-    const y = startY + i * rowH;
-    s.addShape('roundRect', {
+    const y = top + i * rowH + (rowH - cardH) / 2;
+    s.addShape('rect', {
       x: M,
       y,
       w: 12.2,
-      h: 0.68,
+      h: cardH,
       fill: { color: C.card },
-      line: { color: C.soft, width: 1 },
+      line: { type: 'none' },
     });
+    // Chap qirradagi rangli tasma - kartochkani fon ustida ushlab turadi.
+    s.addShape('rect', {
+      x: M,
+      y,
+      w: 0.07,
+      h: cardH,
+      fill: { color: i % 2 === 0 ? C.primary : C.secondary },
+      line: { type: 'none' },
+    });
+    const d = Math.min(0.52, cardH - 0.24);
     s.addShape('ellipse', {
-      x: M + 0.18,
-      y: y + 0.12,
-      w: 0.44,
-      h: 0.44,
+      x: M + 0.28,
+      y: y + (cardH - d) / 2,
+      w: d,
+      h: d,
       fill: { color: i % 2 === 0 ? C.primary : C.secondary },
       line: { type: 'none' },
     });
     s.addText(String(i + 1), {
-      x: M + 0.18,
-      y: y + 0.12,
-      w: 0.44,
-      h: 0.44,
-      fontSize: 14,
+      x: M + 0.28,
+      y: y + (cardH - d) / 2,
+      w: d,
+      h: d,
+      fontSize: 15,
       bold: true,
       color: C.textLight,
       align: 'center',
       valign: 'middle',
+      fontFace: F.heading,
     });
     s.addText(b, {
-      x: M + 0.85,
-      y: y + 0.12,
-      w: 11.1,
-      h: 0.44,
-      fontSize: 16,
+      x: M + 1.05,
+      y,
+      w: 10.9,
+      h: cardH,
+      fontSize: 18,
       color: C.textDark,
       valign: 'middle',
       fontFace: F.body,
+      fit: 'shrink',
     });
   });
   addFooter(s, deckTitle, page, total);
@@ -530,7 +605,7 @@ function layoutImageFocus(
   }
   s.background = { color: C.bgLight };
   const imgW = 7.35;
-  addBleedImage(s, slide, 0, 0, imgW, 6.95, 'left');
+  addBleedImage(s, slide, 0, 0, imgW, 6.95, 'right');
   const panelX = imgW + 0.35;
   const panelW = 13.33 - panelX - M;
   s.addShape('rect', {
@@ -798,12 +873,22 @@ function layoutProcess(
         line: { type: 'none' },
       });
     }
+    // Eng uzun SO\'Z ustunga sig\'sin: "Termoregulyatsiya" kabi so\'z 17pt da
+    // ikkiga bo\'linib ketardi.
+    const longest = Math.max(
+      ...step.label.split(/\s+/).map((word) => word.length),
+      1,
+    );
+    const labelFs = Math.max(
+      11,
+      Math.min(17, Math.floor(((stepW - 0.3) * 72) / (longest * 0.62))),
+    );
     s.addText(step.label, {
       x: M + i * stepW + 0.12,
       y: discY + discD + 0.35,
       w: stepW - 0.24,
       h: 0.75,
-      fontSize: 17,
+      fontSize: labelFs,
       bold: true,
       color: C.primary,
       align: 'center',
@@ -907,7 +992,8 @@ function layoutCaseStudy(
   });
   // Tibbiy xoch - ikki to\'rtburchakdan yig\'ilgan belgi.
   const cx = M + cardW / 2;
-  const cy = top + 1.15;
+  // Xoch yuqoriroqda: pastda rasmga to\'liq kenglik bo\'shatiladi.
+  const cy = top + 0.85;
   s.addShape('rect', {
     x: cx - 0.13, y: cy - 0.42, w: 0.26, h: 0.84,
     fill: { color: C.accent }, line: { type: 'none' },
@@ -917,19 +1003,22 @@ function layoutCaseStudy(
     fill: { color: C.accent }, line: { type: 'none' },
   });
   s.addText(buildLabels(meta).caseStudy.toUpperCase(), {
-    x: M + 0.25, y: cy + 0.7, w: cardW - 0.5, h: 0.35,
+    x: M + 0.25, y: cy + 0.62, w: cardW - 0.5, h: 0.35,
     fontSize: 12, bold: true, color: C.accent,
     align: 'center', charSpacing: 1.5, fontFace: F.body,
   });
   s.addShape('rect', {
-    x: cx - 0.55, y: cy + 1.15, w: 1.1, h: 0.03,
+    x: cx - 0.55, y: cy + 1.06, w: 1.1, h: 0.03,
     fill: { color: C.textLight }, line: { type: 'none' },
   });
   if (hasImage) {
-    addSlideImage(s, slide, M + 0.3, cy + 1.5, cardW - 0.6, bodyH - (cy + 1.5 - top) - 0.3);
+    // Rasm kartochka kengligi bo\'ylab to\'ldiradi - oq ramkadagi kichkina
+    // rasm o\'rniga, chunki u to\'q fonda yamoqdek ko\'rinardi.
+    const imgY = cy + 1.35;
+    addBleedImage(s, slide, M, imgY, cardW, top + bodyH - imgY, 'right');
   } else if (slide.subtitle) {
     s.addText(slide.subtitle, {
-      x: M + 0.3, y: cy + 1.45, w: cardW - 0.6, h: bodyH - (cy + 1.45 - top) - 0.3,
+      x: M + 0.3, y: cy + 1.35, w: cardW - 0.6, h: bodyH - (cy + 1.35 - top) - 0.3,
       fontSize: 15, color: C.textLight, italic: true,
       align: 'center', valign: 'top', fontFace: F.body, fit: 'shrink',
     });
@@ -945,6 +1034,10 @@ function layoutCaseStudy(
   addFooter(s, deckTitle, page, total);
 }
 
+/**
+ * Xulosa. Qator balandligi 1.15" bilan cheklangan edi - ikki-uchta band
+ * bo\'lsa slaydning yarmi bo\'sh turardi. Endi mavjud joyga taqsimlanadi.
+ */
 function layoutSummary(
   s: PptxSlide,
   slide: ContentSlide,
@@ -955,57 +1048,62 @@ function layoutSummary(
 ): void {
   s.background = { color: C.bgLight };
   addHeaderBadge(s, meta);
-  s.addText(slide.title, {
-    x: M,
-    y: 0.7,
-    w: 12.2,
-    h: 0.5,
-    fontSize: 26,
-    bold: true,
-    color: C.primary,
-    fontFace: F.heading,
-  });
+  const top = addSlideTitle(s, slide.title, slide.subtitle, 12.2);
   const bullets = slidePreviewBullets(slide).slice(0, 5);
-  const rowH = Math.min(1.15, 5.4 / Math.max(bullets.length, 1));
+  const bodyH = 6.5 - top;
+  const rowH = bullets.length ? bodyH / bullets.length : bodyH;
   bullets.forEach((b, i) => {
-    const y = 1.4 + i * rowH;
+    const y = top + i * rowH;
     const split = b.match(/^([^:—–-]{4,48})[:—–-]\s*(.+)$/);
-    const head = split ? split[1].trim() : b.slice(0, 48);
-    const tail = split ? split[2].trim() : '';
-    // "1." 0.45" ga sig'may, nuqta pastki qatorga tushib ketardi — quti kengaytirildi
-    // va o'ralish o'chirildi.
+    // Ilgari ajratgich topilmasa matn 48 belgida kesilardi va so\'z o\'rtasida
+    // uzilib qolardi. Endi bunday band butunligicha izoh sifatida chiqadi.
+    const head = split ? split[1].trim() : '';
+    const tail = split ? split[2].trim() : b;
+    if (i > 0) {
+      s.addShape('rect', {
+        x: M, y: y - 0.06, w: 12.2, h: 0.008,
+        fill: { color: C.soft }, line: { type: 'none' },
+      });
+    }
     s.addText(`${i + 1}.`, {
       x: M,
       y,
       w: 0.7,
-      h: 0.4,
-      fontSize: 18,
+      h: 0.45,
+      fontSize: 20,
       bold: true,
       color: C.accent,
       fontFace: F.heading,
       wrap: false,
     });
-    s.addText(head, {
+    if (head) {
+      s.addText(head, {
       x: M + 0.75,
       y,
       w: 11.4,
-      h: 0.35,
-      fontSize: 16,
+      h: 0.42,
+      fontSize: 18,
       bold: true,
       color: C.textDark,
       fontFace: F.heading,
       fit: 'shrink',
-    });
-    s.addText(tail || b, {
-      x: M + 0.75,
-      y: y + 0.35,
-      w: 11.4,
-      h: rowH - 0.42,
-      fontSize: 13,
-      color: C.muted,
-      fontFace: F.body,
-      valign: 'top',
-    });
+      });
+    }
+    if (tail) {
+      const tailY = head ? y + 0.44 : y;
+      const tailH = Math.max(0.3, rowH - (head ? 0.52 : 0.1));
+      s.addText(tail, {
+        x: M + 0.75,
+        y: tailY,
+        w: 11.4,
+        h: tailH,
+        fontSize: fitTextSize(tail, 11.4, tailH, head ? 15 : 19, 12),
+        color: C.muted,
+        fontFace: F.body,
+        valign: 'top',
+        fit: 'shrink',
+      });
+    }
   });
   addFooter(s, deckTitle, page, total);
 }
