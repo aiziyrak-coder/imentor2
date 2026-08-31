@@ -1,12 +1,19 @@
 """Django `core/throttling.py` ekvivalenti — Redis orqali rate limit.
 
-Redis ishlamasa so'rov o'tkaziladi (fail-open): limit tufayli butun API
-to'xtab qolmasin. Kalitlar Django scope nomlari bilan mos.
+Redis ishlamasa jarayon ichidagi zaxira hisoblagichga o'tiladi. Ilgari bunday
+holatda cheklov butunlay o'chib qolardi — ya'ni Redis yiqilgan payt login
+endpointi cheksiz urinishga ochiq bo'lardi. Zaxira hisoblagich har bir
+gunicorn worker'ida alohida, shuning uchun amaldagi chegara worker soniga
+ko'payadi; bu aniq emas, lekin cheksizdan ko'ra ancha yaxshi.
+
+Kalitlar Django scope nomlari bilan mos.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from functools import lru_cache
 
 import redis
@@ -65,6 +72,36 @@ def client_ip(request: Request) -> str:
     return "unknown"
 
 
+class _MemoryCounter:
+    """Redis o'rniga ishlaydigan oddiy oyna hisoblagichi.
+
+    Faqat zaxira sifatida ishlatiladi, shuning uchun aniqligi Redis darajasida
+    emas: oyna qat'iy (sliding emas) va har worker o'zinikini yuritadi. Lug'at
+    cheksiz o'smasin uchun muddati o'tgan kalitlar chaqiruv paytida tozalanadi.
+    """
+
+    _MAX_KEYS = 50_000
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits: dict[str, tuple[float, int]] = {}
+
+    def incr(self, key: str, period: int) -> int:
+        now = time.monotonic()
+        with self._lock:
+            if len(self._hits) > self._MAX_KEYS:
+                self._hits = {k: v for k, v in self._hits.items() if v[0] > now}
+            started, count = self._hits.get(key, (0.0, 0))
+            if started <= now:
+                started, count = now + period, 0
+            count += 1
+            self._hits[key] = (started, count)
+            return count
+
+
+_memory = _MemoryCounter()
+
+
 def enforce(key: str, rate: str) -> None:
     num, period = parse_rate(rate)
     if num <= 0 or period <= 0:
@@ -74,15 +111,18 @@ def enforce(key: str, rate: str) -> None:
         n = int(r.incr(key))
         if n == 1:
             r.expire(key, period)
-        if n > num:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Juda ko'p so'rov. Biroz kuting.",
-            )
-    except HTTPException:
-        raise
     except Exception:
-        logger.warning("Rate limit Redis ishlamadi — so'rov o'tkazildi (%s).", key, exc_info=True)
+        logger.warning(
+            "Rate limit Redis ishlamadi — jarayon ichidagi zaxira ishlatildi (%s).",
+            key,
+            exc_info=True,
+        )
+        n = _memory.incr(key, period)
+    if n > num:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Juda ko'p so'rov. Biroz kuting.",
+        )
 
 
 def throttle_login(request: Request) -> None:

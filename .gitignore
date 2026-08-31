@@ -15,6 +15,10 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/*.pyc
 backend/.pytest_cache/
+
+# FastAPI backend — Python artefaktlari (testlar shu yerda ishlaydi).
+backend_fastapi/**/__pycache__/
+backend_fastapi/*.pyc
 backend/.mypy_cache/
 deploy/__pycache__/
 *.egg-info/
