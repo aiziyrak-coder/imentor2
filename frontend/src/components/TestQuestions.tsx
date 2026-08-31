@@ -68,6 +68,7 @@ import {
   pushLiveTestEvent,
 } from '../utils/liveTestAnticheat';
 import QRCode from 'qrcode';
+import DemoStudentAccounts from './DemoStudentAccounts';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
 import MedicalReferencesList from './staff/MedicalReferencesList';
 import {
@@ -1255,6 +1256,7 @@ export default function TestQuestions() {
                         <Copy size={16} /> {t('common.link')}
                       </button>
                     </div>
+                    <DemoStudentAccounts />
                   </div>
                 </div>
               )}

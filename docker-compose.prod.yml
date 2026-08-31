@@ -207,6 +207,8 @@ services:
         VITE_DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-AdminDemo123}
         VITE_DEMO_STAFF_PHONE: ${DEMO_HODIM_PHONE:-998901112233}
         VITE_DEMO_STAFF_PASSWORD: ${DEMO_HODIM_PASSWORD:-TestHodim123}
+        VITE_DEMO_STUDENT_IDS: ${DEMO_STUDENT_IDS:-}
+        VITE_DEMO_STUDENT_PASSWORD: ${DEMO_STUDENT_PASSWORD:-}
     depends_on:
       backend_fastapi:
         condition: service_healthy
