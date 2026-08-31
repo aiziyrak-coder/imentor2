@@ -6,8 +6,6 @@ import {
   normalizePhoneDigits,
   normalizeUserRole,
   logoutLocalStaff,
-  getDemoRoleLogins,
-  isDemoAuthEnabled,
 } from '../../utils/localStaffAuth';
 import {
   getBackendAccessToken,
@@ -29,10 +27,6 @@ export default function AdminPasswordLogin({ onBack }: AdminPasswordLoginProps) 
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const demoAdmin = isDemoAuthEnabled()
-    ? getDemoRoleLogins().find((d) => d.role === 'admin')
-    : undefined;
 
   const login = async (phoneVal: string, passwordVal: string) => {
     setError(null);
@@ -135,23 +129,6 @@ export default function AdminPasswordLogin({ onBack }: AdminPasswordLoginProps) 
             {t('auth.submitLogin')}
           </button>
         </form>
-
-        {demoAdmin && (
-          <button
-            type="button"
-            onClick={() => void login(demoAdmin.phone, demoAdmin.password)}
-            disabled={loading}
-            className="mt-4 flex items-center gap-3 w-full text-left rounded-xl border border-black/10 bg-white/80 hover:bg-white hover:border-blue-300/60 px-3 py-2.5 transition shadow-sm disabled:opacity-60"
-          >
-            <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-700 flex items-center justify-center shrink-0">
-              <ShieldCheck size={18} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-black/90">{t('auth.demoAdminLogin')}</p>
-              <p className="text-[10px] text-black/35 font-mono mt-0.5">{demoAdmin.phone}</p>
-            </div>
-          </button>
-        )}
       </div>
     </motion.div>
   );
