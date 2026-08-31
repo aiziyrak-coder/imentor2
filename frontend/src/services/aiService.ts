@@ -1620,6 +1620,47 @@ async function requestPresentationDeckFromAi(params: {
     });
   }
 
+  // Bitta javobda 20-25 slayd sig\'maydi: modelning chiqish chegarasi ~16k token,
+  // o\'zbekcha matn esa token-og\'ir. Amalda 11-19 slayd qaytardi. Yetishmasa —
+  // qolganini alohida so\'raymiz va birinchi qism sarlavhalarini beramiz, takrorlamasin.
+  const MIN_SLIDES = 20;
+  const firstSlides = Array.isArray(raw?.slides) ? raw.slides : [];
+  if (firstSlides.length > 0 && firstSlides.length < MIN_SLIDES) {
+    const need = MIN_SLIDES + 3 - firstSlides.length;
+    const usedTitles = firstSlides
+      .map((sl) => String((sl as { title?: string })?.title || '').trim())
+      .filter(Boolean);
+    try {
+      params.onProgress?.(translate(params.language, 'ai.progress.content'));
+      const more = await openaiJson<Partial<PresentationContent>>({
+        model: OPENAI_CHAT,
+        system:
+          system +
+          ` DAVOM ETTIRISH: taqdimotning birinchi qismi tayyor. Endi FAQAT yana ${need} ta ` +
+          'YANGI slayd qaytaring. Quyidagi sarlavhalar allaqachon ishlatilgan — ularni yoki ' +
+          'ularning mazmunini QAYTA yozmang, ma\'ruzaning hali yoritilmagan qismlarini oching. ' +
+          'title va agenda slaydi KERAK EMAS. summary slaydi eng oxirida bitta bo\'lsin.',
+        user:
+          user +
+          '\n\nALLAQACHON ISHLATILGAN SARLAVHALAR:\n' +
+          usedTitles.map((t2) => '- ' + t2).join('\n') +
+          `\n\nYana ${need} ta yangi slayd bering (JSON: {slides:[...]}).`,
+        maxTokens: 16000,
+        temperature: 0.4,
+        bookContext,
+        responseFormat,
+        parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
+      });
+      const extra = Array.isArray(more?.slides) ? more.slides : [];
+      if (extra.length > 0) {
+        raw = { ...raw, slides: [...firstSlides, ...extra] };
+      }
+    } catch (err) {
+      // Ikkinchi bosqich yiqilsa birinchi qism baribir ishlaydi.
+      console.warn('Presentation ikkinchi bosqich yiqildi:', err);
+    }
+  }
+
   params.onProgress?.(translate(params.language, 'ai.progress.normalize'));
   let content = normalizePresentationContent(raw, {
     title: fallbackTitle,

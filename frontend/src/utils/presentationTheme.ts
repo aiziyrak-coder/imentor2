@@ -2,22 +2,27 @@
 
 export const THEME = {
   colors: {
-    primary: '0F4C81',
-    secondary: '2E9E9E',
-    accent: 'F2A93B',
-    textDark: '1A1A1A',
+    // Chuqur akademik ko'k — universitet taqdimotining asosiy rangi.
+    primary: '10395B',
+    secondary: '17607D',
+    // Iliq mis — faqat urg'u uchun (raqam, chiziq, belgi).
+    accent: 'C87941',
+    textDark: '15242E',
     textLight: 'FFFFFF',
-    bgLight: 'F7F9FB',
-    bgDark: '0F1B2B',
-    muted: '5B6B7A',
+    // Sof oq emas, sal iliq fon — ekranda ko'z charchatmaydi.
+    bgLight: 'F7F5F1',
+    bgDark: '0B1F2A',
+    muted: '5D6E78',
     card: 'FFFFFF',
-    zebra: 'E8EEF4',
-    soft: 'D6EAF5',
+    zebra: 'EDEAE4',
+    soft: 'D3DDE3',
   },
   fonts: {
-    // OS’da Montserrat/Inter bo‘lmasa Calibri/Arial ishonchli.
-    heading: 'Calibri',
-    body: 'Calibri',
+    // Calibri butun taqdimotga "standart Office" ko'rinishini berardi.
+    // Georgia — akademik, jiddiy sarlavha; Segoe UI — toza va zich matn.
+    // Ikkalasi ham Windows va Office bilan birga keladi.
+    heading: 'Georgia',
+    body: 'Segoe UI',
   },
   spacing: {
     margin: 0.55,
