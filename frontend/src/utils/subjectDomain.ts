@@ -11,6 +11,26 @@ export type GenerationScope = {
   lectureText: string;
 };
 
+/**
+ * Kirill harflarini lotinga o‘giradi.
+ *
+ * Ilgari faqat bir nechta kirill so‘z alohida almashtirilardi, shuning uchun
+ * "Ахборот технологиялари" kabi ruscha yozilgan fan nomi hech qaysi qolipga
+ * tushmay, standart qiymat — "klinik" — bo‘lib qolardi. Natijada informatika
+ * fani uchun bemor kartasi bilan test yaratilardi.
+ */
+const CYRILLIC: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ж: 'j', з: 'z',
+  и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
+  р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'x', ц: 'ts', ч: 'ch',
+  ш: 'sh', щ: 'sh', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  ў: 'o', қ: 'q', ғ: 'g', ҳ: 'h',
+};
+
+function translit(value: string): string {
+  return value.replace(/[\u0400-\u04FF]/g, (ch) => CYRILLIC[ch] ?? ch);
+}
+
 /** Imlo, kirill va odatiy xatolar — taqqoslash uchun. */
 export function foldDomainText(value: string): string {
   return (value || '')
@@ -20,14 +40,16 @@ export function foldDomainText(value: string): string {
     .replace(/texnalog/g, 'texnolog')
     .replace(/elektorin/g, 'elektron')
     .replace(/ahborot/g, 'axborot')
-    .replace(/ахбор/g, 'axbor')
     .replace(/информационн?\s*технолог/g, 'axborot texnolog')
     .replace(/\s+/g, ' ')
+    .replace(/[\u0400-\u04FF]+/g, translit)
+    .replace(/texnalog/g, 'texnolog')
+    .replace(/ahborot/g, 'axborot')
     .trim();
 }
 
 const ACADEMIC_RE =
-  /informatika|информатик|axborot|ахборот|tibbiyotda\s+axborot|texnologiyalar(i|и)|elektronika|электроник|elektrotexnika|elektron\s*(pochta|xat|imzo|hujjat|tijorat|hisob)|pochta\s*xizmat|\bemail\b|\bsmtp\b|\bimap\b|kiberxavfsizlik|dasturlash|dasturiy\s*taminot|kompyuter|компьютер|algoritm|matemat|математ|oliy\s*matemat|\bfizika\b|\bфизика\b|biofizika|lotin|латин|xorijiy\s*til|ingliz\s*til|rus\s*til|ozbek\s*til|pedagog|falsafa|huquq|iqtisod|statistika|muhandis|jismoniy\s*tarbiya|\bsport\b|malumotlar\s*bazasi|tarmoq|office|\bexcel\b|\bpython\b|sanoq\s*tizim|ikkilik|onlik|on\s*oltilik|protokol|parol|brauzer|\bhtml\b|\bcss\b|\bhttp\b|ip\s*adres|domen\s*nomi|\bkimyo\b|химия|integral\s*hisob|matritsa|vektor\s*algebra/i;
+  /informatika|информатик|axborot|ахборот|tibbiyotda\s+axborot|texnologiyalar(i|и)|elektronika|электроник|elektrotexnika|elektron\s*(pochta|xat|imzo|hujjat|tijorat|hisob)|pochta\s*xizmat|\bemail\b|\bsmtp\b|\bimap\b|kiberxavfsizlik|dasturlash|dasturiy\s*taminot|kompyuter|компьютер|algoritm|matemat|математ|oliy\s*matemat|\bfizika\b|\bфизика\b|biofizika|lotin|latin|ximiya|himiya|латин|xorijiy\s*til|ingliz\s*til|rus\s*til|ozbek\s*til|pedagog|falsafa|huquq|iqtisod|statistika|muhandis|jismoniy\s*tarbiya|\bsport\b|malumotlar\s*bazasi|tarmoq|office|\bexcel\b|\bpython\b|sanoq\s*tizim|ikkilik|onlik|on\s*oltilik|protokol|parol|brauzer|\bhtml\b|\bcss\b|\bhttp\b|ip\s*adres|domen\s*nomi|\bkimyo\b|химия|integral\s*hisob|matritsa|vektor\s*algebra/i;
 
 const ACADEMIC_CODE_RE =
   /(^|[^a-z0-9])(inf|ict|math|phys|lat|cs|comp)(\d|[-_]|$)|(^|[-_\/])it([-_\/]|$)/i;

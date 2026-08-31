@@ -20,7 +20,9 @@ if (typeof globalThis.File === 'undefined') {
     name: string;
     lastModified: number;
     constructor(bits: BlobPart[], name: string, options?: FilePropertyBag) {
-      super(bits as BlobPart[], options);
+      // Node'ning `Blob` i DOM `BlobPart` ini bilmaydi - bu shim faqat
+      // skript uchun, shuning uchun tur tekshiruvi chetlab o'tiladi.
+      super(bits as unknown as ConstructorParameters<typeof NodeBlob>[0], options);
       this.name = name;
       this.lastModified = options?.lastModified ?? Date.now();
     }

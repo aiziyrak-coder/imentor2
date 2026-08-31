@@ -71,7 +71,9 @@ function parseXml(xml: string): Document {
   return new DOMParser().parseFromString(xml, 'application/xml');
 }
 
-function localAll(root: ParentNode, name: string): Element[] {
+// `ParentNode` da `getElementsByTagName` yo'q - chaqiruvchilar doim
+// `Document` yoki `Element` beradi, shuning uchun tur shu ikkisi.
+function localAll(root: Document | Element, name: string): Element[] {
   return [...root.getElementsByTagName('*')].filter((el) => el.localName === name);
 }
 

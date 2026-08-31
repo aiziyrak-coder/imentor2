@@ -68,7 +68,9 @@ function parseJsonLoose<T>(raw: string): T {
 
 async function buildPptxBuffer(deck: Deck): Promise<Buffer> {
   const mod = await import('pptxgenjs');
-  const PptxGenJS = (mod as { default?: new () => InstanceType<typeof import('pptxgenjs')> }).default ?? mod;
+  // `pptxgenjs` modul turi konstruktor emas, shuning uchun `default` ni
+  // noma'lum konstruktor sifatida olamiz - quyida tuzilma bilan tavsiflanadi.
+  const PptxGenJS = (mod as { default?: unknown }).default ?? mod;
   const pptx = new (PptxGenJS as new () => {
     author: string;
     title: string;

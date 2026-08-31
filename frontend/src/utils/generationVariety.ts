@@ -78,7 +78,9 @@ export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): stri
     return [
       'QATTIQ QOIDALAR — oliy ta\'lim AMALIY vaziyat, klinik keys EMAS:',
       'MAVZUGA BOG\'LIQLIK: muammo, ma\'lumotlar va yechim AYNAN fan va mavzu (va ma\'ruza, bo\'lsa) doirasida.',
-      'BEMOR YO\'Q: yosh+jins+kasallik+dori vignette TAQIQLANADI. HbA1c, qon bosimi, puls, qorin og\'rig\'i, appenditsit YO\'Q.',
+      // Klinik nozologiyani nomma-nom sanash modelni aynan o\'sha tomonga
+      // yetaklaydi. Umumiy belgilar yetarli - kasallik nomi berilmaydi.
+      'BEMOR YO\'Q: yosh+jins+kasallik+dori vignette TAQIQLANADI. HbA1c, qon bosimi, puls, qorin og\'rig\'i YO\'Q.',
       'Ishtirokchi: talaba, muhandis, o\'qituvchi, tizim administratori — kasalliksiz.',
       'QIYINLIK: bitta ta\'rif = javob EMAS. Kamida ikkita chalg\'ituvchi, lekin mantiqiy cheklov (standart, formula, protokol).',
       'Yechimda aniq qadam, formula, sozlama yoki qoida; nima uchun muqobil noto\'g\'ri.',
