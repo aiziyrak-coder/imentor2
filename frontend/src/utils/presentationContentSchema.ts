@@ -42,6 +42,10 @@ export type ContentSlide = {
   /** Design Layer to‘ldiradi — Wikimedia data URL */
   imageUrl?: string;
   imageCredit?: string;
+  /** Rasmning asl havolasi. data:URL bazaga yozilmaydi (juda og'ir),
+   *  shuning uchun saqlangan taqdimot ochilganda rasm shu havoladan
+   *  qayta tortiladi — aks holda deck rasmsiz qolardi. */
+  imageSourceUrl?: string;
 };
 
 export type PresentationContent = {

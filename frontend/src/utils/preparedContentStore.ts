@@ -57,7 +57,12 @@ async function requireAuthToken(): Promise<string> {
   return token;
 }
 
-/** data:URL rasmlar JSON ni shishiradi — PPTXda allaqachon bor, bazaga yozilmaydi. */
+/**
+ * data:URL rasmlar JSON ni shishiradi, shuning uchun bazaga yozilmaydi.
+ * Lekin `imageSourceUrl` SAQLANADI — saqlangan taqdimot qayta ochilganda
+ * rasm o\'sha havoladan tortiladi. Ilgari havola ham qolmagani uchun
+ * saqlangan deck butunlay rasmsiz chiqardi.
+ */
 function stripHeavyMediaFromPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object') return payload;
   const deck = payload as { slides?: unknown };

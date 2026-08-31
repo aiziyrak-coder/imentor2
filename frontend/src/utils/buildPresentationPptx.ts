@@ -9,6 +9,7 @@ import {
   slidePreviewBullets,
 } from './presentationContentSchema';
 import { autofitFontSize } from './presentationQa';
+import { fetchImageAsDataUrl } from './presentationImages';
 import { THEME, buildLabels, type PresentationBuildMeta } from './presentationTheme';
 
 export type { PresentationContent, ContentSlide };
@@ -987,6 +988,22 @@ export async function buildPresentationPptxFile(
     subjectName: content.subject_area || 'Fan',
     topicId: 'T',
   };
+
+  // Saqlangan taqdimotda data:URL rasm bo\'lmaydi (bazani shishirmaslik uchun
+  // olib tashlanadi), faqat asl havola qoladi. Yuklab olishdan oldin
+  // rasmlarni o\'sha havoladan qayta tortamiz — aks holda deck rasmsiz chiqadi.
+  const needImages = content.slides.filter(
+    (sl) => !sl.imageUrl?.startsWith('data:') && sl.imageSourceUrl,
+  );
+  if (needImages.length > 0) {
+    const fetched = await Promise.all(
+      needImages.map((sl) => fetchImageAsDataUrl(sl.imageSourceUrl as string).catch(() => null)),
+    );
+    needImages.forEach((sl, i) => {
+      const data = fetched[i];
+      if (data) sl.imageUrl = data;
+    });
+  }
 
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();

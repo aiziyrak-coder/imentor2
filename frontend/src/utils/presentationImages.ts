@@ -255,7 +255,7 @@ async function collectCandidates(slide: ContentSlide): Promise<ImageCandidate[]>
 const MAX_IMAGE_PX = 1100;
 const MAX_IMAGE_BYTES = 8_000_000;
 
-async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+export async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { mode: 'cors', cache: 'no-store', signal: AbortSignal.timeout(14000) });
     if (!res.ok) return null;
@@ -369,17 +369,17 @@ export async function resolvePresentationImages(
       const dataUrl = await fetchImageAsDataUrl(candidate.url);
       if (dataUrl) {
         taken.add(candidate.key);
-        return { index: item.index, dataUrl, credit: candidate.credit };
+        return { index: item.index, dataUrl, credit: candidate.credit, src: candidate.url };
       }
     }
-    return { index: item.index, dataUrl: null, credit: '' };
+    return { index: item.index, dataUrl: null, credit: '', src: '' };
   });
 
   const byIndex = new Map(resolved.filter((r) => r.dataUrl).map((r) => [r.index, r]));
   const slides = content.slides.map((slide, index) => {
     const hit = byIndex.get(index);
     if (!hit?.dataUrl) return slide;
-    return { ...slide, imageUrl: hit.dataUrl, imageCredit: hit.credit };
+    return { ...slide, imageUrl: hit.dataUrl, imageCredit: hit.credit, imageSourceUrl: hit.src };
   });
 
   const withImages = slides.filter((s) => s.imageUrl).length;
