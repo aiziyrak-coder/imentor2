@@ -1,5 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {lazy, Suspense} from 'react';
 import App from './App.tsx';
 import {ErrorBoundary} from './components/ErrorBoundary.tsx';
 import './index.css';
@@ -45,10 +46,40 @@ window.addEventListener('load', () => {
   }
 });
 
+/**
+ * Online ta'lim portali AYRIM domenda turadi (`onlinetalim.fermi.uz`) va
+ * butunlay boshqa daraxt — mavjud `App` ga umuman tegilmaydi.
+ *
+ * Ikkalasi bitta konteynerdan xizmat qiladi, shuning uchun tanlov shu yerda,
+ * domen nomi bo'yicha qilinadi. Domenni `VITE_ONLINE_HOST` bilan o'zgartirish
+ * mumkin; ishlab chiqish uchun `?online=1` ham yetadi.
+ */
+const OnlineApp = lazy(() => import('./online/OnlineApp.tsx'));
+
+function isOnlinePortal(): boolean {
+  try {
+    const env = (import.meta as ImportMeta & {env?: Record<string, string | undefined>}).env;
+    const configured = (env?.VITE_ONLINE_HOST || 'onlinetalim.fermi.uz').toLowerCase();
+    const host = window.location.hostname.toLowerCase();
+    if (host === configured) return true;
+    return new URLSearchParams(window.location.search).get('online') === '1';
+  } catch {
+    return false;
+  }
+}
+
+const Root = isOnlinePortal()
+  ? () => (
+      <Suspense fallback={<div className="p-6 text-slate-500">Yuklanmoqda…</div>}>
+        <OnlineApp />
+      </Suspense>
+    )
+  : App;
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <Root />
     </ErrorBoundary>
   </StrictMode>,
 );

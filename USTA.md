@@ -62,13 +62,17 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 - [x] 2. Admin: "Online ta'lim" sahifasi — sillabus yuklash (mavjud tahlilchi qayta
       ishlatildi), o'qituvchi va guruh biriktirish, darslar va natijalar jadvali.
       API sinovdan o'tdi: o'qituvchi→403, tokensiz→401, eski katalog 200 yozuv joyida.
-- [ ] 3. O'qituvchi: fan → mavzu → material (AI + yuklash)  <- HOZIR SHU YERDA
-- [ ] 4. Jitsi infratuzilmasi + dars sessiyasi + davomat
+- [x] 3. O'qituvchi kabineti: portal qobig'i (`onlinetalim.fermi.uz`), kirish
+      (o'qituvchi telefon+parol, talaba OnlineTest ID), fan → mavzu → 6 material.
+      Ruxsat sinovdan o'tdi: biriktirilmagan foydalanuvchi 403, qayta saqlashda dublikat yo'q.
+- [ ] 4. Jitsi infratuzilmasi + dars sessiyasi + davomat  <- HOZIR SHU YERDA
 - [ ] 5. Talaba portali (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 - [ ] 6. Baholash va hisobotlar (admin panelda)
 - [ ] 7. Deploy, testlar, hujjat
 
 ## Sizdan kerak bo'ladi (bloklovchi, men qila olmayman)
+0. **nginx sayti** `onlinetalim.fermi.uz` uchun — `/etc/nginx` ga yozish sudo
+   paroli talab qiladi, menda yo'q. Aniq buyruqlar javobda berilgan.
 1. **`meet.fermi.uz`** uchun DNS A yozuvi → `87.192.230.208`
    (`onlinetalim.fermi.uz` allaqachon to'g'ri ko'rsatyapti ✅)
 2. **Routerda UDP 10000 portini** `192.168.0.101` ga yo'naltirish —
