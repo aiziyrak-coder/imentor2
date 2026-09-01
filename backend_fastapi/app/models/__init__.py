@@ -8,6 +8,7 @@ from app.models import (  # noqa: F401
     content,
     device_pairing,
     live_test,
+    online_edu,
     prepared_content,
     staff_location,
     startup,

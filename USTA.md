@@ -1,70 +1,87 @@
 # USTA — loyiha yo'l xaritasi
 
 ## Maqsad
-iMentor'ning AI token sarfini maksimal kamaytirish — **generatsiya sifatini
-hech qaysi qismda pasaytirmasdan** (ma'ruza matni, test, vaziyatli masala,
-taqdimot) va **hech qanday ma'lumotni o'chirmasdan**.
+iMentor'ga **Online ta'lim** moduli qo'shish: 6-kurs masofaviy talabalari uchun
+alohida portal (`onlinetalim.fermi.uz`). Mavjud iMentor **o'zgarmaydi** —
+faqat admin panelga bitta yangi "Online ta'lim" sahifasi qo'shiladi.
 
-## Stack va struktura
-- Frontend: React 19 + Vite + TS. AI promptlari — `frontend/src/services/aiService.ts`
-- Backend: FastAPI. OpenAI proksi — `backend_fastapi/app/services/openai_client.py`,
-  marshrut — `app/api/routes/education_ai.py`
-- RAG: PostgreSQL + pgvector, `core_bookchunk` (760 902 chunk, HNSW indeks),
-  qidiruv — `app/services/book_retrieval.py`
-- Server: 192.168.0.101, `/home/imentor`, `docker-compose.prod.yml`
+## Asosiy shart
+> «Loyiha shu joygacha umuman o'zgarmasin.»
 
-## O'lchangan holat (2026-09-01)
+Shuning uchun online modul **butunlay alohida jadvallarda** (`online_*` prefiksi)
+va **alohida API** (`/api/v1/online/...`) da quriladi. Sabab: mavjud
+`TopicHandout` / `TopicVideo` / `PreparedContent` jadvallarini FILTRSIZ
+ro'yxatlaydigan 4 ta joy bor (`content_catalog.py:79`, `topic_content.py:296`,
+`topic_content.py:519`, `content_catalog.py:723`) — o'sha jadvallarni ulashsak,
+online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 
-**Boshlang'ich muammolar**
+## Stack
+- Backend: FastAPI + SQLAlchemy + Alembic · `backend_fastapi/app/`
+- Frontend: React 19 + Vite + TS · `frontend/src/`
+- Baza: PostgreSQL 16 + pgvector · Server: 192.168.0.101, `/home/imentor`
+- Video: Jitsi Meet (serverda o'zimizniki), IFrame API orqali davomat
 
-| Nima | Qiymat | Xulosa |
-|---|---|---|
-| Chunk o'rtacha hajmi | 3 174 belgi (mediana 3 875) | RAG uchun 3-4 barobar katta |
-| Aynan takroriy chunklar | **57.1%** (760 902 → 326 351 noyob) | bir matn 2-3 marta yuboriladi |
-| `hnsw.ef_search` | 40 (standart) | 30 nomzod so'ralganda 13 ta qaytardi |
-| RAG joylashuvi | promptning ENG BOSHIDA | prompt-kesh hech qachon ishlamasdi |
-| Taqdimot 2-bosqichi | RAG'ni QAYTA yuklardi | ~8 500 token behuda |
-| Token hisobi | yo'q | o'lchab bo'lmasdi |
+## Tasdiqlangan qarorlar (2026-09-01)
+| Savol | Qaror |
+|---|---|
+| Video konferensiya | **Jitsi — serverning o'zida**, davomat avtomatik |
+| Talaba login | **OnlineTest ID + parol** (guruh nomi avtomatik keladi) |
+| Mavzu ochilishi | **O'qituvchi "dars o'tildi" tugmasini bosganda** |
+| Baholash | **10 ta test — avtomatik** (keys va davomat ballga kirmaydi) |
+| O'qituvchi qayerda ishlaydi | **`onlinetalim.fermi.uz` da** — iMentor'ga tegilmaydi |
+| Test urinishi | **Bir marta** — ball qat'iy |
 
-**Natija (haqiqiy o'lchov, `oftalmologiya-di-10-s`, glaukoma mavzusi)**
+## Qabul qilingan taxminlar (so'ralmagan, o'zim hal qildim)
+- Online sillabuslar mavjud sillabus yuklash formatida (Excel/Word) yuklanadi,
+  lekin `online_syllabus` jadvaliga tushadi.
+- O'qituvchini adminning o'zi "online" deb belgilaydi va fanga biriktiradi —
+  mavjud `StaffCourseSelection` tegilmaydi.
+- Talaba profili faqat online portalda; hozirgi iMentor talaba oynasi
+  o'zgarmaydi.
+- `onlinetalim.fermi.uz` bir xil frontend konteyneridan xizmat qiladi;
+  `main.tsx` domen nomiga qarab `<OnlineApp/>` ni ko'rsatadi. Mavjud
+  `App.tsx` ochilmaydi ham.
 
-| Ko'rsatkich | Oldin | Keyin |
-|---|---|---|
-| RAG belgilari | 26 006 | 11 514 (**−56%**) |
-| Nomzodlar (filtrdan keyin) | 13 | 30 (**haqiqiy top-10**) |
-| Noyob parchalar | ~7 | 10 |
-| Keshdan olingan kirish | 0 | 3 968 / 7 259 (**55%**) |
-| Kirish tokeni (to'liq narx ekvivalenti) | ~10 900 | ~5 300 (**−51%**) |
-| Chiqish tokeni | o'zgarmagan | o'zgarmagan |
+## Yangi jadvallar
+| Jadval | Nima uchun |
+|---|---|
+| `online_syllabus` | 6-kurs fanlari (mavzular JSONB) |
+| `online_teacher` | qaysi o'qituvchi online o'tadi |
+| `online_teacher_course` | o'qituvchi ↔ fan |
+| `online_group` | guruh (OnlineTest `group_name`) |
+| `online_group_course` | guruh ↔ fan |
+| `online_material` | ma'ruza, taqdimot, video, tarqatma, keys, test |
+| `online_lesson` | video dars sessiyasi + mavzu qulfi |
+| `online_attendance` | kim qachon kirdi/chiqdi |
+| `online_progress` | talaba: ko'rilgan material + test bali |
 
 ## Yo'l xaritasi (bosqichlar)
-- [x] 0. O'rganish va o'lchash
-- [x] 1. Token hisobi (`OPENAI_USAGE` log qatori, `IMENTOR_LOG_LEVEL`)
-- [x] 2. Qidiruvda takrorni yo'qotish (`dedupe_chunks`) — baza tegilmaydi
-- [x] 3. Chunkdan savolga mos oynani kesish (`focus_window`, 1200 belgi)
-- [x] 4. Promptni kesh uchun qayta tartiblash (`_insert_book_context`)
-- [x] 5. Taqdimot 2-bosqichidan ortiqcha RAG olib tashlandi
-- [x] 6. `hnsw.ef_search = 200` — filtrdan keyin ham to'liq nomzod
-- [x] 7. Testlar: 84 backend (18 tasi yangi RAG uchun) + 160 frontend, tsc toza
-- [ ] 8. Bir hafta kuzatish: `OPENAI_USAGE` bo'yicha haqiqiy oylik sarfni hisoblash  <- KEYINGI
+- [x] 0. O'rganish, savollar, TZ
+- [x] 1. Baza: 9 ta jadval + migratsiya `h8i9j0k1l2m3` (upgrade/downgrade sinovdan o'tdi,
+      productionga qo'llandi — mavjud 479 sillabus va 153 kontent joyida)
+- [ ] 2. Admin: sillabus yuklash, o'qituvchi/guruh biriktirish  <- HOZIR SHU YERDA
+- [ ] 3. O'qituvchi: fan → mavzu → material (AI + yuklash)
+- [ ] 4. Jitsi infratuzilmasi + dars sessiyasi + davomat
+- [ ] 5. Talaba portali (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
+- [ ] 6. Baholash va hisobotlar (admin panelda)
+- [ ] 7. Deploy, testlar, hujjat
 
-## Muhim qarorlar
-- **2026-09-01 — ma'lumot o'chirilmaydi.** Bazadagi 57% takror chunk joyida
-  qoladi; takror faqat **qidiruv paytida** filtrlanadi (`dedupe_chunks`).
-- **2026-09-01 — sifat pasaymaydi, ortadi.** Uchala o'zgarish ham sifatga
-  ijobiy: model 10 ta HAR XIL manba ko'radi (avval ~7 ta + nusxalar),
-  parchalar savolga mos joyidan kesiladi (shovqin kamayadi), va `ef_search`
-  tufayli haqiqiy eng yaqin parchalar keladi.
-- **2026-09-01 — `FOCUS_WINDOW_CHARS = 1200`** (`book_retrieval.py`). Agar
-  biror generatsiya yupqaroq tuyulsa — shu bitta sonni oshirish kifoya.
-- **2026-09-01 — `hnsw.ef_search = 200`** bazada saqlanadi va
-  `migrate-entrypoint.sh` orqali har deployda qayta qo'yiladi.
+## Sizdan kerak bo'ladi (bloklovchi, men qila olmayman)
+1. **`meet.fermi.uz`** uchun DNS A yozuvi → `87.192.230.208`
+   (`onlinetalim.fermi.uz` allaqachon to'g'ri ko'rsatyapti ✅)
+2. **Routerda UDP 10000 portini** `192.168.0.101` ga yo'naltirish —
+   Jitsi videosi shu port orqali yuradi. Busiz tashqaridagi talaba
+   video ko'ra olmaydi.
+   Tayyor bo'lguncha vaqtincha `meet.jit.si` ishlatiladi (davomat baribir
+   avtomatik ishlaydi) — `VITE_JITSI_DOMAIN` bitta sozlama.
+
+## Xavfsizlik to'ri
+- Boshlang'ich holat: commit `46eb2e7` (GitHub `production-snapshot`).
+  Nimadir buzilsa shu commitga qaytamiz.
+- Har bosqich oxirida testlar o'tgach commit qilinadi.
+- Migratsiyadan oldin baza zaxirasi olinadi (`pg_dump`).
 
 ## Ochiq savollar / xavflar
-- Mexanik qadamlar (savol tarjimasi, variant izohi) uchun arzonroq model —
-  qo'shimcha ~20-30% tejash mumkin, lekin foydalanuvchi tasdig'i kutilyapti.
-- OpenAI prompt-keshi ~5-10 daqiqa yashaydi: bir vaqtda ko'p o'qituvchi
-  ishlaganda kesh ko'p tegadi, yolg'iz ishlaganda kamroq.
-- Bazadagi 408 254 ortiqcha chunk hamon joyida (~16.9 GB disk, indeks
-  hajmi 3 966 MB). O'chirilsa indeks kichrayadi va qidiruv tezlashadi —
-  lekin bu ma'lumot o'chirish, foydalanuvchi qaroriga qoldirilgan.
+- Jitsi ~4-8 GB RAM oladi. Serverda hozir 41 GB bo'sh — yetadi, lekin
+  bir vaqtda ko'p dars bo'lsa kuzatib borish kerak.
+- Mexanik AI qadamlari uchun arzon model (avvalgi ish) — hali tasdiqlanmagan.
