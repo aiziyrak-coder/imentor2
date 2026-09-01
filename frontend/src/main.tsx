@@ -50,9 +50,12 @@ window.addEventListener('load', () => {
  * Online ta'lim portali AYRIM domenda turadi (`onlinetalim.fermi.uz`) va
  * butunlay boshqa daraxt — mavjud `App` ga umuman tegilmaydi.
  *
- * Ikkalasi bitta konteynerdan xizmat qiladi, shuning uchun tanlov shu yerda,
- * domen nomi bo'yicha qilinadi. Domenni `VITE_ONLINE_HOST` bilan o'zgartirish
- * mumkin; ishlab chiqish uchun `?online=1` ham yetadi.
+ * Portal o'z domeni va O'Z konteynerida (`frontend_online`) turadi — uni
+ * yangilash iMentor frontendini qimirlatmaydi. Bundle bir xil bo'lgani uchun
+ * qaysi qobiq ko'rsatilishini shu yerda, domen nomi hal qiladi.
+ *
+ * `VITE_ONLINE_HOST` — domen sozlamasi. `?online=1` esa FAQAT ishlab chiqish
+ * va tez tekshirish uchun; haqiqiy manzil har doim o'z domeni.
  */
 const OnlineApp = lazy(() => import('./online/OnlineApp.tsx'));
 

@@ -8,13 +8,15 @@ import {
   type OnlineSession,
 } from './onlineAuth';
 import OnlineTeacherCabinet from './OnlineTeacherCabinet';
+import OnlineStudentCabinet from './OnlineStudentCabinet';
 
 /**
  * Online ta'lim portali — `onlinetalim.fermi.uz`.
  *
  * Bu daraxt hozirgi iMentor `App` dan BUTUNLAY ajratilgan: alohida seans
- * kaliti, alohida API marshrutlari, alohida komponentlar. Ikkalasi faqat
- * bitta konteynerdan xizmat qilishi bilan bog'liq.
+ * kaliti, alohida API marshrutlari, alohida komponentlar va alohida
+ * konteyner (`frontend_online`) — iMentor bilan faqat bitta backend
+ * orqali bog'liq.
  */
 
 type Mode = 'teacher' | 'student';
@@ -147,23 +149,6 @@ function LoginScreen({ onDone }: { onDone: (s: OnlineSession) => void }) {
   );
 }
 
-function StudentPlaceholder({ session }: { session: OnlineSession }) {
-  return (
-    <div className="mx-auto max-w-2xl p-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-bold text-slate-900">Salom, {session.displayName}</h2>
-        <p className="mt-1 text-[13.5px] text-slate-600">
-          Guruh: <span className="font-medium">{session.groupName || '—'}</span>
-        </p>
-        <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[13px] text-slate-600">
-          Talaba kabineti tayyorlanmoqda. Fanlaringiz va mavzular tez orada shu
-          yerda paydo bo'ladi.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export default function OnlineApp() {
   const [session, setSession] = useState<OnlineSession | null>(null);
   const [ready, setReady] = useState(false);
@@ -200,6 +185,7 @@ export default function OnlineApp() {
               <p className="text-[13.5px] font-bold text-slate-900">Online ta'lim</p>
               <p className="text-[11px] text-slate-500">
                 {session.role === 'teacher' ? "O'qituvchi" : 'Talaba'} · {session.displayName}
+                {session.role === 'student' && session.groupName ? ` · ${session.groupName}` : ''}
               </p>
             </div>
           </div>
@@ -218,7 +204,7 @@ export default function OnlineApp() {
         {session.role === 'teacher' ? (
           <OnlineTeacherCabinet onUnauthorized={logout} />
         ) : (
-          <StudentPlaceholder session={session} />
+          <OnlineStudentCabinet displayName={session.displayName} />
         )}
       </main>
 

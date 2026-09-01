@@ -16,7 +16,7 @@
 set -euo pipefail
 
 DOMAIN="onlinetalim.fermi.uz"
-UPSTREAM="127.0.0.1:9050"     # iMentor frontend konteyneri
+UPSTREAM="127.0.0.1:9060"     # online portalning O'Z konteyneri
 AVAILABLE="/etc/nginx/sites-available/${DOMAIN}"
 ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"
 
@@ -48,7 +48,7 @@ server {
     client_max_body_size 100m;
 
     location / {
-        proxy_pass http://127.0.0.1:9050;
+        proxy_pass http://127.0.0.1:9060;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;

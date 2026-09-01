@@ -57,6 +57,10 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 
 ## Yo'l xaritasi (bosqichlar)
 - [x] 0. O'rganish, savollar, TZ
+**Ajratish:** portal o'z domenida (`onlinetalim.fermi.uz`) VA o'z konteynerida
+(`frontend_online`, 9060-port). Uni yangilash iMentor frontendini qimirlatmaydi —
+sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.
+
 - [x] 1. Baza: 9 ta jadval + migratsiya `h8i9j0k1l2m3` (upgrade/downgrade sinovdan o'tdi,
       productionga qo'llandi — mavjud 479 sillabus va 153 kontent joyida)
 - [x] 2. Admin: "Online ta'lim" sahifasi — sillabus yuklash (mavjud tahlilchi qayta
@@ -68,8 +72,10 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 - [x] 4. Video dars, davomat va mavzu qulfi. Jitsi domeni serverdan olinadi
       (`/online/config/`), davomat IFrame API hodisalaridan, vaqtni server qo'yadi.
       O'rnatish skriptlari: `deploy/setup-onlinetalim.sh`, `deploy/setup-jitsi.sh`.
-- [ ] 5. Talaba portali  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
-- [ ] 6. Baholash va hisobotlar (admin panelda)
+- [x] 5. Talaba kabineti: fanlar → qulflangan mavzular → material → 10 ta test
+      (bir marta). Jonli darsga qo'shilish tugmasi, davomat avtomatik.
+      Guruh TOKENDAN olinadi — brauzerdan emas.
+- [ ] 6. Baholash va hisobotlar  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 - [ ] 7. Deploy, testlar, hujjat
 
 ## Sizdan kerak bo'ladi (bloklovchi, men qila olmayman)
