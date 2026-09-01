@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 import time
 from typing import Any, Iterator
 
@@ -64,6 +65,42 @@ def _extract_text(resp: dict[str, Any]) -> str:
     return content.strip()
 
 
+# --- Token hisobi -------------------------------------------------------------
+#
+# OpenAI har javobda `usage` qaytaradi, lekin ilgari u o'qilmasdan tashlanardi.
+# Natijada "sarf ko'p" degan gapni tekshirib ham, kamayganini isbotlab ham
+# bo'lmasdi. Endi har chaqiruv bitta qatorga yoziladi va uni oddiy `grep` bilan
+# yig'ish mumkin.
+#
+# `cached` — OpenAI'ning avtomatik prompt-keshi qayta ishlatgan tokenlar soni.
+# Ular arzonroq hisoblanadi, shuning uchun alohida ko'rsatiladi.
+
+usage_logger = logging.getLogger("imentor.openai.usage")
+
+
+def _log_usage(resp: dict, model: str, kind: str) -> None:
+    """Javobdagi `usage` ni bitta qatorga yozadi. Hech qachon xato ko'tarmaydi."""
+    try:
+        u = resp.get("usage") if isinstance(resp, dict) else None
+        if not isinstance(u, dict):
+            return
+        details = u.get("prompt_tokens_details")
+        cached = 0
+        if isinstance(details, dict):
+            cached = int(details.get("cached_tokens") or 0)
+        usage_logger.info(
+            "OPENAI_USAGE kind=%s model=%s in=%s cached=%s out=%s total=%s",
+            kind,
+            model,
+            u.get("prompt_tokens", 0),
+            cached,
+            u.get("completion_tokens", 0),
+            u.get("total_tokens", 0),
+        )
+    except Exception:  # hisob yuritish asosiy ishni to'xtatmasin
+        pass
+
+
 def generate_openai_chat(
     api_key: str,
     *,
@@ -73,6 +110,7 @@ def generate_openai_chat(
     temperature: float = 0.35,
     timeout_sec: int = 280,
     response_format: dict | None = None,
+    usage_kind: str = "chat",
 ) -> str:
     """Tayyor `messages` ro'yxati (system/user/assistant) bilan chat completion."""
     body: dict[str, Any] = {
@@ -85,6 +123,7 @@ def generate_openai_chat(
     if response_format:
         body["response_format"] = response_format
     resp = _http_post(api_key, body, url=OPENAI_CHAT_URL, timeout_sec=timeout_sec)
+    _log_usage(resp, model, usage_kind)
     return _extract_text(resp)
 
 
@@ -156,6 +195,7 @@ def generate_openai_text(
     json_only: bool = False,
     max_429_retries: int = 2,
     timeout_sec: int = 180,
+    usage_kind: str = "text",
 ) -> str:
     sys_text = (system_instruction or "").strip()
     if json_only:
@@ -179,6 +219,7 @@ def generate_openai_text(
     for attempt in range(max(1, max_429_retries)):
         try:
             resp = _http_post(api_key, body, url=OPENAI_CHAT_URL, timeout_sec=timeout_sec)
+            _log_usage(resp, model, usage_kind)
             return _extract_text(resp)
         except OpenAiClientError as e:
             msg = str(e)

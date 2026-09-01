@@ -69,6 +69,109 @@ def resolve_book_department_id(
     return None
 
 
+# --- Kontekstni siqish: takror va shovqinni promptga yubormaslik --------------
+#
+# Ikkala funksiya ham BAZAGA TEGMAYDI — faqat qidiruv natijasini tozalaydi.
+# Chunklar joyida qoladi, shunchaki promptga toza va zich matn boradi.
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+|\n+")
+_WORD = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
+
+# Bitta parchadan promptga ketadigan maksimal belgi. Korpusda o'rtacha chunk
+# ~3 200 belgi (mediana 3 900) — bu RAG uchun 3-4 barobar katta va kerakli
+# jumla shovqin ichida ko'milib ketadi. Savolga eng yaqin oynani kesib olsak,
+# model ham aniqroq javob beradi, token ham kamayadi.
+FOCUS_WINDOW_CHARS = 1200
+
+# Takrorlarni tashlagach yetarli noyob parcha qolishi uchun necha barobar
+# ko'p nomzod olamiz. Korpusda takror ulushi ~57% bo'lgani uchun 3 barobar
+# deyarli har doim yetadi.
+OVERFETCH = 3
+
+
+def _norm_for_dedup(text: str) -> str:
+    """Takrorni aniqlash uchun matnni bir ko'rinishga keltiradi."""
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def dedupe_chunks(chunks: list[dict], limit: int) -> list[dict]:
+    """Bir xil matnli parchalarni tashlab, `limit` tagacha noyobini qaytaradi.
+
+    Korpusning 57 foizi aynan takror (bir kitob bir necha marta yuklangan).
+    Filtrsiz `top_k=10` amalda 4-5 ta har xil manba beradi, qolgani nusxa —
+    ya'ni pul ham ketadi, model ko'radigan manbalar xilma-xilligi ham kamayadi.
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for c in chunks:
+        if not isinstance(c, dict):
+            continue
+        key = _norm_for_dedup(str(c.get("text") or ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def focus_window(text: str, query: str, max_chars: int = FOCUS_WINDOW_CHARS) -> str:
+    """Parchadan savolga eng aloqador uzluksiz qismni kesib oladi.
+
+    Gap chegaralari bo'yicha ishlaydi, ya'ni jumla o'rtasidan kesilmaydi.
+    Savol so'zlari umuman uchramasa — parchaning boshini qaytaradi (parcha
+    baribir vektor qidiruvi bo'yicha eng yaqinlaridan biri).
+    """
+    body = (text or "").strip()
+    if len(body) <= max_chars:
+        return body
+
+    terms = {w.lower() for w in _WORD.findall(query or "")}
+    sentences = [s2.strip() for s2 in _SENTENCE_SPLIT.split(body) if s2.strip()]
+    if not sentences:
+        return body[:max_chars].rstrip()
+
+    scores = []
+    for sent in sentences:
+        if not terms:
+            scores.append(0)
+            continue
+        words = {w.lower() for w in _WORD.findall(sent)}
+        scores.append(len(terms & words))
+
+    # Belgilar bo'yicha cheklangan oyna ichida eng ko'p mos so'z to'plangan joy.
+    best_start, best_end, best_score, best_len = 0, 0, -1, -1
+    start = 0
+    length = 0
+    running = 0
+    for end, sent in enumerate(sentences):
+        length += len(sent) + 1
+        running += scores[end]
+        while length > max_chars and start < end:
+            length -= len(sentences[start]) + 1
+            running -= scores[start]
+            start += 1
+        # Ball teng bo'lsa - to'liqroq oyna. Busiz savol so'zlari umuman
+        # uchramaganda (hamma ball 0) birinchi jumlagina qaytardi, ya'ni
+        # 1200 belgilik joyga 10 belgi ketardi va ma'lumot yo'qolardi.
+        if running > best_score or (running == best_score and length > best_len):
+            best_start, best_end, best_score, best_len = start, end, running, length
+
+    window = " ".join(sentences[best_start : best_end + 1]).strip()
+    if not window:
+        return body[:max_chars].rstrip()
+    # Kesilganini bildirib qo'yamiz — model matn to'liq emasligini bilsin.
+    if len(window) > max_chars:
+        # Bitta gapning o'zi chegaradan uzun - so'z chegarasida kesamiz.
+        cut = window[:max_chars]
+        space = cut.rfind(" ")
+        window = (cut[:space] if space > max_chars // 2 else cut).rstrip()
+    prefix = "… " if best_start > 0 else ""
+    suffix = " …" if best_end < len(sentences) - 1 else ""
+    return prefix + window + suffix
+
+
 def _chunk_to_dict(chunk: BookChunk) -> dict:
     return {
         "book_title": chunk.book.title,
@@ -135,17 +238,31 @@ def retrieve_book_context_many(
         if not q.strip():
             out.append([])
             continue
+        # Takrorlar tashlangach `top_k` ta NOYOB parcha qolishi uchun ortig'i
+        # bilan olamiz. HNSW indeksi bilan bu ~20 ms, ya'ni deyarli tekin.
         chunks = (
             db.execute(
                 select(BookChunk)
                 .where(BookChunk.department_id == dept_id)
                 .order_by(BookChunk.embedding.cosine_distance(vec))
-                .limit(top_k)
+                .limit(top_k * OVERFETCH)
             )
             .scalars()
             .all()
         )
-        out.append([_chunk_to_dict(c) for c in chunks])
+        cands = [_chunk_to_dict(c) for c in chunks]
+        picked = dedupe_chunks(cands, top_k)
+        raw_chars = sum(len(c["text"]) for c in picked)
+        for item in picked:
+            item["text"] = focus_window(item["text"], q)
+        logger.info(
+            "RAG kontekst: %d nomzod -> %d noyob parcha, %d -> %d belgi",
+            len(cands),
+            len(picked),
+            raw_chars,
+            sum(len(c["text"]) for c in picked),
+        )
+        out.append(picked)
     return out
 
 
@@ -186,12 +303,15 @@ def retrieve_book_context_by_department_id(
             select(BookChunk)
             .where(BookChunk.department_id == dept_id)
             .order_by(BookChunk.embedding.cosine_distance(vec))
-            .limit(top_k)
+            .limit(top_k * OVERFETCH)
         )
         .scalars()
         .all()
     )
-    return [_chunk_to_dict(c) for c in chunks]
+    picked = dedupe_chunks([_chunk_to_dict(c) for c in chunks], top_k)
+    for item in picked:
+        item["text"] = focus_window(item["text"], q)
+    return picked
 
 
 def format_book_context_message(chunks: list[dict]) -> str | None:

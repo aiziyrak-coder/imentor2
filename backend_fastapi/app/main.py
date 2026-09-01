@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -51,6 +52,21 @@ async def lifespan(_app: FastAPI):
     limiter = to_thread.current_default_thread_limiter()
     limiter.total_tokens = int(os.environ.get("APP_THREAD_LIMIT", "48"))
     yield
+
+
+# Gunicorn/uvicorn faqat o'zining loglarini sozlaydi, ilova loggerlari esa
+# standart WARNING darajasida qolardi — ya'ni token sarfi va RAG hajmi kabi
+# hisob qatorlari hech qayerga chiqmasdi. Shuni ochamiz (darajani `IMENTOR_LOG_LEVEL`
+# bilan o'zgartirish mumkin).
+_LEVEL = os.environ.get("IMENTOR_LOG_LEVEL", "INFO").upper()
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+for _name in ("app", "imentor"):
+    _lg = logging.getLogger(_name)
+    _lg.setLevel(_LEVEL)
+    if not _lg.handlers:
+        _lg.addHandler(_handler)
+    _lg.propagate = False
 
 
 app = FastAPI(title="iMentor API (FastAPI)", version="0.1.0", lifespan=lifespan)

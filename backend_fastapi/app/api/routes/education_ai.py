@@ -44,6 +44,27 @@ def _release_db(db: Session) -> None:
         pass
 
 
+def _insert_book_context(messages: list[dict], context_message: str) -> list[dict]:
+    """RAG kontekstini statik `system` qoidalaridan KEYIN qo'yadi.
+
+    Ilgari u ro'yxatning eng boshiga qo'yilardi. OpenAI promptni boshidan
+    boshlab mos kelgan qismini keshlaydi va keshdan olingan tokenlarni
+    arzonroq hisoblaydi. RAG matni esa har mavzuda boshqacha — u boshda
+    tursa, ortidagi uzun va HAR DOIM BIR XIL qoidalar hech qachon keshga
+    tushmaydi.
+
+    Tartibni almashtirish javob mazmuniga ta'sir qilmaydi: ikkalasi ham
+    `system` roli va foydalanuvchi navbatidan oldin turadi.
+    """
+    head = 0
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") == "system":
+            head += 1
+        else:
+            break
+    return messages[:head] + [{"role": "system", "content": context_message}] + messages[head:]
+
+
 @router.post("/education-ai/completion/", response_model=EducationAiCompletionResponse)
 def education_ai_completion(
     payload: EducationAiCompletionRequest,
@@ -70,7 +91,7 @@ def education_ai_completion(
         chunks = rag.retrieve_book_context(db, subject_code, topic_query)
         context_message = rag.format_book_context_message(chunks)
         if context_message:
-            messages = [{"role": "system", "content": context_message}] + messages
+            messages = _insert_book_context(messages, context_message)
             book_references = rag.book_references_from_chunks(chunks)
 
     _release_db(db)
@@ -121,7 +142,7 @@ def education_ai_completion_stream(
         chunks = rag.retrieve_book_context(db, subject_code, topic_query)
         context_message = rag.format_book_context_message(chunks)
         if context_message:
-            messages = [{"role": "system", "content": context_message}] + messages
+            messages = _insert_book_context(messages, context_message)
             book_references = rag.book_references_from_chunks(chunks)
 
     # Stream javobida `Depends(get_db)` tozalanishi butun oqim tugagunicha

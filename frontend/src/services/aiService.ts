@@ -1634,20 +1634,25 @@ async function requestPresentationDeckFromAi(params: {
       params.onProgress?.(translate(params.language, 'ai.progress.content'));
       const more = await openaiJson<Partial<PresentationContent>>({
         model: OPENAI_CHAT,
-        system:
-          system +
-          ` DAVOM ETTIRISH: taqdimotning birinchi qismi tayyor. Endi FAQAT yana ${need} ta ` +
-          'YANGI slayd qaytaring. Quyidagi sarlavhalar allaqachon ishlatilgan — ularni yoki ' +
-          'ularning mazmunini QAYTA yozmang, ma\'ruzaning hali yoritilmagan qismlarini oching. ' +
-          'title va agenda slaydi KERAK EMAS. summary slaydi eng oxirida bitta bo\'lsin.',
+        // `system` AYNAN birinchi chaqiruvdagidek qoladi — davom ettirish
+        // ko\'rsatmasi `user` oxiriga qo\'shiladi. Shunda promptning boshi
+        // birinchi chaqiruv bilan bir xil bo\'lib, OpenAI uni keshdan oladi.
+        system,
         user:
           user +
+          `\n\nDAVOM ETTIRISH: taqdimotning birinchi qismi tayyor. Endi FAQAT yana ${need} ta ` +
+          'YANGI slayd qaytaring. Quyidagi sarlavhalar allaqachon ishlatilgan — ularni yoki ' +
+          'ularning mazmunini QAYTA yozmang, ma\'ruzaning hali yoritilmagan qismlarini oching. ' +
+          'title va agenda slaydi KERAK EMAS. summary slaydi eng oxirida bitta bo\'lsin.' +
           '\n\nALLAQACHON ISHLATILGAN SARLAVHALAR:\n' +
           usedTitles.map((t2) => '- ' + t2).join('\n') +
           `\n\nYana ${need} ta yangi slayd bering (JSON: {slides:[...]}).`,
         maxTokens: 16000,
         temperature: 0.4,
-        bookContext,
+        // Darslik konteksti QAYTA so\'ralmaydi: `user` ichida ma\'ruza matni
+        // (24 000 belgigacha) allaqachon bor va vazifa aynan shu matnni
+        // slaydlarga aylantirish. Kitob parchalarini ikkinchi marta yuklash
+        // har taqdimotda ~8 500 tokenni behuda sarflardi.
         responseFormat,
         parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
       });
