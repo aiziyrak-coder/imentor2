@@ -59,8 +59,10 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 - [x] 0. O'rganish, savollar, TZ
 - [x] 1. Baza: 9 ta jadval + migratsiya `h8i9j0k1l2m3` (upgrade/downgrade sinovdan o'tdi,
       productionga qo'llandi — mavjud 479 sillabus va 153 kontent joyida)
-- [ ] 2. Admin: sillabus yuklash, o'qituvchi/guruh biriktirish  <- HOZIR SHU YERDA
-- [ ] 3. O'qituvchi: fan → mavzu → material (AI + yuklash)
+- [x] 2. Admin: "Online ta'lim" sahifasi — sillabus yuklash (mavjud tahlilchi qayta
+      ishlatildi), o'qituvchi va guruh biriktirish, darslar va natijalar jadvali.
+      API sinovdan o'tdi: o'qituvchi→403, tokensiz→401, eski katalog 200 yozuv joyida.
+- [ ] 3. O'qituvchi: fan → mavzu → material (AI + yuklash)  <- HOZIR SHU YERDA
 - [ ] 4. Jitsi infratuzilmasi + dars sessiyasi + davomat
 - [ ] 5. Talaba portali (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 - [ ] 6. Baholash va hisobotlar (admin panelda)
@@ -80,6 +82,10 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
   Nimadir buzilsa shu commitga qaytamiz.
 - Har bosqich oxirida testlar o'tgach commit qilinadi.
 - Migratsiyadan oldin baza zaxirasi olinadi (`pg_dump`).
+
+## Sinov ma'lumoti (oxirida o'chiriladi)
+Serverda sinov uchun yaratilgan: `Ichki kasalliklar (online sinov)` fani (id 1),
+`998901112233` o'qituvchi, `601-guruh`. 7-bosqichda tozalanadi.
 
 ## Ochiq savollar / xavflar
 - Jitsi ~4-8 GB RAM oladi. Serverda hozir 41 GB bo'sh — yetadi, lekin

@@ -92,6 +92,7 @@ import AdminStaffLocationConsole from './components/admin/AdminStaffLocationCons
 import AdminLiveTeachingBoard from './components/admin/AdminLiveTeachingBoard';
 import AdminCampusBuildingsPage from './components/admin/AdminCampusBuildingsPage';
 import AdminSyllabusCatalog from './components/admin/AdminSyllabusCatalog';
+import AdminOnlineEdu from './components/admin/AdminOnlineEdu';
 import AdminCourseAssignments from './components/admin/AdminCourseAssignments';
 import AdminTopicVideos from './components/admin/AdminTopicVideos';
 import AdminTopicHandouts from './components/admin/AdminTopicHandouts';
@@ -122,6 +123,7 @@ type View =
   | 'admin-live-test-results'
   | 'admin-syllabuses'
   | 'admin-course-assignments'
+  | 'admin-online-edu'
   | 'admin-videos'
   | 'admin-handouts'
   | 'admin-books'
@@ -150,6 +152,7 @@ const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-live-test-results': Users,
   'admin-syllabuses': BookOpen,
   'admin-course-assignments': GraduationCap,
+  'admin-online-edu': Monitor,
   'admin-videos': Youtube,
   'admin-handouts': Files,
   'admin-books': BookMarked,
@@ -184,6 +187,7 @@ const ADMIN_NAV_IDS: View[] = [
   'admin-campus-buildings',
   'admin-syllabuses',
   'admin-course-assignments',
+  'admin-online-edu',
   'admin-videos',
   'admin-handouts',
   'admin-books',
@@ -549,6 +553,8 @@ export default function App() {
         return <AdminLiveTestResultsPage />;
       case 'admin-syllabuses':
         return <AdminSyllabusCatalog />;
+      case 'admin-online-edu':
+        return <AdminOnlineEdu />;
       case 'admin-course-assignments':
         return <AdminCourseAssignments />;
       case 'admin-videos':
