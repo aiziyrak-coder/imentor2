@@ -26,6 +26,8 @@ class OnlineSyllabusUpsert(BaseModel):
     subject_name: str = Field(min_length=1, max_length=255)
     subject_code: str = Field(default="", max_length=64)
     department_name: str = Field(default="", max_length=255)
+    # Kafedra AI uchun: darslik qidiruvi aynan shu bo'yicha ishlaydi.
+    department_id: int | None = None
     description: str = Field(default="", max_length=512)
     instruction_language: str = Field(default="uz", max_length=8)
     file_name: str = Field(default="", max_length=512)
@@ -40,6 +42,7 @@ class OnlineSyllabusOut(BaseModel):
     subject_name: str
     subject_code: str
     department_name: str
+    department_id: int | None = None
     description: str
     instruction_language: str
     file_name: str
@@ -61,6 +64,7 @@ class OnlineSyllabusBrief(BaseModel):
     subject_name: str
     subject_code: str
     department_name: str
+    department_id: int | None = None
     instruction_language: str
     topic_count: int
     variant_labels: list[str]
@@ -100,6 +104,7 @@ class OnlineGroupOut(BaseModel):
     id: int
     name: str
     is_active: bool
+    student_count: int = 0
     courses: list[dict] = []
 
 

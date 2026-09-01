@@ -51,6 +51,7 @@ export type OnlineSyllabusBrief = {
   subject_name: string;
   subject_code: string;
   department_name: string;
+  department_id: number | null;
   instruction_language: string;
   topic_count: number;
   variant_labels: string[];
@@ -84,6 +85,8 @@ export type OnlineGroup = {
   id: number;
   name: string;
   is_active: boolean;
+  /** Shu guruhdan nechta talaba portalda iz qoldirgan. */
+  student_count: number;
   courses: OnlineCourseLink[];
 };
 
@@ -283,4 +286,90 @@ export function fetchOnlineReport(params: {
   if (params.groupName) q.set('group_name', params.groupName);
   const qs = q.toString();
   return call(`/admin/report/${qs ? `?${qs}` : ''}`);
+}
+
+/* ---------------- tanlagichlar ---------------- */
+
+export type DeptOption = {
+  id: number;
+  name: string;
+  code: string;
+  /** Kafedrada nechta darslik parchasi bor — AI shulardan o'qiydi. */
+  book_chunks: number;
+};
+
+export type StaffOption = {
+  owner_key: string;
+  full_name: string;
+  department: string;
+  is_online_teacher: boolean;
+};
+
+export type SubjectTopicRow = {
+  code: string;
+  title: string;
+  ready: number;
+  opened_for: string[];
+};
+
+export type SubjectVariant = {
+  label: string;
+  topic_count: number;
+  ready_count: number;
+  topics: SubjectTopicRow[];
+};
+
+export type SubjectDetail = {
+  id: number;
+  subject_name: string;
+  subject_code: string;
+  department_name: string;
+  department_id: number | null;
+  instruction_language: string;
+  is_active: boolean;
+  variant_labels: string[];
+  teachers: Array<{
+    link_id: number;
+    teacher_id: number;
+    owner_key: string;
+    full_name: string;
+    variant_label: string;
+  }>;
+  groups: Array<{
+    link_id: number;
+    group_id: number;
+    name: string;
+    is_active: boolean;
+    variant_label: string;
+  }>;
+  variants: SubjectVariant[];
+  lessons: Array<{
+    id: number;
+    topic_code: string;
+    variant_label: string;
+    group_name: string;
+    started_at: string | null;
+    ended_at: string | null;
+    is_opened: boolean;
+  }>;
+};
+
+export function fetchDepartments(): Promise<DeptOption[]> {
+  return call('/admin/departments/');
+}
+
+export function fetchStaffOptions(q = ''): Promise<StaffOption[]> {
+  const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+  return call(`/admin/staff/${qs}`);
+}
+
+export function fetchSubjectDetail(id: number): Promise<SubjectDetail> {
+  return call(`/admin/subject/${id}/`);
+}
+
+export function setGroupActive(id: number, name: string, active: boolean): Promise<OnlineGroup> {
+  return call(`/admin/groups/${id}/`, {
+    method: 'PATCH',
+    body: { name, is_active: active },
+  });
 }

@@ -37,12 +37,25 @@ def slugify_subject(name: str) -> str:
 
 
 def unique_subject_code(db: Session, base: str) -> str:
+    """Fan kodi IKKALA jadvalda ham noyob bo'ladi.
+
+    Kod RAG uchun kalit: darslik qidiruvi avval `core_coursesyllabus` da,
+    keyin `online_syllabus` da qidiradi. Ikkalasida bir xil kod bo'lsa,
+    online fanga boshqa kafedraning darsliklari kelib qolardi.
+    """
+    from app.models.content import CourseSyllabus
+
     code = (base or "").strip()[:64] or "fan"
     root = code
     n = 1
-    while db.execute(
-        select(OnlineSyllabus.id).where(OnlineSyllabus.subject_code == code)
-    ).scalar_one_or_none():
+    while (
+        db.execute(
+            select(OnlineSyllabus.id).where(OnlineSyllabus.subject_code == code)
+        ).scalar_one_or_none()
+        or db.execute(
+            select(CourseSyllabus.id).where(CourseSyllabus.subject_code == code)
+        ).scalar_one_or_none()
+    ):
         code = f"{root}-{n}"[:64]
         n += 1
     return code

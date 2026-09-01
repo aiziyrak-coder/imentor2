@@ -12,6 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.core.db import get_db
+from app.models.book import BookChunk
+from app.models.content import AcademicDepartment
+from app.models.staff_location import StaffProfile
 from app.models.online_edu import (
     OnlineAttendance,
     OnlineGroup,
@@ -69,6 +72,7 @@ def list_syllabuses(
             subject_name=s.subject_name,
             subject_code=s.subject_code,
             department_name=s.department_name,
+            department_id=s.department_id,
             instruction_language=s.instruction_language,
             topic_count=len(svc.topics_for(s)),
             variant_labels=svc.variant_labels(s),
@@ -117,6 +121,7 @@ def create_syllabus(
         subject_name=name,
         subject_code=code,
         department_name=payload.department_name.strip()[:255],
+        department_id=payload.department_id,
         description=payload.description.strip()[:512],
         instruction_language=lang,
         file_name=file_name or f"{name}.pdf",
@@ -142,6 +147,8 @@ def update_syllabus(
     obj = _syllabus_or_404(db, pk)
     obj.subject_name = payload.subject_name.strip()
     obj.department_name = payload.department_name.strip()[:255]
+    if payload.department_id is not None:
+        obj.department_id = payload.department_id
     obj.description = payload.description.strip()[:512]
     obj.sort_order = payload.sort_order
     obj.is_active = payload.is_active
@@ -318,6 +325,13 @@ def _group_out(db: Session, g: OnlineGroup) -> OnlineGroupOut:
         id=g.id,
         name=g.name,
         is_active=g.is_active,
+        student_count=int(
+            db.execute(
+                select(func.count(func.distinct(OnlineProgress.student_id))).where(
+                    OnlineProgress.group_name == g.name
+                )
+            ).scalar_one()
+        ),
         courses=[
             {
                 "id": gc.id,
@@ -351,6 +365,25 @@ def add_group(
         return _group_out(db, existing)
     obj = OnlineGroup(name=name, is_active=payload.is_active, created_at=svc.now())
     db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return _group_out(db, obj)
+
+
+@router.patch("/online/admin/groups/{pk}/", response_model=OnlineGroupOut)
+def set_group_active(
+    pk: int, payload: OnlineGroupIn, db: Session = Depends(get_db), _auth=AdminOnly
+) -> OnlineGroupOut:
+    """Guruhni yoqadi yoki o'chiradi.
+
+    Talaba portalga kirishga urinsa, guruhi o'zi nofaol holatda yoziladi —
+    admin uni shu yerda bitta bosish bilan yoqadi. Nom qo'lda terilmaydi,
+    demak xato ham bo'lmaydi.
+    """
+    obj = db.get(OnlineGroup, pk)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Guruh topilmadi.")
+    obj.is_active = payload.is_active
     db.commit()
     db.refresh(obj)
     return _group_out(db, obj)
@@ -645,4 +678,208 @@ def admin_report(
         "rows": out,
         "lessons_total": held_count,
         "topics_opened": opened_topics,
+    }
+
+# ============================ Tanlagichlar ============================
+
+@router.get("/online/admin/departments/")
+def pick_departments(db: Session = Depends(get_db), _auth=AdminOnly) -> list[dict]:
+    """Kafedralar va ularda nechta darslik parchasi borligi.
+
+    Fan qaysi kafedraga tegishli ekani AI uchun muhim: ma'ruza va test
+    o'sha kafedra darsliklaridan yoziladi. Shuning uchun ro'yxatda parcha
+    soni ham ko'rsatiladi — kafedra bo'sh bo'lsa, buni oldindan bilib
+    olish kerak.
+    """
+    counts = dict(
+        db.execute(
+            select(BookChunk.department_id, func.count(BookChunk.id)).group_by(
+                BookChunk.department_id
+            )
+        ).all()
+    )
+    rows = db.execute(
+        select(AcademicDepartment)
+        .where(AcademicDepartment.is_active.is_(True))
+        .order_by(AcademicDepartment.sort_order, AcademicDepartment.name)
+    ).scalars().all()
+    return [
+        {
+            "id": d.id,
+            "name": d.name,
+            "code": d.code,
+            "book_chunks": int(counts.get(d.id, 0)),
+        }
+        for d in rows
+    ]
+
+
+@router.get("/online/admin/staff/")
+def pick_staff(
+    db: Session = Depends(get_db),
+    _auth=AdminOnly,
+    q: str = Query(default="", max_length=120),
+) -> list[dict]:
+    """O'qituvchi tanlash uchun mavjud iMentor xodimlari.
+
+    Ilgari admin telefon raqamini yoddan yozardi. Endi ism bo'yicha
+    qidiriladi va ro'yxatdan tanlanadi.
+    """
+    from app.models.user import Group as UserGroup, user_groups
+
+    stmt = (
+        select(User)
+        .join(user_groups, user_groups.c.user_id == User.id)
+        .join(UserGroup, UserGroup.id == user_groups.c.group_id)
+        .where(UserGroup.name.in_(("admin", "klinika_admin", "hodim")))
+        .distinct()
+    )
+    term = q.strip().lower()
+    if term:
+        like = f"%{term}%"
+        stmt = stmt.where(
+            func.lower(User.first_name).like(like)
+            | func.lower(User.last_name).like(like)
+            | User.username.like(like)
+        )
+    users = db.execute(stmt.order_by(User.first_name, User.last_name).limit(60)).scalars().all()
+
+    already = {
+        t.owner_key
+        for t in db.execute(select(OnlineTeacher)).scalars().all()
+    }
+    profiles = {
+        pr.owner_key: pr
+        for pr in db.execute(
+            select(StaffProfile).where(
+                StaffProfile.owner_key.in_([u.username for u in users] or [""])
+            )
+        ).scalars().all()
+    }
+    out = []
+    for u in users:
+        pr = profiles.get(u.username)
+        out.append(
+            {
+                "owner_key": u.username,
+                "full_name": f"{u.first_name} {u.last_name}".strip() or u.username,
+                "department": (pr.department if pr else "") or "",
+                "is_online_teacher": u.username in already,
+            }
+        )
+    return out
+
+
+@router.get("/online/admin/subject/{pk}/")
+def subject_detail(pk: int, db: Session = Depends(get_db), _auth=AdminOnly) -> dict:
+    """Bitta fanning TO'LIQ holati — bir ekranda.
+
+    Admin panelning asosiy ko'rinishi shu: fan tanlanadi va uning
+    o'qituvchisi, guruhlari, mavzulari va darslari birga ko'rinadi.
+    Ilgari bularning har biri alohida bo'limda edi va nima nimaga
+    bog'langanini ko'rish uchun bir necha joyni aylanib chiqish kerakdi.
+    """
+    syllabus = _syllabus_or_404(db, pk)
+
+    teachers = [
+        {
+            "link_id": tc.id,
+            "teacher_id": t.id,
+            "owner_key": t.owner_key,
+            "full_name": t.full_name,
+            "variant_label": tc.variant_label,
+        }
+        for tc, t in db.execute(
+            select(OnlineTeacherCourse, OnlineTeacher)
+            .join(OnlineTeacher, OnlineTeacher.id == OnlineTeacherCourse.teacher_id)
+            .where(OnlineTeacherCourse.syllabus_id == pk)
+        ).all()
+    ]
+
+    groups = [
+        {
+            "link_id": gc.id,
+            "group_id": g.id,
+            "name": g.name,
+            "is_active": g.is_active,
+            "variant_label": gc.variant_label,
+        }
+        for gc, g in db.execute(
+            select(OnlineGroupCourse, OnlineGroup)
+            .join(OnlineGroup, OnlineGroup.id == OnlineGroupCourse.group_id)
+            .where(OnlineGroupCourse.syllabus_id == pk)
+            .order_by(OnlineGroup.name)
+        ).all()
+    ]
+
+    mats = db.execute(
+        select(OnlineMaterial.variant_label, OnlineMaterial.topic_code, OnlineMaterial.kind).where(
+            OnlineMaterial.syllabus_id == pk
+        )
+    ).all()
+    have: dict[tuple[str, str], set[str]] = {}
+    for variant, code, kind in mats:
+        have.setdefault((str(variant or ""), str(code)), set()).add(str(kind))
+
+    lessons = db.execute(
+        select(OnlineLesson, OnlineGroup)
+        .join(OnlineGroup, OnlineGroup.id == OnlineLesson.group_id)
+        .where(OnlineLesson.syllabus_id == pk)
+        .order_by(OnlineLesson.created_at.desc())
+        .limit(50)
+    ).all()
+
+    labels = svc.variant_labels(syllabus) or [""]
+    variants = []
+    for label in labels:
+        topics = svc.topics_for(syllabus, label)
+        ready = 0
+        rows = []
+        for t in topics:
+            code = str(t.get("code") or "")
+            kinds = have.get((label, code), set())
+            if len(kinds) == 6:
+                ready += 1
+            rows.append(
+                {
+                    "code": code,
+                    "title": str(t.get("title") or ""),
+                    "ready": len(kinds),
+                    "opened_for": [
+                        grp.name
+                        for lesson, grp in lessons
+                        if lesson.is_opened
+                        and lesson.topic_code == code
+                        and lesson.variant_label == label
+                    ],
+                }
+            )
+        variants.append(
+            {"label": label, "topic_count": len(topics), "ready_count": ready, "topics": rows}
+        )
+
+    return {
+        "id": syllabus.id,
+        "subject_name": syllabus.subject_name,
+        "subject_code": syllabus.subject_code,
+        "department_name": syllabus.department_name,
+        "department_id": syllabus.department_id,
+        "instruction_language": syllabus.instruction_language,
+        "is_active": syllabus.is_active,
+        "variant_labels": labels,
+        "teachers": teachers,
+        "groups": groups,
+        "variants": variants,
+        "lessons": [
+            {
+                "id": lesson.id,
+                "topic_code": lesson.topic_code,
+                "variant_label": lesson.variant_label,
+                "group_name": grp.name,
+                "started_at": lesson.started_at,
+                "ended_at": lesson.ended_at,
+                "is_opened": lesson.is_opened,
+            }
+            for lesson, grp in lessons
+        ],
     }

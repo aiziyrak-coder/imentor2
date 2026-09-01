@@ -53,6 +53,12 @@ class OnlineSyllabus(Base):
     subject_name: Mapped[str] = mapped_column(String(255))
     subject_code: Mapped[str] = mapped_column(String(64), unique=True)
     department_name: Mapped[str] = mapped_column(String(255), default="")
+    # Kitob qidiruvi (RAG) AYNAN kafedra bo'yicha ishlaydi: `core_bookchunk`
+    # darsliklari kafedraga biriktirilgan. Bu bog'lanishsiz AI ma'ruza va
+    # testni faqat o'z xotirasidan yozadi — darsliksiz, manbasiz.
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("core_academicdepartment.id", ondelete="SET NULL"), nullable=True
+    )
     description: Mapped[str] = mapped_column(String(512), default="")
     instruction_language: Mapped[str] = mapped_column(String(8), default="uz")
     file_name: Mapped[str] = mapped_column(String(512), default="")

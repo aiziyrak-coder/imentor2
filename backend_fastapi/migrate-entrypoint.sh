@@ -9,10 +9,11 @@ alembic upgrade head
 # HNSW qidiruv kengligi.
 #
 # pgvector avval indeksdan `ef_search` ta eng yaqin nomzodni oladi va FAQAT
-# keyin `WHERE department_id = ...` filtrini qo'llaydi. Kafedra korpusning
-# ~15 foizini tashkil qilgani uchun standart 40 qiymatda 10 ta parcha
-# so'ralganda amalda 13 tagina nomzod qolar va ular kafedra bo'yicha
-# HAQIQIY eng yaqinlari bo'lmasdi. 200 da to'liq 30 nomzod qaytadi.
+# keyin filtrlarni qo'llaydi. Ikkita filtr bor: kafedra (korpusning ~15%) va
+# parcha uzunligi (bo'sh OCR yozuvlari tashlanadi). Standart 40 da 10 ta
+# parcha so'ralganda amalda 4 tasi qolar va ular jami 127 belgi edi —
+# ya'ni AI deyarli darsliksiz yozardi. 800 da to'liq 30 nomzod keladi va
+# ulardan 10 ta noyob parcha (~9-12 ming belgi) tanlanadi.
 #
 # Sozlama bazada saqlanadi, shuning uchun bu buyruq qayta ishga tushirishda
 # zararsiz takrorlanadi — lekin baza noldan qurilsa yo'qolmasligi uchun shu
@@ -34,6 +35,6 @@ dsn = (
     f"@{s.django_db_host}:{s.django_db_port}/{name}"
 )
 with psycopg.connect(dsn, autocommit=True) as conn:
-    conn.execute(f'ALTER DATABASE "{name}" SET hnsw.ef_search = 200')
-print(f"hnsw.ef_search = 200 ({name})")
+    conn.execute(f'ALTER DATABASE "{name}" SET hnsw.ef_search = 800')
+print(f"hnsw.ef_search = 800 ({name})")
 PY

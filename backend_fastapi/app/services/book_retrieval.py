@@ -6,7 +6,7 @@ import logging
 import os
 import re
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -44,6 +44,19 @@ def resolve_book_department_id(
     ).scalar_one_or_none()
     if syl and syl.department_id:
         return int(syl.department_id)
+
+    # Online ta'lim fanlari alohida jadvalda turadi, lekin DARSLIKLAR umumiy:
+    # `core_bookchunk` kafedra bo'yicha indekslangan. Shu qidiruvsiz online
+    # fanda AI ma'ruza va testni darsliksiz, faqat o'z xotirasidan yozardi.
+    #
+    # Import shu yerda: modul yuklanishida aylanma bog'liqlik bo'lmasin.
+    from app.models.online_edu import OnlineSyllabus
+
+    online = db.execute(
+        select(OnlineSyllabus).where(OnlineSyllabus.subject_code == code)
+    ).scalar_one_or_none()
+    if online and online.department_id:
+        return int(online.department_id)
 
     dept_code = code.split("__", 1)[0].strip() if "__" in code else code
 
@@ -87,6 +100,14 @@ FOCUS_WINDOW_CHARS = 1200
 # ko'p nomzod olamiz. Korpusda takror ulushi ~57% bo'lgani uchun 3 barobar
 # deyarli har doim yetadi.
 OVERFETCH = 3
+
+# Bundan qisqa parcha generatsiyaga hech narsa bermaydi.
+#
+# Korpusda 14 873 ta (1.95%) shunday yozuv bor — OCR chiqindisi, ba'zilari
+# bitta belgidan iborat (".", "s"). Ularning vektorlari mazmunsiz bo'lgani
+# uchun ISTALGAN savolga "yaqin" chiqishi va haqiqiy matnni siqib chiqarishi
+# mumkin. Bir sinovda 30 nomzoddan atigi 127 belgi foydali matn qolgan edi.
+MIN_CHUNK_CHARS = 200
 
 
 def _norm_for_dedup(text: str) -> str:
@@ -243,7 +264,10 @@ def retrieve_book_context_many(
         chunks = (
             db.execute(
                 select(BookChunk)
-                .where(BookChunk.department_id == dept_id)
+                .where(
+                    BookChunk.department_id == dept_id,
+                    func.length(BookChunk.text) >= MIN_CHUNK_CHARS,
+                )
                 .order_by(BookChunk.embedding.cosine_distance(vec))
                 .limit(top_k * OVERFETCH)
             )
@@ -301,7 +325,10 @@ def retrieve_book_context_by_department_id(
     chunks = (
         db.execute(
             select(BookChunk)
-            .where(BookChunk.department_id == dept_id)
+            .where(
+                BookChunk.department_id == dept_id,
+                func.length(BookChunk.text) >= MIN_CHUNK_CHARS,
+            )
             .order_by(BookChunk.embedding.cosine_distance(vec))
             .limit(top_k * OVERFETCH)
         )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
+  ChevronRight,
   GraduationCap,
   Loader2,
   Monitor,
@@ -41,6 +42,8 @@ import {
   type OnlineVariant,
 } from '../../utils/onlineEduApi';
 import { parseVariantLabel } from '../../utils/syllabusVariant';
+import OnlineSubjectWorkspace from './OnlineSubjectWorkspace';
+import { setGroupActive } from '../../utils/onlineEduApi';
 
 /**
  * Online ta'lim boshqaruvi — 6-kurs masofaviy dasturi.
@@ -50,14 +53,16 @@ import { parseVariantLabel } from '../../utils/syllabusVariant';
  * hech narsa u yerga tushmaydi.
  */
 
-type Tab = 'subjects' | 'teachers' | 'groups' | 'lessons' | 'results';
+type Tab = 'subjects' | 'groups' | 'lessons' | 'results';
 
+// O'qituvchi va guruh biriktirish endi FANNING ichida — ular fanga
+// bog'liq qaror, alohida bo'lim emas. "Guruhlar" bo'limi faqat yangi
+// kelgan guruhlarni yoqish uchun qoldi.
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
   { id: 'subjects', label: 'Fanlar', icon: BookOpen },
-  { id: 'teachers', label: "O'qituvchilar", icon: GraduationCap },
   { id: 'groups', label: 'Guruhlar', icon: Users },
   { id: 'lessons', label: 'Darslar', icon: Monitor },
-  { id: 'results', label: 'Natijalar', icon: Users },
+  { id: 'results', label: 'Natijalar', icon: GraduationCap },
 ];
 
 function errText(e: unknown): string {
@@ -97,6 +102,7 @@ export default function AdminOnlineEdu() {
   const [lessons, setLessons] = useState<OnlineLessonRow[]>([]);
   const [progress, setProgress] = useState<OnlineProgressRow[]>([]);
   const [report, setReport] = useState<OnlineReport | null>(null);
+  const [openSubject, setOpenSubject] = useState<number | null>(null);
   const [filterSyllabus, setFilterSyllabus] = useState('');
   const [filterGroup, setFilterGroup] = useState('');
 
@@ -231,15 +237,23 @@ export default function AdminOnlineEdu() {
         })}
       </nav>
 
-      {tab === 'subjects' && (
-        <SubjectsTab syllabuses={syllabuses} busy={busy} run={run} />
-      )}
-      {tab === 'teachers' && (
-        <TeachersTab teachers={teachers} syllabuses={syllabuses} busy={busy} run={run} />
-      )}
-      {tab === 'groups' && (
-        <GroupsTab groups={groups} syllabuses={syllabuses} busy={busy} run={run} />
-      )}
+      {tab === 'subjects' &&
+        (openSubject === null ? (
+          <SubjectsTab
+            syllabuses={syllabuses}
+            teachers={teachers}
+            busy={busy}
+            run={run}
+            onOpen={setOpenSubject}
+          />
+        ) : (
+          <OnlineSubjectWorkspace
+            syllabusId={openSubject}
+            onBack={() => setOpenSubject(null)}
+            onChanged={() => void reload()}
+          />
+        ))}
+      {tab === 'groups' && <GroupsTab groups={groups} busy={busy} run={run} />}
       {tab === 'lessons' && <LessonsTab rows={lessons} />}
       {tab === 'results' && (
         <ResultsTab
@@ -261,12 +275,16 @@ export default function AdminOnlineEdu() {
 
 function SubjectsTab({
   syllabuses,
+  teachers,
   busy,
   run,
+  onOpen,
 }: {
   syllabuses: OnlineSyllabusBrief[];
+  teachers: OnlineTeacher[];
   busy: boolean;
   run: (fn: () => Promise<unknown>, ok: string) => Promise<void>;
+  onOpen: (id: number) => void;
 }) {
   const [name, setName] = useState('');
   const [dept, setDept] = useState('');
@@ -392,225 +410,58 @@ function SubjectsTab({
       {syllabuses.length === 0 ? (
         <Empty text="Hali fan qo'shilmagan. Yuqoridan sillabus yuklang." />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="w-full text-[13px]">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Fan</th>
-                <th className="px-3 py-2 text-left font-semibold">Kafedra</th>
-                <th className="px-3 py-2 text-left font-semibold">Yo'nalishlar</th>
-                <th className="px-3 py-2 text-right font-semibold">Mavzu</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {syllabuses.map((s) => (
-                <tr key={s.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-medium text-slate-800">{s.subject_name}</td>
-                  <td className="px-3 py-2 text-slate-600">{s.department_name || '—'}</td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {s.variant_labels.length ? s.variant_labels.join(', ') : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                    {s.topic_count}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(() => deleteOnlineSyllabus(s.id), 'Fan o‘chirildi.')
-                      }
-                      disabled={busy}
-                      className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                      aria-label="O'chirish"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ============================ O'qituvchilar ============================ */
-
-function CourseAssigner({
-  syllabuses,
-  busy,
-  onAssign,
-}: {
-  syllabuses: OnlineSyllabusBrief[];
-  busy: boolean;
-  onAssign: (syllabusId: number, variant: string) => void;
-}) {
-  const [sid, setSid] = useState('');
-  const [variant, setVariant] = useState('');
-  const chosen = syllabuses.find((s) => String(s.id) === sid);
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <select
-        value={sid}
-        onChange={(e) => {
-          setSid(e.target.value);
-          setVariant('');
-        }}
-        className="rounded-lg border border-slate-200 px-2 py-1 text-[12.5px]"
-      >
-        <option value="">Fan tanlang…</option>
-        {syllabuses.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.subject_name}
-          </option>
-        ))}
-      </select>
-      {chosen && chosen.variant_labels.length > 0 && (
-        <select
-          value={variant}
-          onChange={(e) => setVariant(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2 py-1 text-[12.5px]"
-        >
-          <option value="">Barcha yo'nalish</option>
-          {chosen.variant_labels.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-      )}
-      <button
-        type="button"
-        disabled={busy || !sid}
-        onClick={() => {
-          onAssign(Number(sid), variant);
-          setSid('');
-          setVariant('');
-        }}
-        className="rounded-lg bg-slate-100 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
-      >
-        Biriktirish
-      </button>
-    </div>
-  );
-}
-
-function TeachersTab({
-  teachers,
-  syllabuses,
-  busy,
-  run,
-}: {
-  teachers: OnlineTeacher[];
-  syllabuses: OnlineSyllabusBrief[];
-  busy: boolean;
-  run: (fn: () => Promise<unknown>, ok: string) => Promise<void>;
-}) {
-  const [phone, setPhone] = useState('');
-
-  return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
-        <h3 className="text-[14px] font-bold text-slate-900">O'qituvchi qo'shish</h3>
-        <p className="text-[12.5px] text-slate-500">
-          O'qituvchi iMentor'da allaqachon ro'yxatdan o'tgan bo'lishi kerak — bu yerda
-          faqat "online ham o'tadi" deb belgilanadi.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="998901112233"
-            inputMode="numeric"
-            className="flex-1 min-w-[12rem] rounded-lg border border-slate-200 px-3 py-2 text-[13.5px] font-mono"
-          />
-          <button
-            type="button"
-            disabled={busy || !phone.trim()}
-            onClick={() =>
-              void run(async () => {
-                await addOnlineTeacher(phone.replace(/\D/g, ''));
-                setPhone('');
-              }, 'O‘qituvchi qo‘shildi.')
-            }
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-          >
-            <Plus size={15} />
-            Qo'shish
-          </button>
-        </div>
-      </section>
-
-      {teachers.length === 0 ? (
-        <Empty text="Hali online o'qituvchi belgilanmagan." />
-      ) : (
-        <div className="space-y-2">
-          {teachers.map((t) => (
-            <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-[13.5px] font-semibold text-slate-800">
-                    {t.full_name || t.owner_key}
-                  </p>
-                  <p className="font-mono text-[11.5px] text-slate-500">{t.owner_key}</p>
-                </div>
+        <div className="space-y-1.5">
+          {syllabuses.map((s) => {
+            const mine = teachers.filter((t) =>
+              t.courses.some((c) => c.syllabus_id === s.id),
+            );
+            const ready = Boolean(s.department_id) && mine.length > 0;
+            return (
+              <div
+                key={s.id}
+                className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+              >
                 <button
                   type="button"
-                  onClick={() =>
-                    void run(() => removeOnlineTeacher(t.id), 'O‘qituvchi olib tashlandi.')
-                  }
+                  onClick={() => onOpen(s.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      ready ? 'bg-emerald-500' : 'bg-amber-400'
+                    }`}
+                    title={ready ? 'Sozlangan' : 'Sozlash tugallanmagan'}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold text-slate-800">
+                      {s.subject_name}
+                      {!s.is_active && (
+                        <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10.5px] font-medium text-slate-500">
+                          nofaol
+                        </span>
+                      )}
+                    </span>
+                    <span className="block truncate text-[12px] text-slate-500">
+                      {s.department_name || 'kafedra tanlanmagan'} · {s.topic_count} mavzu
+                      {mine.length > 0
+                        ? ` · ${mine.map((t) => t.full_name || t.owner_key).join(', ')}`
+                        : " · o'qituvchi yo'q"}
+                    </span>
+                  </span>
+                  <ChevronRight size={16} className="shrink-0 text-slate-300" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void run(() => deleteOnlineSyllabus(s.id), 'Fan o\u2018chirildi.')}
                   disabled={busy}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                  aria-label="Olib tashlash"
+                  className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                  aria-label="O'chirish"
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
-
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {t.courses.map((c) => (
-                  <span
-                    key={c.id}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1 text-[12px] text-slate-700"
-                  >
-                    {c.subject_name}
-                    {c.variant_label ? ` · ${c.variant_label}` : ''}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(() => unassignTeacherCourse(c.id), 'Biriktiruv olindi.')
-                      }
-                      disabled={busy}
-                      className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                      aria-label="Olib tashlash"
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-                {t.courses.length === 0 && (
-                  <span className="text-[12px] text-slate-400">Fan biriktirilmagan</span>
-                )}
-              </div>
-
-              <div className="mt-2">
-                <CourseAssigner
-                  syllabuses={syllabuses}
-                  busy={busy}
-                  onAssign={(sid, variant) =>
-                    void run(
-                      () => assignTeacherCourse(t.id, sid, variant),
-                      'Fan biriktirildi.',
-                    )
-                  }
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -621,103 +472,92 @@ function TeachersTab({
 
 function GroupsTab({
   groups,
-  syllabuses,
   busy,
   run,
 }: {
   groups: OnlineGroup[];
-  syllabuses: OnlineSyllabusBrief[];
   busy: boolean;
   run: (fn: () => Promise<unknown>, ok: string) => Promise<void>;
 }) {
-  const [name, setName] = useState('');
+  const pending = groups.filter((g) => !g.is_active);
+  const active = groups.filter((g) => g.is_active);
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
-        <h3 className="text-[14px] font-bold text-slate-900">Guruh qo'shish</h3>
-        <p className="text-[12.5px] text-slate-500">
-          Guruh nomi OnlineTest tizimidagi nom bilan AYNAN bir xil bo'lishi kerak —
-          talaba kirganda tizim uni shu nom orqali topadi.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="601-guruh"
-            className="flex-1 min-w-[12rem] rounded-lg border border-slate-200 px-3 py-2 text-[13.5px]"
-          />
-          <button
-            type="button"
-            disabled={busy || !name.trim()}
-            onClick={() =>
-              void run(async () => {
-                await addOnlineGroup(name.trim());
-                setName('');
-              }, 'Guruh qo‘shildi.')
-            }
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-          >
-            <Plus size={15} />
-            Qo'shish
-          </button>
-        </div>
-      </section>
+      <p className="text-[12.5px] text-slate-500">
+        Guruh nomi qo'lda terilmaydi. Talaba portalga kirishga urinsa, guruhi shu
+        yerda o'zi paydo bo'ladi — siz uni yoqasiz. Shunda nom OnlineTest bilan
+        har doim bir xil bo'ladi.
+      </p>
 
-      {groups.length === 0 ? (
-        <Empty text="Hali guruh qo'shilmagan." />
-      ) : (
-        <div className="space-y-2">
-          {groups.map((g) => (
-            <div key={g.id} className="rounded-2xl border border-slate-200 bg-white p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[13.5px] font-semibold text-slate-800">{g.name}</p>
+      {pending.length > 0 && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
+          <h3 className="mb-2 text-[13.5px] font-bold text-amber-900">
+            Yoqilishini kutyapti — {pending.length} ta
+          </h3>
+          <div className="space-y-1.5">
+            {pending.map((g) => (
+              <div
+                key={g.id}
+                className="flex items-center gap-2 rounded-lg bg-white px-3 py-2"
+              >
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800">
+                  {g.name}
+                </span>
                 <button
                   type="button"
-                  onClick={() => void run(() => removeOnlineGroup(g.id), 'Guruh o‘chirildi.')}
                   disabled={busy}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                  aria-label="O'chirish"
+                  onClick={() =>
+                    void run(() => setGroupActive(g.id, g.name, true), 'Guruh yoqildi.')
+                  }
+                  className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-[12.5px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
-                  <Trash2 size={15} />
+                  Yoqish
                 </button>
               </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-              <div className="mt-2 flex flex-wrap gap-1.5">
+      {active.length === 0 ? (
+        <Empty text="Hali faol guruh yo'q." />
+      ) : (
+        <div className="space-y-1.5">
+          {active.map((g) => (
+            <div
+              key={g.id}
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+            >
+              <span className="text-[13.5px] font-semibold text-slate-800">{g.name}</span>
+              {g.student_count > 0 && (
+                <span className="text-[11.5px] text-slate-400 tabular-nums">
+                  {g.student_count} talaba
+                </span>
+              )}
+              <span className="flex flex-1 flex-wrap justify-end gap-1.5">
                 {g.courses.map((c) => (
                   <span
                     key={c.id}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1 text-[12px] text-slate-700"
+                    className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11.5px] text-slate-600"
                   >
                     {c.subject_name}
-                    {c.variant_label ? ` · ${c.variant_label}` : ''}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(() => unassignGroupCourse(c.id), 'Biriktiruv olindi.')
-                      }
-                      disabled={busy}
-                      className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                      aria-label="Olib tashlash"
-                    >
-                      <X size={12} />
-                    </button>
                   </span>
                 ))}
                 {g.courses.length === 0 && (
-                  <span className="text-[12px] text-slate-400">Fan biriktirilmagan</span>
+                  <span className="text-[11.5px] text-slate-400">fan biriktirilmagan</span>
                 )}
-              </div>
-
-              <div className="mt-2">
-                <CourseAssigner
-                  syllabuses={syllabuses}
-                  busy={busy}
-                  onAssign={(sid, variant) =>
-                    void run(() => assignGroupCourse(g.id, sid, variant), 'Fan biriktirildi.')
-                  }
-                />
-              </div>
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void run(() => setGroupActive(g.id, g.name, false), "Guruh o\u2018chirildi.")
+                }
+                className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                O'chirish
+              </button>
             </div>
           ))}
         </div>

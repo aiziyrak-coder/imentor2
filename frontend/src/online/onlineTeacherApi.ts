@@ -41,6 +41,9 @@ export const KIND_LABEL: Record<MaterialKind, string> = {
 export type TeacherCourse = {
   syllabus_id: number;
   subject_name: string;
+  /** RAG uchun: server shu kod orqali fanning kafedrasini topadi. */
+  subject_code: string;
+  department_name: string;
   variant_label: string;
   topic_count: number;
   instruction_language: string;

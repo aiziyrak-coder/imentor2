@@ -8,6 +8,7 @@ import {
   Loader2,
   Presentation,
   Save,
+  Sparkles,
   Trash2,
   Upload,
   Video,
@@ -28,6 +29,7 @@ import {
   type TeacherTopic,
 } from './onlineTeacherApi';
 import OnlineLessons from './OnlineLessons';
+import { caseToText, generateCase, generateLecture, generateTest } from './onlineGenerate';
 
 /**
  * O'qituvchi kabineti: fan → mavzu → material.
@@ -373,6 +375,7 @@ function TopicMaterials({
               kind={kind}
               course={course}
               topicCode={topic.code}
+              topicTitle={topic.title}
               existing={byKind.get(kind)}
               busy={busyKind === kind}
               onSave={(fn, ok) => void run(kind, fn, ok)}
@@ -388,6 +391,7 @@ function MaterialCard({
   kind,
   course,
   topicCode,
+  topicTitle,
   existing,
   busy,
   onSave,
@@ -395,6 +399,7 @@ function MaterialCard({
   kind: MaterialKind;
   course: TeacherCourse;
   topicCode: string;
+  topicTitle: string;
   existing?: Material;
   busy: boolean;
   onSave: (fn: () => Promise<unknown>, ok: string) => void;
@@ -402,6 +407,16 @@ function MaterialCard({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [url, setUrl] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState('');
+
+  const genInput = {
+    subjectName: course.subject_name,
+    subjectCode: course.subject_code,
+    departmentName: course.department_name,
+    topicTitle: `${topicCode}. ${topicTitle}`,
+    language: (course.instruction_language || 'uz') as 'uz' | 'ru' | 'en',
+  };
   const Icon = kindIcon(kind);
   const done = Boolean(existing);
 
@@ -501,6 +516,35 @@ function MaterialCard({
 
           {TEXT_KINDS.includes(kind) && (
             <div className="space-y-2">
+              <button
+                type="button"
+                disabled={aiBusy || busy}
+                onClick={async () => {
+                  setAiBusy(true);
+                  setAiNote(
+                    kind === 'lecture'
+                      ? "Ma'ruza yozilmoqda — darsliklardan o'qiyapti…"
+                      : 'Vaziyatli masala tuzilmoqda…',
+                  );
+                  try {
+                    const out =
+                      kind === 'lecture'
+                        ? await generateLecture(genInput, (soFar) => setText(soFar))
+                        : caseToText(await generateCase(genInput));
+                    setText(out);
+                    setAiNote('Tayyor. Tekshirib, saqlang.');
+                  } catch (e) {
+                    setAiNote(errText(e));
+                  } finally {
+                    setAiBusy(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-800 px-3 py-2 text-[13px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+              >
+                {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                AI bilan yaratish
+              </button>
+              {aiNote && <p className="text-[12.5px] text-slate-500">{aiNote}</p>}
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -530,11 +574,62 @@ function MaterialCard({
           )}
 
           {kind === 'test' && (
-            <p className="rounded-lg bg-slate-50 px-3 py-3 text-[12.5px] text-slate-600">
-              Testlar iMentor'da AI bilan tayyorlanadi va shu yerga ko'chiriladi.
-              Keyingi bosqichda bu tugma to'g'ridan-to'g'ri AI'ga ulanadi.
-              {existing ? ` Hozir ${testCount} ta savol saqlangan.` : ''}
-            </p>
+            <div className="space-y-2">
+              <p className="text-[12.5px] text-slate-500">
+                10 ta savol darslik matni asosida yaratiladi. Yaratilgach avval
+                o'zingiz ko'rib chiqing.
+                {existing ? ` Hozir ${testCount} ta savol saqlangan.` : ''}
+              </p>
+              <button
+                type="button"
+                disabled={aiBusy || busy}
+                onClick={() => {
+                  setAiBusy(true);
+                  setAiNote('10 ta test tuzilmoqda…');
+                  onSave(async () => {
+                    try {
+                      const session = await generateTest(genInput, 10);
+                      const questions = (session.questions || []).map((q) => ({
+                        question: q.question,
+                        options: q.options,
+                        correctOptionIndex: q.correctOptionIndex,
+                        explanation: q.explanation || '',
+                      }));
+                      if (questions.length === 0) {
+                        throw new Error('AI savol qaytarmadi. Qayta urinib ko‘ring.');
+                      }
+                      return saveMaterial({
+                        ...base,
+                        kind: 'test',
+                        title: `${questions.length} ta test`,
+                        payload: { questions },
+                      });
+                    } finally {
+                      setAiBusy(false);
+                      setAiNote('');
+                    }
+                  }, 'Testlar yaratildi va saqlandi.');
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-[13px] font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+              >
+                {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                AI bilan 10 ta test yaratish
+              </button>
+              {aiNote && <p className="text-[12.5px] text-slate-500">{aiNote}</p>}
+              {existing && testCount > 0 && (
+                <details className="rounded-lg bg-slate-50 px-3 py-2">
+                  <summary className="cursor-pointer text-[12.5px] font-medium text-slate-700">
+                    Savollarni ko'rish
+                  </summary>
+                  <ol className="mt-2 space-y-1.5 pl-4 text-[12.5px] text-slate-600">
+                    {((existing.payload as { questions?: Array<{ question?: string }> })
+                      .questions || []).map((q, i) => (
+                      <li key={i}>{q.question}</li>
+                    ))}
+                  </ol>
+                </details>
+              )}
+            </div>
           )}
 
           {existing && (

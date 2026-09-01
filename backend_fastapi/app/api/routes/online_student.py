@@ -45,17 +45,35 @@ VIEW_COLUMNS = {
 
 
 def _group(db: Session, auth: AuthContext) -> OnlineGroup:
+    """Talabaning guruhi. Noma'lum guruh AVTOMATIK ro'yxatga olinadi.
+
+    Ilgari admin guruh nomini qo'lda terardi va u OnlineTest'dagi nom bilan
+    harfma-harf mos kelishi kerak edi. Bitta xato harf — talaba kira olmasdi
+    va sababi hech qayerda ko'rinmasdi.
+
+    Endi talaba kirishga urinsa, guruhi `is_active=False` holatida yoziladi:
+    admin uni ro'yxatda ko'radi va bitta bosish bilan yoqadi. Terish ham,
+    xato ham yo'q. Nofaol guruh talabaga hech narsa ochmaydi.
+    """
     name = (auth.group_name or "").strip()
     if not name:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Guruhingiz aniqlanmadi. Qaytadan kiring.",
+            detail="Guruhingiz aniqlanmadi. Tizimdan chiqib, qaytadan kiring.",
         )
     group = svc.group_by_name(db, name)
-    if group is None or not group.is_active:
+    if group is None:
+        group = OnlineGroup(name=name[:255], is_active=False, created_at=svc.now())
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+    if not group.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"'{name}' guruhi online ta'limga qo'shilmagan. Administratorga murojaat qiling.",
+            detail=(
+                f"'{name}' guruhi hali online ta'limga ulanmagan. "
+                "Guruhingiz ro'yxatga olindi — administrator tasdiqlagach fanlaringiz ochiladi."
+            ),
         )
     return group
 

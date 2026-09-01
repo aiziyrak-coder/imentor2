@@ -77,7 +77,11 @@ sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.
       Guruh TOKENDAN olinadi — brauzerdan emas.
 - [x] 6. Hisobot: talaba kesimida o'zlashtirish va davomat foizi, fan/guruh
       filtri, CSV yuklab olish. Mavzular kesimidagi batafsil ko'rinish ham qoldi.
-- [x] 7. Hujjat (artefakt) va yakuniy tekshiruv. Modul TAYYOR.
+- [x] 7. Hujjat (artefakt) va yakuniy tekshiruv.
+- [x] 8. Admin panel FAN MARKAZLI qilib qayta qurildi; AI bilan material
+      yaratish o'qituvchi kabinetiga ulandi; guruhlar avtomatik ro'yxatga
+      olinadi; qidiruvdan bo'sh OCR parchalari chiqarildi (127 -> ~10 000
+      belgi foydali kontekst); `ef_search` 800. Modul TAYYOR.
 
 **Keyingi bosqichlar (ishni to'smaydi):** testni AI bilan to'g'ridan-to'g'ri
 yaratish, keys javobini baholash, haftalik dars jadvali, bildirishnomalar. (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test

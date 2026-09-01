@@ -101,6 +101,10 @@ def teacher_me(
                 {
                     "syllabus_id": syl.id,
                     "subject_name": syl.subject_name,
+                    # Kod AI uchun kerak: server u orqali fanning kafedrasini
+                    # topadi va darsliklardan o'qiydi.
+                    "subject_code": syl.subject_code,
+                    "department_name": syl.department_name,
                     "variant_label": label,
                     "topic_count": len(svc.topics_for(syl, label)),
                     "instruction_language": syl.instruction_language,
