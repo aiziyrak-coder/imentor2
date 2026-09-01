@@ -77,7 +77,10 @@ sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.
       Guruh TOKENDAN olinadi — brauzerdan emas.
 - [x] 6. Hisobot: talaba kesimida o'zlashtirish va davomat foizi, fan/guruh
       filtri, CSV yuklab olish. Mavzular kesimidagi batafsil ko'rinish ham qoldi.
-- [ ] 7. Hujjat va yakuniy tekshiruv  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
+- [x] 7. Hujjat (artefakt) va yakuniy tekshiruv. Modul TAYYOR.
+
+**Keyingi bosqichlar (ishni to'smaydi):** testni AI bilan to'g'ridan-to'g'ri
+yaratish, keys javobini baholash, haftalik dars jadvali, bildirishnomalar. (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 
 ## Sizdan kerak bo'ladi (bloklovchi, men qila olmayman)
 0. **nginx sayti** `onlinetalim.fermi.uz` uchun — `/etc/nginx` ga yozish sudo
