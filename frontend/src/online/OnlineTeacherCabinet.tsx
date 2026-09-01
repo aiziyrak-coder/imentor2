@@ -27,6 +27,7 @@ import {
   type TeacherCourse,
   type TeacherTopic,
 } from './onlineTeacherApi';
+import OnlineLessons from './OnlineLessons';
 
 /**
  * O'qituvchi kabineti: fan → mavzu → material.
@@ -64,6 +65,8 @@ export default function OnlineTeacherCabinet({
   const [topic, setTopic] = useState<TeacherTopic | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [section, setSection] = useState<'materials' | 'lessons'>('materials');
+  const [fullName, setFullName] = useState('');
 
   useEffect(() => {
     fetchTeacherMe()
@@ -72,6 +75,7 @@ export default function OnlineTeacherCabinet({
           setNotTeacher(true);
           return;
         }
+        setFullName(me.full_name || '');
         setCourses(me.courses);
         if (me.courses.length === 1) setCourse(me.courses[0]);
       })
@@ -154,10 +158,30 @@ export default function OnlineTeacherCabinet({
           </p>
         </header>
 
+        <nav className="flex gap-1.5 border-b border-slate-200 pb-2">
+          {(['materials', 'lessons'] as const).map((s2) => (
+            <button
+              key={s2}
+              type="button"
+              onClick={() => setSection(s2)}
+              className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition ${
+                section === s2 ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {s2 === 'materials' ? 'Mavzular va materiallar' : 'Video darslar'}
+            </button>
+          ))}
+        </nav>
+
+        {section === 'lessons' && (
+          <OnlineLessons course={course} topics={topics} teacherName={fullName} />
+        )}
+
         {error && (
           <p className="rounded-xl bg-rose-50 px-3 py-2 text-[13px] text-rose-700">{error}</p>
         )}
 
+        {section === 'materials' && (
         <div className="space-y-1.5">
           {topics.map((t) => (
             <button
@@ -200,6 +224,7 @@ export default function OnlineTeacherCabinet({
             </button>
           ))}
         </div>
+        )}
       </div>
     );
   }

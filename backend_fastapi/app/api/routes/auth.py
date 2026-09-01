@@ -34,6 +34,13 @@ def _login_response(
     extra = {"role": role}
     if student_id:
         extra["student_id"] = student_id
+    # Guruh nomi ham tokenga: online ta'limda mavzu qulfi va davomat AYNAN
+    # guruh bo'yicha ishlaydi, shuning uchun uni brauzerdan so'rab bo'lmaydi —
+    # aks holda talaba boshqa guruh nomini yozib, o'zgalarning darsiga
+    # qo'shilib olardi. Bu QO'SHIMCHA da'vo: mavjud kod uni o'qimaydi va
+    # eski tokenlar ham ishlaydi.
+    if group_name:
+        extra["group_name"] = group_name
     access = create_access_token(user.id, extra)
     refresh = create_refresh_token(user.id, extra)
     return LoginResponse(

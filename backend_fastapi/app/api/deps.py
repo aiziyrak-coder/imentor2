@@ -18,10 +18,18 @@ ALLOWED_ROLES = ("admin", "klinika_admin", "hodim", "student")
 
 
 class AuthContext:
-    def __init__(self, user: User, role: str, student_id: str | None = None) -> None:
+    def __init__(
+        self,
+        user: User,
+        role: str,
+        student_id: str | None = None,
+        group_name: str | None = None,
+    ) -> None:
         self.user = user
         self.role = role
         self.student_id = student_id
+        # Faqat talaba tokenida bo'ladi; qolganlarda None.
+        self.group_name = group_name
 
 
 def get_current_auth(
@@ -52,7 +60,8 @@ def get_current_auth(
         jwt_role = ""
     role = db_role or jwt_role or "hodim"
     student_id = auth_service.resolve_student_id(user, payload.get("student_id"))
-    return AuthContext(user=user, role=role, student_id=student_id)
+    group_name = str(payload.get("group_name") or "").strip() or None
+    return AuthContext(user=user, role=role, student_id=student_id, group_name=group_name)
 
 
 def require_roles(*roles: str):

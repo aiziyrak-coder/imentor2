@@ -22,6 +22,8 @@ from app.core.db import get_db
 from app.models.online_edu import (
     MATERIAL_KINDS,
     OnlineMaterial,
+    OnlineGroup,
+    OnlineGroupCourse,
     OnlineSyllabus,
     OnlineTeacher,
     OnlineTeacherCourse,
@@ -148,6 +150,50 @@ def teacher_topics(
             }
         )
     return out
+
+
+@router.get("/online/teacher/groups/")
+def teacher_groups(
+    syllabus_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_auth),
+) -> list[dict]:
+    """O'qituvchi dars o'ta oladigan guruhlar.
+
+    Faqat SHU o'qituvchining fanlariga biriktirilgan guruhlar qaytadi —
+    aks holda dars yaratishda begona guruhni tanlab qo'yish mumkin bo'lardi.
+    """
+    teacher = _me(db, auth)
+    mine = db.execute(
+        select(OnlineTeacherCourse.syllabus_id).where(
+            OnlineTeacherCourse.teacher_id == teacher.id
+        )
+    ).scalars().all()
+    if not mine:
+        return []
+    if syllabus_id is not None:
+        if syllabus_id not in set(mine):
+            raise HTTPException(status_code=403, detail="Bu fan sizga biriktirilmagan.")
+        mine = [syllabus_id]
+
+    rows = db.execute(
+        select(OnlineGroup, OnlineGroupCourse.syllabus_id)
+        .join(OnlineGroupCourse, OnlineGroupCourse.group_id == OnlineGroup.id)
+        .where(
+            OnlineGroupCourse.syllabus_id.in_(mine),
+            OnlineGroup.is_active.is_(True),
+        )
+        .order_by(OnlineGroup.name)
+    ).all()
+
+    seen: dict[int, dict] = {}
+    for group, sid in rows:
+        item = seen.setdefault(
+            group.id, {"id": group.id, "name": group.name, "syllabus_ids": []}
+        )
+        if sid not in item["syllabus_ids"]:
+            item["syllabus_ids"].append(sid)
+    return list(seen.values())
 
 
 # ============================ Materiallar ============================

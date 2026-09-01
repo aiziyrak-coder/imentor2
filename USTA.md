@@ -65,8 +65,10 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 - [x] 3. O'qituvchi kabineti: portal qobig'i (`onlinetalim.fermi.uz`), kirish
       (o'qituvchi telefon+parol, talaba OnlineTest ID), fan → mavzu → 6 material.
       Ruxsat sinovdan o'tdi: biriktirilmagan foydalanuvchi 403, qayta saqlashda dublikat yo'q.
-- [ ] 4. Jitsi infratuzilmasi + dars sessiyasi + davomat  <- HOZIR SHU YERDA
-- [ ] 5. Talaba portali (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
+- [x] 4. Video dars, davomat va mavzu qulfi. Jitsi domeni serverdan olinadi
+      (`/online/config/`), davomat IFrame API hodisalaridan, vaqtni server qo'yadi.
+      O'rnatish skriptlari: `deploy/setup-onlinetalim.sh`, `deploy/setup-jitsi.sh`.
+- [ ] 5. Talaba portali  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 - [ ] 6. Baholash va hisobotlar (admin panelda)
 - [ ] 7. Deploy, testlar, hujjat
 

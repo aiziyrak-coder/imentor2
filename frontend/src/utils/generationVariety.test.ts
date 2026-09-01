@@ -48,7 +48,11 @@ describe('Test generatsiya qoidalari', () => {
     );
     expect(prompt).toMatch(/3 ZICH JUMLA/);
     expect(prompt).toMatch(/ABG=tashxis/);
-    expect(prompt).toMatch(/ehtimoliy tashxis/);
+    // Promptdagi haqiqiy matn — "yolg'iz 'qaysi tashxis ehtimoliy?' YO'Q".
+    // Ilgari bu yerda /ehtimoliy tashxis/ turardi va u doimiy matnga emas,
+    // TASODIFIY tanlanadigan savol uslubiga tushib qolardi — test ikki
+    // ishga tushirishning birida yiqilardi.
+    expect(prompt).toMatch(/qaysi tashxis ehtimoliy/);
     expect(prompt).toContain('Piodermiyalar');
     expect(prompt).toMatch(/TO'G'RI JAVOBI shu mavzuga/i);
     expect(prompt).toMatch(/Mavzudan CHIQMANG|mavzu doirasida/i);

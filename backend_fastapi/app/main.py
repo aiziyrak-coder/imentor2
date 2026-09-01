@@ -25,6 +25,7 @@ from app.api.routes import (
     legacy,
     live_test,
     online_admin,
+    online_lesson,
     online_teacher,
     prepared_content,
     staff_admin,
@@ -95,6 +96,7 @@ app.include_router(syllabus_catalog.router, prefix="/api/v1", tags=["syllabus"])
 app.include_router(live_test.router, prefix="/api/v1", tags=["live-test"])
 app.include_router(online_admin.router, prefix="/api/v1", tags=["online-admin"])
 app.include_router(online_teacher.router, prefix="/api/v1", tags=["online-teacher"])
+app.include_router(online_lesson.router, prefix="/api/v1", tags=["online-lesson"])
 app.include_router(staff_location.router, prefix="/api/v1", tags=["staff-location"])
 app.include_router(clinical_group.router, prefix="/api/v1", tags=["clinical-group"])
 app.include_router(clinic_admin.router, prefix="/api/v1", tags=["clinic-admin"])
