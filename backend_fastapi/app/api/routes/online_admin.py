@@ -548,3 +548,101 @@ def admin_attendance(
         }
         for a in rows
     ]
+
+@router.get("/online/admin/report/")
+def admin_report(
+    db: Session = Depends(get_db),
+    _auth=AdminOnly,
+    syllabus_id: int | None = Query(default=None),
+    group_name: str = Query(default=""),
+) -> dict:
+    """Guruh kesimida o'zlashtirish va davomat — kim orqada qolgani.
+
+    Talabalar ro'yxati bizda saqlanmaydi (u OnlineTest'da), shuning uchun
+    hisobot IZ qoldirganlar bo'yicha quriladi: kim material ochgan, test
+    topshirgan yoki darsga kirgan bo'lsa — shu yerda ko'rinadi.
+    """
+    # 1. Qaysi darslar hisobga olinadi.
+    lesson_stmt = select(OnlineLesson)
+    if syllabus_id:
+        lesson_stmt = lesson_stmt.where(OnlineLesson.syllabus_id == syllabus_id)
+    if group_name.strip():
+        grp = db.execute(
+            select(OnlineGroup).where(OnlineGroup.name == group_name.strip())
+        ).scalar_one_or_none()
+        if grp is None:
+            return {"rows": [], "lessons_total": 0, "topics_opened": 0}
+        lesson_stmt = lesson_stmt.where(OnlineLesson.group_id == grp.id)
+    lessons = db.execute(lesson_stmt).scalars().all()
+    lesson_ids = [x.id for x in lessons]
+    held = [x for x in lessons if x.started_at is not None]
+    opened_topics = len({(x.syllabus_id, x.variant_label, x.topic_code) for x in lessons if x.is_opened})
+
+    # 2. O'zlashtirish.
+    prog_stmt = select(OnlineProgress)
+    if syllabus_id:
+        prog_stmt = prog_stmt.where(OnlineProgress.syllabus_id == syllabus_id)
+    if group_name.strip():
+        prog_stmt = prog_stmt.where(OnlineProgress.group_name == group_name.strip())
+    progress = db.execute(prog_stmt).scalars().all()
+
+    # 3. Davomat.
+    attendance = []
+    if lesson_ids:
+        attendance = db.execute(
+            select(OnlineAttendance).where(OnlineAttendance.lesson_id.in_(lesson_ids))
+        ).scalars().all()
+
+    rows: dict[str, dict] = {}
+
+    def slot(sid: str, name: str, group: str) -> dict:
+        item = rows.setdefault(
+            sid,
+            {
+                "student_id": sid,
+                "student_name": name or sid,
+                "group_name": group,
+                "topics_touched": 0,
+                "tests_taken": 0,
+                "score_sum": 0,
+                "score_max": 0,
+                "lessons_attended": 0,
+                "minutes_total": 0,
+            },
+        )
+        if name and not item["student_name"].strip():
+            item["student_name"] = name
+        if group and not item["group_name"].strip():
+            item["group_name"] = group
+        return item
+
+    for p in progress:
+        item = slot(p.student_id, p.student_name, p.group_name)
+        item["topics_touched"] += 1
+        if p.test_submitted_at is not None:
+            item["tests_taken"] += 1
+            item["score_sum"] += p.test_score
+            item["score_max"] += p.test_total
+
+    for a in attendance:
+        item = slot(a.student_id, a.student_name, "")
+        item["lessons_attended"] += 1
+        item["minutes_total"] += round(a.total_seconds / 60)
+
+    held_count = len(held)
+    out = []
+    for item in rows.values():
+        item["avg_pct"] = (
+            round(100.0 * item["score_sum"] / item["score_max"]) if item["score_max"] else None
+        )
+        item["attendance_pct"] = (
+            round(100.0 * item["lessons_attended"] / held_count) if held_count else None
+        )
+        out.append(item)
+    out.sort(key=lambda r: (-(r["avg_pct"] or -1), r["student_name"]))
+
+    return {
+        "rows": out,
+        "lessons_total": held_count,
+        "topics_opened": opened_topics,
+    }

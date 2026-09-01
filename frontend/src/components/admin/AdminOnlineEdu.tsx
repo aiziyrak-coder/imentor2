@@ -5,6 +5,7 @@ import {
   Loader2,
   Monitor,
   Plus,
+  Download,
   RefreshCw,
   Trash2,
   Upload,
@@ -31,7 +32,9 @@ import {
   type OnlineGroup,
   type OnlineLessonRow,
   type OnlineOverview,
+  fetchOnlineReport,
   type OnlineProgressRow,
+  type OnlineReport,
   type OnlineSyllabusBrief,
   type OnlineTeacher,
   type OnlineTopic,
@@ -93,6 +96,9 @@ export default function AdminOnlineEdu() {
   const [groups, setGroups] = useState<OnlineGroup[]>([]);
   const [lessons, setLessons] = useState<OnlineLessonRow[]>([]);
   const [progress, setProgress] = useState<OnlineProgressRow[]>([]);
+  const [report, setReport] = useState<OnlineReport | null>(null);
+  const [filterSyllabus, setFilterSyllabus] = useState('');
+  const [filterGroup, setFilterGroup] = useState('');
 
   const flash = useCallback((text: string) => {
     setNotice(text);
@@ -131,8 +137,13 @@ export default function AdminOnlineEdu() {
 
   useEffect(() => {
     if (tab !== 'results') return;
-    fetchOnlineProgress().then(setProgress).catch((e) => setError(errText(e)));
-  }, [tab]);
+    const params = {
+      syllabusId: filterSyllabus ? Number(filterSyllabus) : undefined,
+      groupName: filterGroup || undefined,
+    };
+    fetchOnlineProgress(params).then(setProgress).catch((e) => setError(errText(e)));
+    fetchOnlineReport(params).then(setReport).catch((e) => setError(errText(e)));
+  }, [tab, filterSyllabus, filterGroup]);
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, okText: string) => {
@@ -230,7 +241,18 @@ export default function AdminOnlineEdu() {
         <GroupsTab groups={groups} syllabuses={syllabuses} busy={busy} run={run} />
       )}
       {tab === 'lessons' && <LessonsTab rows={lessons} />}
-      {tab === 'results' && <ResultsTab rows={progress} />}
+      {tab === 'results' && (
+        <ResultsTab
+          rows={progress}
+          report={report}
+          syllabuses={syllabuses}
+          groups={groups}
+          filterSyllabus={filterSyllabus}
+          filterGroup={filterGroup}
+          onFilterSyllabus={setFilterSyllabus}
+          onFilterGroup={setFilterGroup}
+        />
+      )}
     </div>
   );
 }
@@ -765,42 +787,217 @@ function LessonsTab({ rows }: { rows: OnlineLessonRow[] }) {
 
 /* ============================ Natijalar ============================ */
 
-function ResultsTab({ rows }: { rows: OnlineProgressRow[] }) {
-  if (rows.length === 0) return <Empty text="Hali natija yo'q." />;
+function csvEscape(v: unknown): string {
+  const t = String(v ?? '');
+  return /[",\n;]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+/** Hisobotni CSV qilib yuklab beradi — dekanat Excel'da ochadi. */
+function downloadCsv(report: OnlineReport): void {
+  const head = [
+    'Talaba ID', 'F.I.Sh.', 'Guruh', 'Ochilgan mavzu',
+    'Test topshirdi', 'Ball', 'Foiz', 'Darsga keldi', 'Davomat %', 'Daqiqa',
+  ];
+  const lines = [head.join(';')];
+  for (const r of report.rows) {
+    lines.push([
+      r.student_id, r.student_name, r.group_name, r.topics_touched,
+      r.tests_taken, `${r.score_sum}/${r.score_max}`,
+      r.avg_pct === null ? '' : r.avg_pct,
+      `${r.lessons_attended}/${report.lessons_total}`,
+      r.attendance_pct === null ? '' : r.attendance_pct,
+      r.minutes_total,
+    ].map(csvEscape).join(';'));
+  }
+  // Excel UTF-8 ni BOM'siz tanimaydi va o'zbekcha harflar buziladi.
+  const blob = new Blob(['\ufeff' + lines.join('\n')], {
+    type: 'text/csv;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'online-talim-hisobot.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function Bar({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-slate-300">—</span>;
+  const tone =
+    pct >= 80 ? 'bg-emerald-500' : pct >= 55 ? 'bg-amber-500' : 'bg-rose-500';
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200">
-      <table className="w-full text-[13px]">
-        <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-          <tr>
-            <th className="px-3 py-2 text-left font-semibold">Talaba</th>
-            <th className="px-3 py-2 text-left font-semibold">Guruh</th>
-            <th className="px-3 py-2 text-left font-semibold">Fan / mavzu</th>
-            <th className="px-3 py-2 text-right font-semibold">Ball</th>
-            <th className="px-3 py-2 text-left font-semibold">Topshirdi</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={`${r.student_id}-${r.topic_code}-${i}`} className="border-t border-slate-100">
-              <td className="px-3 py-2">
-                <span className="font-medium text-slate-800">{r.student_name || r.student_id}</span>
-                <span className="block font-mono text-[11.5px] text-slate-500">{r.student_id}</span>
-              </td>
-              <td className="px-3 py-2 text-slate-600">{r.group_name || '—'}</td>
-              <td className="px-3 py-2">
-                <span className="text-slate-800">{r.subject_name}</span>
-                <span className="block text-[12px] text-slate-500">
-                  {r.topic_code}. {r.topic_title || '—'}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800">
-                {r.test_submitted_at ? `${r.test_score} / ${r.test_total}` : '—'}
-              </td>
-              <td className="px-3 py-2 tabular-nums text-slate-600">{fmt(r.test_submitted_at)}</td>
-            </tr>
+    <span className="flex items-center gap-1.5">
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-200">
+        <span className={`block h-full ${tone}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </span>
+      <span className="tabular-nums text-slate-700">{pct}%</span>
+    </span>
+  );
+}
+
+function ResultsTab({
+  rows,
+  report,
+  syllabuses,
+  groups,
+  filterSyllabus,
+  filterGroup,
+  onFilterSyllabus,
+  onFilterGroup,
+}: {
+  rows: OnlineProgressRow[];
+  report: OnlineReport | null;
+  syllabuses: OnlineSyllabusBrief[];
+  groups: OnlineGroup[];
+  filterSyllabus: string;
+  filterGroup: string;
+  onFilterSyllabus: (v: string) => void;
+  onFilterGroup: (v: string) => void;
+}) {
+  const [view, setView] = useState<'summary' | 'detail'>('summary');
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={filterSyllabus}
+          onChange={(e) => onFilterSyllabus(e.target.value)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[13px]"
+        >
+          <option value="">Barcha fanlar</option>
+          {syllabuses.map((s) => (
+            <option key={s.id} value={s.id}>{s.subject_name}</option>
           ))}
-        </tbody>
-      </table>
+        </select>
+        <select
+          value={filterGroup}
+          onChange={(e) => onFilterGroup(e.target.value)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[13px]"
+        >
+          <option value="">Barcha guruhlar</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.name}>{g.name}</option>
+          ))}
+        </select>
+
+        <div className="ml-auto flex gap-1">
+          {(['summary', 'detail'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium ${
+                view === v ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {v === 'summary' ? 'Talabalar kesimida' : 'Mavzular kesimida'}
+            </button>
+          ))}
+          {report && report.rows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => downloadCsv(report)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Download size={13} />
+              CSV
+            </button>
+          )}
+        </div>
+      </div>
+
+      {view === 'summary' ? (
+        !report || report.rows.length === 0 ? (
+          <Empty text="Hali natija yo'q." />
+        ) : (
+          <>
+            <p className="text-[12.5px] text-slate-500">
+              {report.lessons_total} ta dars o'tilgan · {report.topics_opened} ta mavzu ochilgan
+            </p>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-[13px]">
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Talaba</th>
+                    <th className="px-3 py-2 text-left font-semibold">Guruh</th>
+                    <th className="px-3 py-2 text-right font-semibold">Test</th>
+                    <th className="px-3 py-2 text-left font-semibold">O'zlashtirish</th>
+                    <th className="px-3 py-2 text-left font-semibold">Davomat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rows.map((r) => (
+                    <tr key={r.student_id} className="border-t border-slate-100">
+                      <td className="px-3 py-2">
+                        <span className="font-medium text-slate-800">{r.student_name}</span>
+                        <span className="block font-mono text-[11.5px] text-slate-500">
+                          {r.student_id}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">{r.group_name || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                        {r.tests_taken > 0 ? `${r.score_sum}/${r.score_max}` : '—'}
+                      </td>
+                      <td className="px-3 py-2"><Bar pct={r.avg_pct} /></td>
+                      <td className="px-3 py-2">
+                        <span className="flex items-center gap-2">
+                          <Bar pct={r.attendance_pct} />
+                          <span className="text-[11.5px] text-slate-400">
+                            {r.lessons_attended}/{report.lessons_total}
+                          </span>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )
+      ) : rows.length === 0 ? (
+        <Empty text="Hali natija yo'q." />
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="w-full text-[13px]">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Talaba</th>
+                <th className="px-3 py-2 text-left font-semibold">Guruh</th>
+                <th className="px-3 py-2 text-left font-semibold">Fan / mavzu</th>
+                <th className="px-3 py-2 text-right font-semibold">Ball</th>
+                <th className="px-3 py-2 text-left font-semibold">Topshirdi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.student_id}-${r.topic_code}-${i}`} className="border-t border-slate-100">
+                  <td className="px-3 py-2">
+                    <span className="font-medium text-slate-800">
+                      {r.student_name || r.student_id}
+                    </span>
+                    <span className="block font-mono text-[11.5px] text-slate-500">
+                      {r.student_id}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{r.group_name || '—'}</td>
+                  <td className="px-3 py-2">
+                    <span className="text-slate-800">{r.subject_name}</span>
+                    <span className="block text-[12px] text-slate-500">
+                      {r.topic_code}. {r.topic_title || '—'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-800">
+                    {r.test_submitted_at ? `${r.test_score} / ${r.test_total}` : '—'}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-slate-600">
+                    {fmt(r.test_submitted_at)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

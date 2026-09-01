@@ -75,8 +75,9 @@ sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.
 - [x] 5. Talaba kabineti: fanlar → qulflangan mavzular → material → 10 ta test
       (bir marta). Jonli darsga qo'shilish tugmasi, davomat avtomatik.
       Guruh TOKENDAN olinadi — brauzerdan emas.
-- [ ] 6. Baholash va hisobotlar  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
-- [ ] 7. Deploy, testlar, hujjat
+- [x] 6. Hisobot: talaba kesimida o'zlashtirish va davomat foizi, fan/guruh
+      filtri, CSV yuklab olish. Mavzular kesimidagi batafsil ko'rinish ham qoldi.
+- [ ] 7. Hujjat va yakuniy tekshiruv  <- HOZIR SHU YERDA (`onlinetalim.fermi.uz`): qulflangan mavzular, material, test
 
 ## Sizdan kerak bo'ladi (bloklovchi, men qila olmayman)
 0. **nginx sayti** `onlinetalim.fermi.uz` uchun — `/etc/nginx` ga yozish sudo
@@ -95,9 +96,10 @@ sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.
 - Har bosqich oxirida testlar o'tgach commit qilinadi.
 - Migratsiyadan oldin baza zaxirasi olinadi (`pg_dump`).
 
-## Sinov ma'lumoti (oxirida o'chiriladi)
-Serverda sinov uchun yaratilgan: `Ichki kasalliklar (online sinov)` fani (id 1),
-`998901112233` o'qituvchi, `601-guruh`. 7-bosqichda tozalanadi.
+## Sinov ma'lumoti
+`Ichki kasalliklar (online sinov)` fani **nofaol** qilindi — talabalar ko'rmaydi,
+lekin admin panelida turibdi (modulni sinab ko'rish uchun). To'liq o'chirish:
+admin → Online ta'lim → Fanlar → savatcha (avval materiallarni o'chirish kerak).
 
 ## Ochiq savollar / xavflar
 - Jitsi ~4-8 GB RAM oladi. Serverda hozir 41 GB bo'sh — yetadi, lekin

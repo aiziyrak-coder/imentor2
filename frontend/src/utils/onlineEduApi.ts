@@ -253,3 +253,34 @@ export function fetchOnlineProgress(params: {
 export function fetchOnlineAttendance(lessonId: number): Promise<OnlineAttendanceRow[]> {
   return call(`/admin/attendance/${lessonId}/`);
 }
+
+export type OnlineReportRow = {
+  student_id: string;
+  student_name: string;
+  group_name: string;
+  topics_touched: number;
+  tests_taken: number;
+  score_sum: number;
+  score_max: number;
+  avg_pct: number | null;
+  lessons_attended: number;
+  minutes_total: number;
+  attendance_pct: number | null;
+};
+
+export type OnlineReport = {
+  rows: OnlineReportRow[];
+  lessons_total: number;
+  topics_opened: number;
+};
+
+export function fetchOnlineReport(params: {
+  syllabusId?: number;
+  groupName?: string;
+} = {}): Promise<OnlineReport> {
+  const q = new URLSearchParams();
+  if (params.syllabusId) q.set('syllabus_id', String(params.syllabusId));
+  if (params.groupName) q.set('group_name', params.groupName);
+  const qs = q.toString();
+  return call(`/admin/report/${qs ? `?${qs}` : ''}`);
+}
