@@ -714,6 +714,38 @@ def pick_departments(db: Session = Depends(get_db), _auth=AdminOnly) -> list[dic
     ]
 
 
+# O'zbek lotinida bitta ism bir necha xil yoziladi va bazada qaysi shakl
+# turgani oldindan ma'lum emas:
+#     Shohruh / Shoxrux / Shohrux / Shoxruh
+#     Ahmadaliyev / Axmadaliyev / Ahmadaliev
+#     G'ulom / Gulom
+# Aynan shu sabab "Shohruh" deb qidirilganda bazadagi "Shoxrux" topilmagan
+# va o'qituvchi ro'yxatga qo'shilmay qolgan.
+#
+# Yechim: taqqoslashdan oldin ikkala tomon ham bitta shaklga keltiriladi.
+_FOLD_DELETE = "'`\u2018\u2019\u02bb\u02bc\u00b4"  # apostrofning barcha ko'rinishlari
+#   '   oddiy        \u2018 chap tirnoq    \u2019 o'ng tirnoq
+#   `   teskari      \u02bb o'zbek belgisi  \u02bc modifikator
+#   \u00b4 urg'u belgisi
+
+
+def _fold_text(value: str) -> str:
+    """Ismni taqqoslash shakliga keltiradi (Python tomoni)."""
+    out = (value or "").lower()
+    for ch in _FOLD_DELETE:
+        out = out.replace(ch, "")
+    return out.replace("x", "h").replace("iy", "i")
+
+
+def _fold_sql(col):
+    """Xuddi shu qoida, lekin SQL ichida — filtr bazada bajarilsin."""
+    return func.replace(
+        func.translate(func.lower(col), "x" + _FOLD_DELETE, "h"),
+        "iy",
+        "i",
+    )
+
+
 @router.get("/online/admin/staff/")
 def pick_staff(
     db: Session = Depends(get_db),
@@ -723,7 +755,8 @@ def pick_staff(
     """O'qituvchi tanlash uchun mavjud iMentor xodimlari.
 
     Ilgari admin telefon raqamini yoddan yozardi. Endi ism bo'yicha
-    qidiriladi va ro'yxatdan tanlanadi.
+    qidiriladi — imlo farqlariga va so'zlar tartibiga bog'liq emas:
+    "ahmadaliyev shohruh" ham, "Shoxrux" ham bir xil odamni topadi.
     """
     from app.models.user import Group as UserGroup, user_groups
 
@@ -734,14 +767,16 @@ def pick_staff(
         .where(UserGroup.name.in_(("admin", "klinika_admin", "hodim")))
         .distinct()
     )
-    term = q.strip().lower()
-    if term:
-        like = f"%{term}%"
-        stmt = stmt.where(
-            func.lower(User.first_name).like(like)
-            | func.lower(User.last_name).like(like)
-            | User.username.like(like)
-        )
+
+    # Ism va familiya qaysi tartibda yozilishi noma'lum, shuning uchun
+    # so'rovdagi HAR BIR so'z to'liq ism ichidan qidiriladi.
+    full = _fold_sql(User.first_name + " " + User.last_name)
+    for word in q.strip().split():
+        folded = _fold_text(word)
+        if not folded:
+            continue
+        stmt = stmt.where(full.like(f"%{folded}%") | User.username.like(f"%{word}%"))
+
     users = db.execute(stmt.order_by(User.first_name, User.last_name).limit(60)).scalars().all()
 
     already = {
