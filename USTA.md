@@ -57,6 +57,12 @@ online materiallar hozirgi iMentor katalogida ko'rinib qolardi.
 
 ## Yo'l xaritasi (bosqichlar)
 - [x] 0. O'rganish, savollar, TZ
+**Portal darvozasi:** `frontend_online` — oddiy statik server, u `/api/` ni
+backendga uzatmaydi va SPA sahifasini qaytaradi. Shuning uchun `nginx_online`
+gateway'i qo'shildi (`deploy/nginx/docker-gateway.online.conf`): `/api/` →
+backend, `/media/` → fayllar, `/` → `frontend_online`. iMentor'ning `nginx`
+xizmatidan mustaqil — biri ikkinchisini qayta ishga tushirmaydi.
+
 **Ajratish:** portal o'z domenida (`onlinetalim.fermi.uz`) VA o'z konteynerida
 (`frontend_online`, 9060-port). Uni yangilash iMentor frontendini qimirlatmaydi —
 sinovda tasdiqlandi: portal 18 soniya, iMentor 48 daqiqa uzluksiz.

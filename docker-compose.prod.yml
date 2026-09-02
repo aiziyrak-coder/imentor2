@@ -233,10 +233,38 @@ services:
     depends_on:
       frontend:
         condition: service_healthy
-    ports:
-      - "${ONLINE_HTTP_BIND:-127.0.0.1}:${ONLINE_HTTP_PORT:-9060}:80"
+    # Port CHIQARILMAYDI: bu shunchaki statik server bo'lib, `/api/` ni
+    # backendga uzatmaydi. Tashqariga `nginx_online` gateway'i chiqadi.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "5" }
+
+  # Online portal gateway'i — `onlinetalim.fermi.uz` shu yerga keladi.
+  #
+  # iMentor'ning `nginx` xizmatidan MUSTAQIL: o'z konfigi, o'z porti.
+  # Ikkalasi bir xil vazifani bajaradi, lekin biri ikkinchisini qayta
+  # ishga tushirmaydi.
+  nginx_online:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile.online
+    ports:
+      - "${ONLINE_HTTP_BIND:-127.0.0.1}:${ONLINE_HTTP_PORT:-9060}:80"
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+      frontend_online:
+        condition: service_healthy
+    volumes:
+      - media_data:/var/www/media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/api/health/"]
       interval: 15s
       timeout: 5s
       retries: 5
