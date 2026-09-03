@@ -87,19 +87,34 @@ echo "    nginx qayta o'qildi (uzilishsiz)."
 echo "==> 4/4  SSL sertifikati"
 if [ -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
   echo "    sertifikat allaqachon bor — tegilmadi."
+elif ! command -v certbot >/dev/null 2>&1; then
+  echo "OGOHLANTIRISH: certbot topilmadi. Sayt HTTP orqali ishlayapti."
 else
-  if command -v certbot >/dev/null 2>&1; then
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
-      --register-unsafely-without-email --redirect || {
-        echo
-        echo "OGOHLANTIRISH: sertifikat olinmadi."
-        echo "  Sayt HTTP orqali ishlayapti. Qo'lda urinib ko'ring:"
-        echo "      sudo certbot --nginx -d $DOMAIN"
-        exit 0
-      }
+  # Serverda BIR NECHTA Let's Encrypt hisobi ro'yxatdan o'tgan, shuning uchun
+  # certbot avtomatik rejimda "Please choose an account" deb to'xtab qoladi.
+  #
+  # Mavzu shundaki: mavjud sertifikatlarning KO'PCHILIGI qaysi hisobda bo'lsa,
+  # yangisi ham o'shanda bo'lishi kerak — aks holda yangilash paytida ikkita
+  # hisob aralashib ketadi.
+  ACCOUNT="$(grep -hoE '^account = [0-9a-f]+' /etc/letsencrypt/renewal/*.conf 2>/dev/null |
+    awk '{print $3}' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')"
+
+  ACCOUNT_ARG=""
+  if [ -n "$ACCOUNT" ]; then
+    ACCOUNT_ARG="--account $ACCOUNT"
+    echo "    hisob: $ACCOUNT (mavjud sertifikatlar bilan bir xil)"
+  fi
+
+  if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+      --register-unsafely-without-email --redirect $ACCOUNT_ARG; then
     echo "    sertifikat olindi va HTTPS yo'naltirish qo'shildi."
   else
-    echo "OGOHLANTIRISH: certbot topilmadi. Sayt HTTP orqali ishlayapti."
+    echo
+    echo "OGOHLANTIRISH: sertifikat olinmadi."
+    echo "  Sayt HTTP orqali ISHLAYAPTI — bu qadam faqat HTTPS uchun."
+    echo "  Qo'lda urinib ko'ring:"
+    echo "      sudo certbot --nginx -d $DOMAIN $ACCOUNT_ARG"
+    exit 0
   fi
 fi
 
