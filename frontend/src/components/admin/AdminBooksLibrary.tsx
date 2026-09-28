@@ -24,6 +24,9 @@ export default function AdminBooksLibrary() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [removingId, setRemovingId] = useState<number | null>(null);
+  // Protokollar (klinik protokol, SanPin, SSV buyrug'i) AI generatsiyasida majburiy manba —
+  // darsliklardan alohida ko'rsatiladi (2026-09-24).
+  const [kind, setKind] = useState<'book' | 'protocol'>('book');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,13 +48,16 @@ export default function AdminBooksLibrary() {
     void load();
   }, [load]);
 
+  const protocolCount = useMemo(() => books.filter((b) => b.kind === 'protocol').length, [books]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return books;
-    return books.filter((b) =>
+    const ofKind = books.filter((b) => (b.kind || 'book') === kind);
+    if (!q) return ofKind;
+    return ofKind.filter((b) =>
       `${b.title} ${b.department_name} ${b.source_archive}`.toLowerCase().includes(q),
     );
-  }, [books, search]);
+  }, [books, search, kind]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, { departmentName: string; rows: SubjectBookItem[] }>();
@@ -108,7 +114,33 @@ export default function AdminBooksLibrary() {
         </button>
       </div>
 
-      {stats && (
+      <div className="inline-flex rounded-xl bg-slate-100 p-1" role="tablist">
+        {([
+          ['book', t('admin.booksTabBooks'), books.length - protocolCount],
+          ['protocol', t('admin.booksTabProtocols'), protocolCount],
+        ] as const).map(([key, label, n]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={kind === key}
+            onClick={() => setKind(key)}
+            className={`rounded-lg px-4 py-2 text-[13px] font-semibold transition ${
+              kind === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {label} <span className="ml-1 text-slate-400">{n}</span>
+          </button>
+        ))}
+      </div>
+
+      {kind === 'protocol' && (
+        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] leading-relaxed text-amber-900 ring-1 ring-amber-200">
+          {t('admin.booksProtocolsHint')}
+        </p>
+      )}
+
+      {stats && kind === 'book' && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="ios-glass rounded-2xl border border-white/70 p-4">
             <p className="text-[11px] font-semibold text-slate-400 uppercase">{t('admin.booksDepartmentsCovered')}</p>

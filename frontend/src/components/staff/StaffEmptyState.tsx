@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { staffCard, staffBtnPrimary, STAFF_HEADING } from './staffUi';
+import { staffBtnPrimary } from './staffUi';
 
 type Props = {
   icon: LucideIcon;
@@ -9,6 +9,14 @@ type Props = {
   onAction?: () => void;
 };
 
+/**
+ * Bo'sh holat.
+ *
+ * Ilgari bu 40px li belgi bilan oq quti edi va bo'sh sahifada eng ko'zga
+ * tashlanadigan narsa "hozircha hech narsa yo'q" degan quti bo'lardi.
+ * Endi quti yo'q — belgi kichik va och, matn markazda, keyingi qadam esa
+ * bitta tugmada. Bo'sh joy o'zi ham xabar beradi.
+ */
 export default function StaffEmptyState({
   icon: Icon,
   title,
@@ -17,17 +25,15 @@ export default function StaffEmptyState({
   onAction,
 }: Props) {
   return (
-    <div className="max-w-lg mx-auto">
-      <div className={`${staffCard} p-8 text-center space-y-4`}>
-        <Icon size={40} className="mx-auto text-[#083047]/70" />
-        <h2 className={`text-lg font-bold ${STAFF_HEADING}`}>{title}</h2>
-        <p className="text-[14px] text-black/55 leading-relaxed">{hint}</p>
-        {actionLabel && onAction && (
-          <button type="button" onClick={onAction} className={staffBtnPrimary}>
-            {actionLabel}
-          </button>
-        )}
-      </div>
+    <div className="mx-auto max-w-sm px-4 py-16 text-center">
+      <Icon size={22} className="mx-auto mb-3 text-slate-300" />
+      <p className="text-[14px] font-semibold text-slate-700">{title}</p>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-slate-500">{hint}</p>
+      {actionLabel && onAction && (
+        <button type="button" onClick={onAction} className={`${staffBtnPrimary} mt-5`}>
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }

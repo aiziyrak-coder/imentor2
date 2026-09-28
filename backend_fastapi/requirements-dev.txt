@@ -1,0 +1,3 @@
+# Faqat test uchun — prod image'ga kirmaydi (Dockerfile requirements.txt ni oladi).
+-r requirements.txt
+pytest==8.3.4

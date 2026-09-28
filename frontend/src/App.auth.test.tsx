@@ -1,25 +1,38 @@
+import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
-const { getCurrentLocalUserMock, subscribeLocalAuthMock, isPublicStudentTestUrlMock } = vi.hoisted(() => ({
+const { getCurrentLocalUserMock, subscribeLocalAuthMock, isPublicStudentTestUrlMock, isMobileMock } = vi.hoisted(() => ({
+  isMobileMock: vi.fn(() => false),
   getCurrentLocalUserMock: vi.fn(),
   subscribeLocalAuthMock: vi.fn(),
   isPublicStudentTestUrlMock: vi.fn(() => false),
 }));
 
-vi.mock('motion/react', () => ({
-  motion: {
-    aside: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
-      <aside {...props}>{children}</aside>
-    ),
-    div: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
-      <div {...props}>{children}</div>
-    ),
-  },
-}));
+// `motion.<teg>` ning har qanday variantini qamrab oladi. Ilgari bu yerda
+// faqat `aside` va `div` bor edi — qobiqqa `motion.span` qo'shilganda test
+// "Element type is invalid" bilan yiqilgan, holbuki kod to'g'ri edi.
+vi.mock('motion/react', () => {
+  const plain = (tag: string) =>
+    ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => {
+      // Animatsiya xossalari DOM ga o'tmasin — React ogohlantirish beradi.
+      const {
+        initial: _i, animate: _a, exit: _e, transition: _t, layoutId: _l,
+        whileHover: _wh, whileTap: _wt, layout: _lay,
+        ...rest
+      } = props as Record<string, unknown>;
+      return React.createElement(tag, rest, children);
+    };
+  return {
+    AnimatePresence: ({ children }: React.PropsWithChildren) => children,
+    motion: new Proxy({} as Record<string, unknown>, {
+      get: (_target, tag: string) => plain(tag),
+    }),
+  };
+});
 
 vi.mock('./hooks/useDeviceProfile', () => ({
-  useDeviceProfile: () => ({ isMobile: false }),
+  useDeviceProfile: () => ({ isMobile: isMobileMock() }),
 }));
 
 vi.mock('./hooks/useStaffLocationTracking', () => ({
@@ -67,6 +80,10 @@ vi.mock('./components/staff/StaffTeachingSubjectsPicker', () => ({
   default: () => <div data-testid="teaching-subjects-picker">PICKER</div>,
 }));
 
+vi.mock('./components/auth/MobileAuthScreen', () => ({
+  default: () => <div data-testid="mobile-auth" />,
+}));
+
 vi.mock('./components/public/PublicLandingPage', () => ({
   default: () => <div data-testid="public-landing">PUBLIC_LANDING</div>,
 }));
@@ -107,6 +124,7 @@ describe('App auth shell', () => {
     getCurrentLocalUserMock.mockReset();
     subscribeLocalAuthMock.mockReset();
     isPublicStudentTestUrlMock.mockReturnValue(false);
+    isMobileMock.mockReturnValue(false);
     window.history.pushState({}, '', '/');
   });
 
@@ -114,6 +132,14 @@ describe('App auth shell', () => {
     getCurrentLocalUserMock.mockReturnValue(null);
     render(<App />);
     expect(screen.getByTestId('public-landing')).toBeInTheDocument();
+  });
+
+  it('telefonda landing emas, darhol kirish sahifasi ochiladi', () => {
+    isMobileMock.mockReturnValue(true);
+    getCurrentLocalUserMock.mockReturnValue(null);
+    render(<App />);
+    expect(screen.getByTestId('mobile-auth')).toBeInTheDocument();
+    expect(screen.queryByTestId('public-landing')).toBeNull();
   });
 
   it('renders main syllabus shell for signed-in hodim', async () => {

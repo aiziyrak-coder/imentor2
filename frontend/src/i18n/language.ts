@@ -81,11 +81,39 @@ export function inferPdfLanguage(text: string): AppLanguage {
 
   // O'zbek (lotin yoki kirill) — rus/inglizdan oldin.
   if (uzScore >= 2 && uzScore >= ruScore) return 'uz';
+
+  // Lotin yozuvidagi o'zbekcha MAVZU NOMLARI (2026-09-26). Yuqoridagi
+  // "ma'ruza/amaliy/mavzu" so'zlari hujjat sarlavhasida bo'ladi, mavzu
+  // nomlarida emas — "Odam anatomiyasi. Suyaklar tuzilishi" hech qaysi
+  // belgiga tushmay, lotin harf ko'pligi uchun INGLIZ deb aniqlanardi va AI
+  // o'zbek guruhiga inglizcha material yozardi (20 ta fan shunday edi).
+  if (lat > cyr) {
+    const uzMarks = latinUzbekMarks(sample);
+    const enMarks = (sample.match(/\b(the|of|and|with|in|to|for|by|its|their|from)\b|tion\b|ness\b|ies\b/g) || []).length;
+    if (uzMarks >= 3 && uzMarks > enMarks) return 'uz';
+  }
   if (ruScore >= enScore + 2) return 'ru';
   if (enScore >= ruScore + 2) return 'en';
   if (uzScore >= 2) return 'uz';
 
   return cyr > lat ? 'ru' : 'en';
+}
+
+/**
+ * Lotin o'zbekchaning ishonchli belgilari: o'/g' (har qanday tutuq belgisi
+ * bilan), "q" ning "u"siz kelishi (inglizda deyarli yo'q), bog'lovchilar va
+ * o'zbekcha qo'shimchalar. "-lar" ataylab yo'q: inglizcha "vascular",
+ * "cellular" ham shu bilan tugaydi.
+ */
+function latinUzbekMarks(sample: string): number {
+  const apostrophePairs = (sample.match(/[og][ʻʼ‘’'`]/g) || []).length;
+  const bareQ = (sample.match(/q(?!u)/g) || []).length;
+  const words = (sample.match(/\b(va|bilan|uchun|hamda|yoki|ham|turlari|usullari)\b/g) || []).length;
+  const suffixes = (sample.match(/[a-z](larning|lari|ning|dagi|ligi|lik|lash|ishi|iyasi|inchi)\b/g) || []).length;
+  // Kelishik qo'shimchalari: "faniga", "gigiyenasi", "kasallikni". Kamida ikki
+  // harfli o'zakdan keyin — inglizcha qisqa so'zlar ("yoga") sanalmasin.
+  const cases = (sample.match(/[a-z]{3,}(iga|ga|si|ni|dan)\b/g) || []).length;
+  return apostrophePairs + bareQ + words + suffixes + cases;
 }
 
 export function languageLabel(lang: AppLanguage): string {

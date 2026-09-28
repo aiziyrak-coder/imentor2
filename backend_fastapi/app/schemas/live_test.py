@@ -24,6 +24,8 @@ class LiveTestSubmissionCreateRequest(BaseModel):
     first_name: str
     last_name: str
     answers: list[int] = Field(min_length=1, max_length=200)
+    started_at_ms: int | None = None
+    duration_sec: int | None = None
 
 
 class LiveTestDraftUpsertRequest(BaseModel):

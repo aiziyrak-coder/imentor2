@@ -10,6 +10,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -22,9 +23,22 @@ class AcademicDepartment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True)
+    #: Nom tarjimalari: {"ru": "...", "en": "..."}. `name` — o'zbekcha manba
+    #: va u KALIT sifatida ishlatiladi, shuning uchun bu yerda takrorlanmaydi.
+    name_i18n: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     code: Mapped[str] = mapped_column(String(64), unique=True)
+    # HEMIS'dagi ayni kafedra. Nomlar bir xil yozilmagani uchun (imlo, "kafedrasi"
+    # qo'shimchasi) bog'lanish shu yerda saqlanadi; `name` esa O'ZGARMAYDI —
+    # u hamma joyda kalit sifatida ishlatiladi (2026-09-25).
+    hemis_id: Mapped[str] = mapped_column(String(32), default="")
+    hemis_code: Mapped[str] = mapped_column(String(64), default="")
+    hemis_name: Mapped[str] = mapped_column(String(255), default="")
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Institut hujjatidagi klinik kafedrami (bemor yonida, shifoxona bazasida).
+    # AI material shu bayroqqa qarab klinik yoki klinik emas deb yoziladi
+    # (`app/data/clinical_departments.json`, 2026-09-25).
+    is_clinical: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
@@ -52,6 +66,17 @@ class CourseSyllabus(Base):
     #   topics_i18n -> {"ru": {"<asl sarlavha>": "<tarjima>"}, "en": {...}}
     name_i18n: Mapped[dict] = mapped_column(JSONB, default=dict)
     topics_i18n: Mapped[dict] = mapped_column(JSONB, default=dict)
+    #: Bu fanni ko'ra va tanlay oladigan hodimlar (`owner_key`). BO'SH —
+    #: hammaga ochiq (odatiy holat). To'ldirilgan bo'lsa fan katalogda va
+    #: kafedra ro'yxatida faqat shularga ko'rinadi va faqat ular uni o'ziga
+    #: biriktira oladi. Admin cheklovdan tashqarida.
+    allowed_owner_keys: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    #: Excel'dan o'zi yuklagan o'qituvchining `owner_key`. BO'SH — admin
+    #: yaratgan umumiy fan. To'ldirilgan fan faqat shu o'qituvchiniki:
+    #: `allowed_owner_keys` ham `[owner]`, o'chirishni faqat u qila oladi.
+    created_by: Mapped[str] = mapped_column(String(128), default="", server_default="")
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))

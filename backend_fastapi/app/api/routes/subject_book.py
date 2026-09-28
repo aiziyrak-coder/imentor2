@@ -37,6 +37,7 @@ def admin_subject_book_stats(
             AcademicDepartment.name,
             func.count(func.distinct(SubjectBook.id)).label("books_count"),
             func.count(func.distinct(BookChunk.id)).label("chunks_count"),
+            func.count(func.distinct(SubjectBook.id)).filter(SubjectBook.kind == "protocol").label("protocols_count"),
         )
         .select_from(AcademicDepartment)
         .join(SubjectBook, SubjectBook.department_id == AcademicDepartment.id)
@@ -47,7 +48,10 @@ def admin_subject_book_stats(
     ).all()
 
     by_department = [
-        DepartmentBookStats(id=r.id, code=r.code, name=r.name, books_count=r.books_count, chunks_count=r.chunks_count)
+        DepartmentBookStats(
+            id=r.id, code=r.code, name=r.name, books_count=r.books_count,
+            chunks_count=r.chunks_count, protocols_count=r.protocols_count,
+        )
         for r in rows
     ]
     total_books = db.execute(select(func.count()).select_from(SubjectBook)).scalar_one()
@@ -63,9 +67,11 @@ def admin_list_subject_books(
     request: Request,
     department_code: str = "",
     q: str = "",
+    kind: str = "",
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles("admin")),
 ) -> dict:
+    """`kind=protocol` — faqat protokollar (klinik protokol, SanPin, SSV buyrug'i)."""
     stmt = (
         select(
             SubjectBook,
@@ -82,6 +88,8 @@ def admin_list_subject_books(
         stmt = stmt.where(AcademicDepartment.code == department_code.strip())
     if q.strip():
         stmt = stmt.where(SubjectBook.title.ilike(f"%{q.strip()}%"))
+    if kind.strip():
+        stmt = stmt.where(SubjectBook.kind == kind.strip())
 
     rows = db.execute(stmt).all()
     media_url = get_settings().django_media_url.rstrip("/")
@@ -111,6 +119,7 @@ def admin_list_subject_books(
                 page_count=book.page_count,
                 chunk_count=chunk_count,
                 is_active=book.is_active,
+                kind=book.kind or "book",
                 created_at=book.created_at,
             ).model_dump()
         )

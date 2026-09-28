@@ -43,6 +43,23 @@ export function totalTopicCount(variants: SyllabusVariant[]): number {
   return variants.reduce((n, v) => n + (v.topics?.length ?? 0), 0);
 }
 
+/**
+ * Fanning mavzular soni.
+ *
+ * Katalog `slim` rejimida mavzular ro'yxati bo'sh keladi (4.4 MB javobni
+ * 0.4 MB ga tushirish uchun) va son `topic_count` da bo'ladi. To'liq
+ * javobda esa `topic_count` bo'lmaydi — o'shanda mavzular sanaladi.
+ */
+export function syllabusTopicCount(row: {
+  topic_count?: number;
+  variants?: SyllabusVariant[];
+  topics?: SyllabusTopic[];
+  file_name?: string;
+}): number {
+  if (typeof row.topic_count === 'number') return row.topic_count;
+  return totalTopicCount(resolveSyllabusVariants(row));
+}
+
 export function countTopicsByType(topics: SyllabusTopic[]): {
   lectures: number;
   practicals: number;

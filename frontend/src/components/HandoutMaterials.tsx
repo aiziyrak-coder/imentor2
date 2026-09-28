@@ -7,6 +7,7 @@ import {
   FileText,
   Loader2,
   Sparkles,
+  Trash2,
   Upload,
   X,
   ZoomIn,
@@ -14,11 +15,14 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { GlobalTopicContext, AppNavigationContext } from '../App';
 import { useUiText } from '../i18n/useUiText';
+import { postActivityEvents } from '../utils/analyticsApi';
 import { useLocalizedTopic } from '../i18n/useLocalizedTopic';
 import { backendErrorMessage } from '../utils/apiError';
 import {
+  deleteHandout,
   fetchHandoutsForTopic,
   getHandoutFileBlobUrl,
+  handoutLanguage,
   resolveHandoutFileUrl,
   uploadHandout,
   HANDOUT_FILE_ACCEPT,
@@ -30,7 +34,6 @@ import StaffPageLayout from './staff/StaffPageLayout';
 import StaffTopicHeader from './staff/StaffTopicHeader';
 import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
-import StaffPanel from './staff/StaffPanel';
 import { staffBtnGhost, staffBtnPrimary, staffBtnSecondary } from './staff/staffUi';
 import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
 
@@ -95,7 +98,7 @@ function HandoutThumb({ item }: { item: TopicHandoutItem }) {
 
   if (failed || !src) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black/5 text-black/30 text-[11px]">
+      <div className="absolute inset-0 flex items-center justify-center bg-black/5 text-slate-300 text-[11px]">
         {failed ? t('handout.imageFailed') : t('common.loading')}
       </div>
     );
@@ -148,7 +151,7 @@ function HandoutLightbox({ items, index, onClose, onIndexChange }: LightboxProps
         <div className="min-w-0 flex-1 pr-3">
           <p className="text-[15px] font-semibold truncate">{item.title || item.file_name}</p>
           <p className="text-[12px] text-white/60 truncate">
-            {index + 1} / {items.length} · {item.author_name || item.owner_key}
+            {index + 1} / {items.length}{item.author_name ? ` · ${item.author_name}` : ''}
           </p>
         </div>
         {fileSrc && (
@@ -232,6 +235,7 @@ export default function HandoutMaterials() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState<'upload' | 'generate' | null>(null);
   const [progress, setProgress] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const topicKey = topicContextKey(globalTopic);
   const requestSeq = useRef(0);
@@ -246,12 +250,17 @@ export default function HandoutMaterials() {
     setLoading(true);
     setError(null);
     try {
-      const list = await fetchHandoutsForTopic(globalTopic, language);
+      const list = await fetchHandoutsForTopic(globalTopic);
       if (seq !== requestSeq.current) return;
+      const prefer = language;
+      list.sort((a, b) => {
+        const ap = handoutLanguage(a) === prefer ? 0 : 1;
+        const bp = handoutLanguage(b) === prefer ? 0 : 1;
+        return ap - bp;
+      });
       setItems(list);
     } catch (e) {
       if (seq !== requestSeq.current) return;
-      setItems([]);
       setError(
         e instanceof Error && e.message === 'no-backend-token'
           ? t('handout.errorLogin')
@@ -265,6 +274,22 @@ export default function HandoutMaterials() {
   useEffect(() => {
     void loadHandouts();
   }, [loadHandouts]);
+
+  /** O'chirish: o'zi yuklagani yoki o'z fanidagi tarqatma (server `can_delete` beradi). */
+  const handleDelete = async (item: TopicHandoutItem) => {
+    if (!window.confirm(t('handout.deleteConfirm'))) return;
+    setDeletingId(item.id);
+    setError(null);
+    try {
+      await deleteHandout(item.id);
+      setLightboxIndex(null);
+      await loadHandouts();
+    } catch {
+      setError(t('handout.deleteFailed'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleUploadFiles = async (list: FileList | null) => {
     if (!globalTopic || !isTopicContextComplete(globalTopic)) return;
@@ -316,7 +341,11 @@ export default function HandoutMaterials() {
 
   if (!globalTopic?.title || !isTopicContextComplete(globalTopic)) {
     return (
-      <StaffPageLayout>
+      <StaffPageLayout
+        title={t('nav.handouts')}
+        icon={FileText}
+        accent="teal"
+      >
         <StaffEmptyState
           icon={BookOpen}
           title={t('handout.noTopicTitle')}
@@ -329,7 +358,11 @@ export default function HandoutMaterials() {
   }
 
   return (
-    <StaffPageLayout>
+    <StaffPageLayout
+      title={t('nav.handouts')}
+      icon={FileText}
+      accent="teal"
+    >
       <StaffTopicHeader
         moduleLabel={t('handout.title')}
         topic={localizedTopic}
@@ -376,30 +409,43 @@ export default function HandoutMaterials() {
       />
 
       {progress ? (
-        <StaffPanel className="py-3 px-4 text-[13px] text-[#083047] font-medium">{progress}</StaffPanel>
+        <p className="text-[12.5px] font-medium text-slate-500">{progress}</p>
       ) : null}
 
       {error && <StaffErrorAlert message={error} />}
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="animate-spin text-[#083047]/60" size={36} />
+          <Loader2 className="animate-spin text-slate-300" size={36} />
         </div>
       ) : items.length === 0 ? (
-        <StaffPanel className="py-12 text-center text-black/45 text-[14px]">
-          {t('handout.empty')}
-        </StaffPanel>
+        <div className="mx-auto max-w-sm px-4 py-16 text-center">
+          <FileText size={22} className="mx-auto mb-3 text-slate-300" />
+          <p className="text-[13px] leading-relaxed text-slate-500">{t('handout.empty')}</p>
+        </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
           {items.map((item, idx) => (
             <motion.div
               key={item.id}
               layout
-              className="group relative ios-glass rounded-2xl border border-white/70 overflow-hidden shadow-sm"
+              className="group relative overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.06]"
             >
               <button
                 type="button"
-                onClick={() => setLightboxIndex(idx)}
+                onClick={() => {
+                  setLightboxIndex(idx);
+                  // Hisobot uchun: o'qituvchi qaysi tarqatmani ochgani.
+                  void postActivityEvents(
+                    [
+                      {
+                        event_type: 'content_view',
+                        meta: { kind: 'handout', title: item.title || item.file_name || '' },
+                      },
+                    ],
+                    'handouts',
+                  );
+                }}
                 className="block w-full aspect-[4/3] bg-black/5 relative"
               >
                 <HandoutThumb item={item} />
@@ -408,20 +454,32 @@ export default function HandoutMaterials() {
                 </span>
               </button>
               <div className="p-2.5 space-y-1">
-                <p className="text-[12px] font-semibold text-black/85 line-clamp-2 leading-snug">
+                <p className="text-[12px] font-semibold text-slate-800 line-clamp-2 leading-snug">
                   {item.title || item.file_name}
                 </p>
-                <p className="text-[10px] text-black/35">
+                <p className="text-[10px] text-slate-400">
                   {item.kind === 'pdf' ? 'PDF' : t('handout.kindImage')} · {formatSize(item.file_size)}
                 </p>
               </div>
+              {item.can_delete === true && (
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(item)}
+                  disabled={deletingId === item.id}
+                  className="absolute right-2 top-2 rounded-lg bg-white/90 p-1.5 text-rose-600 shadow-sm ring-1 ring-slate-900/10 transition hover:bg-rose-50 disabled:opacity-50"
+                  aria-label={t('handout.delete')}
+                  title={t('handout.delete')}
+                >
+                  {deletingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                </button>
+              )}
             </motion.div>
           ))}
         </div>
       )}
 
       {items.length > 0 && (
-        <p className="text-center text-[12px] text-black/40">
+        <p className="text-center text-[12px] text-slate-400">
           {t('handout.totalCount', { count: items.length })}
         </p>
       )}

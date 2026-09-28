@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import {legacyColors} from './src/utils/legacyCss';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
@@ -10,7 +11,14 @@ export default defineConfig(({mode}) => {
     ? ''
     : env.OPENAI_API_KEY || env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || '';
   return {
-    plugins: [react(), tailwindcss()],
+    // legacyColors: Tailwind v4 oklch ranglari Chrome <111 da ko'rinmaydi (Windows 7).
+    plugins: [react(), tailwindcss(), legacyColors()],
+    build: {
+      // Eski telefonlar (Chrome 80, Samsung Internet) uchun: yangi sintaksis
+      // (masalan `?.`, `??`, sinf maydonlari) eskisiga o'giriladi. Yangi METODLAR
+      // `src/utils/polyfills.ts` da qo'shiladi — target ularni qo'shmaydi.
+      target: ['chrome80', 'safari13', 'firefox78', 'edge88'],
+    },
     define: {
       'process.env.OPENAI_API_KEY': JSON.stringify(openaiKey),
       'process.env.DEEPSEEK_API_KEY': JSON.stringify(openaiKey),

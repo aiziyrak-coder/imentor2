@@ -215,6 +215,14 @@ export async function deleteAdminCatalogItem(id: number): Promise<void> {
   });
 }
 
+/** Ochiq baza umumiy raqamlari — landing sahifa uchun, token talab qilinmaydi. */
+export async function fetchPublicCatalogTotals(): Promise<CatalogStatsTotals | null> {
+  const stats = await httpJson<CatalogStats>(`${apiBaseUrl()}/v1/public/content-catalog/stats/`, {
+    timeoutMs: 15000,
+  });
+  return stats?.totals ?? null;
+}
+
 export async function fetchAdminCatalogStats(params?: {
   kind?: CatalogKind | '';
 }): Promise<CatalogStats | null> {

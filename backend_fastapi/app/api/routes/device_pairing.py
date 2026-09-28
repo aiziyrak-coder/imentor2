@@ -16,7 +16,10 @@ from app.schemas.device_pairing import DevicePairConfirmRequest, DevicePairCreat
 
 router = APIRouter()
 
-PAIRING_TTL_MINUTES = 4
+# 4 daqiqa kam edi: o'qituvchi telefonda parolini topib kirguncha QR eskirib
+# qolardi. Kodni faqat telefonda kirgan xodim tasdiqlay oladi, kompyuter esa
+# tokenni faqat o'z `desktop_secret`i bilan oladi — uzoqroq muddat xavfsiz.
+PAIRING_TTL_MINUTES = 10
 
 _SENSITIVE_PROFILE_KEYS = frozenset(
     {"password", "phoneDigits", "phone_digits", "access", "refresh", "token"}

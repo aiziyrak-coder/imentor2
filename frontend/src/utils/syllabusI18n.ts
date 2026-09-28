@@ -1,3 +1,4 @@
+import { cacheSyllabusRows, getCachedSyllabusRow } from './syllabusRowCache';
 import type { AppLanguage } from '../i18n/language';
 import type { CourseSyllabusRow } from './syllabusApi';
 import { httpJson } from '../api/httpClient';
@@ -80,8 +81,8 @@ export async function requestSyllabusTranslation(
   requested.add(key);
   try {
     const token = await getBackendAccessToken();
-    if (!token) return false;
-    await httpJson(
+    if (!token) { requested.delete(key); return false; }
+    const result = await httpJson<Pick<CourseSyllabusRow, "name_i18n" | "topics_i18n">>(
       `${apiBaseUrl()}/v1/course-syllabuses/${syllabusId}/translate/?lang=${encodeURIComponent(lang)}`,
       {
         method: 'POST',
@@ -90,6 +91,8 @@ export async function requestSyllabusTranslation(
         timeoutMs: 180_000,
       },
     );
+    const row = getCachedSyllabusRow(syllabusId);
+    if (row) cacheSyllabusRows([{ ...row, name_i18n: result.name_i18n, topics_i18n: result.topics_i18n }]);
     return true;
   } catch {
     // Tarjima bo'lmasa ham ilova ishlayveradi — asl nom ko'rsatiladi.

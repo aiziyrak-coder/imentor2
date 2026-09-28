@@ -200,7 +200,14 @@ export async function upsertLiveTestDraftOnServer(
 /** Talaba: javoblarni serverga yuboradi (JWT majburiy). */
 export async function submitLiveTestOnServer(
   sessionKey: string,
-  body: { participantKey?: string; firstName: string; lastName: string; answers: number[] }
+  body: {
+    participantKey?: string;
+    firstName: string;
+    lastName: string;
+    answers: number[];
+    started_at_ms?: number;
+    duration_sec?: number;
+  }
 ): Promise<void> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
@@ -212,6 +219,8 @@ export async function submitLiveTestOnServer(
       first_name: body.firstName,
       last_name: body.lastName,
       answers: body.answers,
+      started_at_ms: body.started_at_ms,
+      duration_sec: body.duration_sec,
     },
     timeoutMs: 30000,
   });

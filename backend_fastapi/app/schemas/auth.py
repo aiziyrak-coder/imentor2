@@ -13,6 +13,9 @@ class LocalLoginRequest(BaseModel):
     role: str | None = None
     first_name: str = ""
     last_name: str = ""
+    faculty: str = ""
+    department: str = ""
+    direction: str = ""
     register: bool = False
 
     @field_validator("phone_digits")
@@ -41,6 +44,9 @@ class LoginResponse(BaseModel):
     photo_url: str = ""
     student_id: str | None = None
     group_name: str | None = None
+    # Hisob boshqa odam bergan parol bilan yaratilgan (masalan pasport
+    # seriyasi) — foydalanuvchi avval o'z parolini qo'yishi kerak.
+    must_change_password: bool = False
 
 
 class TokenRefreshRequest(BaseModel):

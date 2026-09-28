@@ -20,15 +20,33 @@ from app.schemas.content import (
     SetMyTeachingSubjectsRequest,
     StaffCourseSelectionOut,
 )
-from app.schemas.course_syllabus import CourseSyllabusFullOut, CourseSyllabusUpsertRequest
+from app.schemas.course_syllabus import (
+    CourseSyllabusFullOut,
+    CourseSyllabusUpsertRequest,
+    OwnSyllabusCreateRequest,
+    OwnSyllabusUpdateRequest,
+)
 from app.services.direction_code import infer_direction_code, normalize_direction_code
 from app.services.pagination import paginate
+from app.services.staff_department import normalize_department_name
+from app.services import staff_department as staff_dept
+from app.services import syllabus_access as access
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
+
+# Bitta o'qituvchi Excel'dan yuklay oladigan faol shaxsiy fanlar chegarasi.
+OWN_SYLLABUS_LIMIT = 40
+
+_OWN_TYPE_PREFIX = {"lecture": "L", "practical": "A", "clinical": "K", "independent": "I", "lab": "B"}
+
+
+# Fan ko'rinishi qoidasi `app/services/syllabus_access.py` da — tarqatma,
+# taqdimot, video va tayyor kontent ham aynan shu qoidadan o'tadi.
+_visible_to = access.visible_to
 
 
 def _slugify_subject(name: str) -> str:
@@ -38,8 +56,12 @@ def _slugify_subject(name: str) -> str:
     return (s or "fan")[:64]
 
 
+def _valid_variants(obj: CourseSyllabus) -> list[dict]:
+    return [v for v in (obj.variants or []) if isinstance(v, dict)]
+
+
 def _sync_legacy_fields(obj: CourseSyllabus) -> None:
-    variants = obj.variants or []
+    variants = _valid_variants(obj)
     if variants:
         first = variants[0]
         obj.file_name = (first.get("file_name") or obj.file_name or "")[:512]
@@ -56,14 +78,16 @@ def _full_out(obj: CourseSyllabus) -> CourseSyllabusFullOut:
         department=obj.department_id,
         department_name=obj.department.name if obj.department else "",
         department_code=obj.department.code if obj.department else "",
+        department_is_clinical=bool(obj.department.is_clinical) if obj.department else False,
         direction_code=obj.direction_code or "",
         description=obj.description,
         instruction_language=obj.instruction_language,
         file_name=obj.file_name,
         topics=obj.topics,
-        variants=obj.variants,
+        variants=_valid_variants(obj),
         name_i18n=obj.name_i18n or {},
         topics_i18n=obj.topics_i18n or {},
+        teacher_owned=bool(obj.created_by),
         sort_order=obj.sort_order,
         is_active=obj.is_active,
         created_at=obj.created_at,
@@ -77,6 +101,7 @@ def _selection_out(sel: StaffCourseSelection) -> StaffCourseSelectionOut:
         syllabus=_full_out(sel.syllabus).model_dump(),
         variant_label=sel.variant_label,
         selected_at=sel.selected_at,
+        is_own=bool(sel.syllabus.created_by) and sel.syllabus.created_by == sel.owner_key,
     )
 
 
@@ -114,12 +139,10 @@ def syllabus_catalog(
         .scalars()
         .all()
     )
+    username = auth.user.username
     out = []
     for obj in rows:
-        topic_count = sum(len((v or {}).get("topics") or []) for v in (obj.variants or []))
-        if not topic_count and obj.topics:
-            topic_count = len(obj.topics)
-        if topic_count > 0:
+        if _topic_count(obj) > 0 and _visible_to(obj.allowed_owner_keys, username, auth.role):
             out.append(_full_out(obj).model_dump())
     return paginate(out, request, default_page_size=200, max_page_size=1000)
 
@@ -140,7 +163,7 @@ def translate_syllabus(
     from app.services.syllabus_i18n import SUPPORTED_LANGS, ensure_syllabus_translations
 
     obj = db.get(CourseSyllabus, pk)
-    if obj is None:
+    if obj is None or not _visible_to(obj.allowed_owner_keys, auth.user.username, auth.role):
         raise HTTPException(status_code=404, detail="Sillabus topilmadi.")
 
     wanted = (lang or "").strip().lower()
@@ -214,7 +237,7 @@ def admin_update_syllabus_translations(
 
 
 def _topic_count(obj: CourseSyllabus) -> int:
-    topic_count = sum(len((v or {}).get("topics") or []) for v in (obj.variants or []))
+    topic_count = sum(len((v.get("topics") or [])) for v in _valid_variants(obj))
     if not topic_count and obj.topics:
         topic_count = len(obj.topics)
     return topic_count
@@ -236,11 +259,28 @@ def department_course_syllabuses(
 ) -> dict:
     """Xodim kafedrasidagi faol fanlar (birinchi kirish / profile tanlash uchun)."""
     profile = _staff_profile(db, auth.user.username)
+    if profile is not None and not profile.department_id and (profile.department or '').strip():
+        staff_dept.apply_staff_department(db, profile, department_name=profile.department)
+        db.commit()
+        db.refresh(profile)
     if profile is None or not profile.department_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Kafedra biriktirilmagan. Administrator bilan bog'laning.",
+        # Registratsiya paytida kafedra ID yozilmay qolgan eski profillarni bloklamaymiz:
+        # o'qituvchi qidiruv orqali fanini tanlay olsin.
+        rows = (
+            db.execute(
+                select(CourseSyllabus)
+                .where(CourseSyllabus.is_active.is_(True))
+                .order_by(CourseSyllabus.department_id, CourseSyllabus.sort_order, CourseSyllabus.subject_name)
+            )
+            .scalars()
+            .all()
         )
+        out = [
+            _full_out(obj).model_dump()
+            for obj in rows
+            if _topic_count(obj) > 0 and _visible_to(obj.allowed_owner_keys, auth.user.username, auth.role)
+        ]
+        return paginate(out, request, default_page_size=200, max_page_size=1000)
 
     rows = (
         db.execute(
@@ -254,7 +294,56 @@ def department_course_syllabuses(
         .scalars()
         .all()
     )
-    out = [_full_out(obj).model_dump() for obj in rows if _topic_count(obj) > 0]
+
+    # Kafedra dublikat yoki imlosi boshqacha yozilgan bo'lsa, fanlar bo'sh qolmasin.
+    # Masalan xodim profili bir AcademicDepartment IDda, syllabuslar esa shu nomga
+    # yaqin boshqa IDda turib qolishi mumkin.
+    if not rows and (profile.department or '').strip():
+        target = normalize_department_name(profile.department or '')
+        all_rows = (
+            db.execute(
+                select(CourseSyllabus)
+                .join(AcademicDepartment, CourseSyllabus.department_id == AcademicDepartment.id, isouter=True)
+                .where(CourseSyllabus.is_active.is_(True))
+                .order_by(CourseSyllabus.sort_order, CourseSyllabus.subject_name)
+            )
+            .scalars()
+            .all()
+        )
+        rows = [
+            obj for obj in all_rows
+            if obj.department and normalize_department_name(obj.department.name) == target
+        ]
+
+    # Baribir topilmasa ham o'qituvchini to'xtatmaymiz: qidiruv orqali barcha
+    # fanlardan tanlay oladi. Bu onboardingdagi "kafedrada fan yo'q" holatini yo'qotadi.
+    if not rows:
+        rows = (
+            db.execute(
+                select(CourseSyllabus)
+                .where(CourseSyllabus.is_active.is_(True))
+                .order_by(CourseSyllabus.department_id, CourseSyllabus.sort_order, CourseSyllabus.subject_name)
+            )
+            .scalars()
+            .all()
+        )
+
+    # O'qituvchining Excel'dan o'zi yuklagan fanlari kafedrasidan qat'i nazar
+    # doim ro'yxatda — kafedrasi aniqlanmagan (NULL) fan yo'qolib qolmasin.
+    have = {obj.id for obj in rows}
+    own = db.execute(
+        select(CourseSyllabus).where(
+            CourseSyllabus.created_by == auth.user.username,
+            CourseSyllabus.is_active.is_(True),
+        )
+    ).scalars().all()
+    rows = list(rows) + [obj for obj in own if obj.id not in have]
+
+    out = [
+        _full_out(obj).model_dump()
+        for obj in rows
+        if _topic_count(obj) > 0 and _visible_to(obj.allowed_owner_keys, auth.user.username, auth.role)
+    ]
     return paginate(out, request, default_page_size=200, max_page_size=1000)
 
 
@@ -276,7 +365,13 @@ def my_course_selections(
         .scalars()
         .all()
     )
-    return [_selection_out(r) for r in rows]
+    # Ko'rish huquqi bo'lmagan (boshqaga cheklangan) fan ro'yxatga chiqmaydi —
+    # aks holda uning id'si keyingi saqlashda qaytib kelib, butun ro'yxat rad etilardi.
+    return [
+        _selection_out(r)
+        for r in rows
+        if _visible_to(r.syllabus.allowed_owner_keys, auth.user.username, auth.role)
+    ]
 
 
 @router.put("/course-syllabuses/my/", response_model=list[StaffCourseSelectionOut])
@@ -285,24 +380,30 @@ def set_my_teaching_subjects(
     db: Session = Depends(get_db),
     auth=Depends(require_roles("hodim")),
 ) -> list[StaffCourseSelectionOut]:
-    """Kafedra fanlaridan o'qitadigan fanlar to'plamini almashtiradi (kamida 1 ta)."""
+    """O'qitadigan fanlar to'plamini almashtiradi.
+
+    Bo'sh ro'yxat ham qabul qilinadi: fan tanlash majburiy emas — o'qituvchi
+    tizimga fansiz kira oladi va keyin katalogdan tanlaydi yoki o'zi yuklaydi.
+    """
     ids = sorted({int(x) for x in payload.syllabus_ids})
     if not ids:
-        raise HTTPException(status_code=400, detail="Kamida bitta fan tanlang.")
+        db.execute(delete(StaffCourseSelection).where(StaffCourseSelection.owner_key == auth.user.username))
+        db.commit()
+        return []
 
     profile = _staff_profile(db, auth.user.username)
-    if profile is None or not profile.department_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Kafedra biriktirilmagan. Administrator bilan bog'laning.",
-        )
+    if profile is not None and not profile.department_id and (profile.department or '').strip():
+        staff_dept.apply_staff_department(db, profile, department_name=profile.department)
+        db.commit()
+        db.refresh(profile)
+    # Profil (kafedra) bo'lmasa ham fan tanlash to'xtatilmaydi: katalog butun
+    # institutniki, o'qituvchi o'z fanini yuklagan bo'lishi ham mumkin.
 
     fans = (
         db.execute(
             select(CourseSyllabus).where(
                 CourseSyllabus.id.in_(ids),
                 CourseSyllabus.is_active.is_(True),
-                CourseSyllabus.department_id == profile.department_id,
             )
         )
         .scalars()
@@ -310,16 +411,33 @@ def set_my_teaching_subjects(
     )
     found = {f.id for f in fans}
     missing = [i for i in ids if i not in found]
-    if missing:
+    # Boshqa o'qituvchiga tegishli (cheklangan) fan id bilan ham tanlanmaydi.
+    # Xabar "topilmadi" bilan bir xil — fan borligini oshkor qilmaydi.
+    forbidden = [f.id for f in fans if not _visible_to(f.allowed_owner_keys, auth.user.username, auth.role)]
+    if missing or forbidden:
         raise HTTPException(
             status_code=400,
             detail="Faqat o'z kafedrangizdagi faol fanlarni tanlash mumkin.",
         )
 
     owner = auth.user.username
-    db.execute(delete(StaffCourseSelection).where(StaffCourseSelection.owner_key == owner))
+    # Farq bo'yicha yangilanadi: ro'yxatda qolgan fanning MAVJUD qatorlari
+    # (admin biriktirgan yo'nalish `variant_label` bilan) tegilmaydi. Ilgari
+    # hammasi o'chirilib `variant_label=""` bilan qayta yozilardi — o'qituvchi
+    # boshqa fan qo'shganda admin tanlagan yo'nalish jimgina yo'qolib, boshqa
+    # yo'nalishning mavzulari va materiallari chiqib qolardi.
+    existing = db.execute(
+        select(StaffCourseSelection).where(StaffCourseSelection.owner_key == owner)
+    ).scalars().all()
+    have = {row.syllabus_id for row in existing}
+    wanted = set(ids)
+    for row in existing:
+        if row.syllabus_id not in wanted:
+            db.delete(row)
     now = dt.datetime.now(dt.timezone.utc)
     for sid in ids:
+        if sid in have:
+            continue
         db.add(
             StaffCourseSelection(
                 owner_key=owner,
@@ -362,6 +480,312 @@ def my_course_selection_delete_forbidden(syllabus_id: int, auth=Depends(require_
     )
 
 
+# ---------------- O'qituvchining o'zi yuklagan fanlari ----------------
+
+
+def _own_topics(payload: OwnSyllabusCreateRequest | OwnSyllabusUpdateRequest) -> list[dict]:
+    """Kodlar serverda qayta beriladi (L1, A1, I1 …) — brauzerdan kelganiga
+    ishonmaymiz: takror yoki noto'g'ri kod materialni boshqa mavzuga ulab
+    qo'yardi. Bir turdagi bir xil nom takrorlansa bittasi qoladi."""
+    counters: dict[str, int] = {}
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    order = list(_OWN_TYPE_PREFIX)
+    for t in sorted(payload.topics or [], key=lambda x: order.index(x.type)):
+        title = " ".join(t.title.split())[:1000]
+        key = (t.type, title.lower())
+        if len(title) < 2 or key in seen:
+            continue
+        seen.add(key)
+        counters[t.type] = counters.get(t.type, 0) + 1
+        out.append({"id": f"{_OWN_TYPE_PREFIX[t.type]}{counters[t.type]}", "type": t.type, "title": title})
+    return out
+
+
+@router.post(
+    "/course-syllabuses/own/",
+    response_model=StaffCourseSelectionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_own_syllabus(
+    payload: OwnSyllabusCreateRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    auth=Depends(require_roles("hodim")),
+) -> StaffCourseSelectionOut:
+    """O'qituvchi namuna Excel'idan o'z fanini yaratadi.
+
+    Fan faqat shu o'qituvchiga ko'rinadi (`allowed_owner_keys=[owner]`) va
+    darhol uning "Mening fanlarim" ro'yxatiga qo'shiladi. Mavzu kodlari
+    oddiy fanlardagidek (L1/A1/I1), shuning uchun tarqatma, taqdimot, video,
+    ma'ruza va testlar hech qanday farqsiz shu mavzularga biriktiriladi.
+    """
+    owner = auth.user.username
+    name = " ".join(payload.subject_name.split())[:255]
+    topics = _own_topics(payload)
+    if not topics:
+        raise HTTPException(status_code=400, detail="Faylda mavzu topilmadi.")
+
+    active_count = len(
+        db.execute(
+            select(CourseSyllabus.id).where(
+                CourseSyllabus.created_by == owner, CourseSyllabus.is_active.is_(True)
+            )
+        ).all()
+    )
+    if active_count >= OWN_SYLLABUS_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Siz {OWN_SYLLABUS_LIMIT} tadan ortiq fan yuklay olmaysiz. Keraksizini o'chiring.",
+        )
+
+    # Bir xil nomdagi shaxsiy fan ikki marta yuklansa — nusxa ko'paymasin.
+    duplicate = db.execute(
+        select(CourseSyllabus.id).where(
+            CourseSyllabus.created_by == owner,
+            CourseSyllabus.is_active.is_(True),
+            CourseSyllabus.subject_name == name,
+        )
+    ).first()
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bu nomdagi fan sizda allaqachon bor. Nomini o'zgartiring yoki eskisini o'chiring.",
+        )
+
+    profile = _staff_profile(db, owner)
+    if profile is not None and not profile.department_id and (profile.department or "").strip():
+        staff_dept.apply_staff_department(db, profile, department_name=profile.department)
+        db.flush()
+    lang = (payload.instruction_language or "uz").strip().lower()
+    if lang not in ("uz", "en", "ru"):
+        lang = "uz"
+    file_name = (payload.file_name or f"{name}.xlsx").strip()[:512]
+
+    base = f"own-{owner}-{_slugify_subject(name)}"[:58]
+    code, n = base, 1
+    while db.execute(select(CourseSyllabus.id).where(CourseSyllabus.subject_code == code)).first():
+        code = f"{base}-{n}"[:64]
+        n += 1
+
+    now = dt.datetime.now(dt.timezone.utc)
+    obj = CourseSyllabus(
+        subject_name=name,
+        subject_code=code,
+        department_id=profile.department_id if profile is not None else None,
+        direction_code=infer_direction_code(name) or "",
+        description="O'qituvchi o'zi yuklagan fan.",
+        instruction_language=lang,
+        file_name=file_name,
+        topics=topics,
+        variants=[{"label": "asosiy", "file_name": file_name, "topics": topics}],
+        name_i18n={},
+        topics_i18n={},
+        allowed_owner_keys=[owner],
+        created_by=owner,
+        sort_order=0,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    _sync_legacy_fields(obj)
+    db.add(obj)
+    db.flush()
+    sel = StaffCourseSelection(owner_key=owner, syllabus_id=obj.id, variant_label="", selected_at=now)
+    db.add(sel)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Ikki oynadan bir vaqtda yuklash: kod tekshiruvdan keyin band bo'ldi.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Fan hozirgina yaratildi. Sahifani yangilang.") from None
+    db.refresh(sel)
+    background.add_task(_translate_syllabus_bg, obj.id)
+    logger.info("Shaxsiy fan yaratildi: #%s %r owner=%s mavzular=%s", obj.id, name, owner, len(topics))
+    return _selection_out(sel)
+
+
+def _norm_title(title: str) -> str:
+    return " ".join((title or "").replace("’", "'").replace("‘", "'").split()).lower()
+
+
+def _codes_with_materials(db: Session, sid: int) -> set[str]:
+    """Qaysi mavzu kodlariga material biriktirilgan (tarqatma, taqdimot, video, tayyor kontent)."""
+    from app.models.prepared_content import PreparedContent
+    from app.models.topic_content import TopicHandout, TopicPresentation, TopicVideo
+
+    codes: set[str] = set()
+    for model in (TopicHandout, TopicPresentation, TopicVideo, PreparedContent):
+        for norm in db.execute(
+            select(model.topic_norm).where(model.topic_norm.like(f"{sid}::%"))
+        ).scalars():
+            parts = (norm or "").split("::")
+            if len(parts) == 3 and parts[2]:
+                codes.add(parts[2].lower())
+    return codes
+
+
+def _merge_own_topics(
+    old: list[dict], new: list[dict], keep_codes: set[str], counters: dict | None = None
+) -> tuple[list[dict], dict]:
+    """Yangi Excel ro'yxatini eski mavzular bilan birlashtiradi — material yo'qolmasin.
+
+    * Nomi (bir xil turda) mos kelgan mavzu ESKI kodini saqlaydi — unga
+      yuklangan tarqatma/video/test o'z joyida qoladi.
+    * Yangi mavzu shu turdagi eng katta raqamdan keyingi kodni oladi (eski
+      kod qayta ishlatilmaydi — boshqa mavzuning materiali unga o'tib ketmasin).
+    * Faylda yo'q, lekin materiali bor mavzu o'chirilmaydi — ro'yxat oxirida
+      qoladi; materialsiz eski mavzu olib tashlanadi.
+    """
+    order = list(_OWN_TYPE_PREFIX)
+    by_key = {(t.get("type"), _norm_title(t.get("title", ""))): t for t in old}
+    # Oldin berilgan eng katta raqamlar (o'chirilgan mavzular ham) — kod qayta
+    # berilmasin: brauzer keshida eski mavzuning ma'ruzasi yangi mavzuga chiqardi.
+    max_num: dict[str, int] = {k: int(v) for k, v in (counters or {}).items() if str(v).isdigit()}
+    for t in old:
+        tid = str(t.get("id") or "")
+        num = "".join(ch for ch in tid if ch.isdigit())
+        if num:
+            max_num[t.get("type")] = max(max_num.get(t.get("type"), 0), int(num))
+
+    used: set[str] = set()
+    merged: list[dict] = []
+    added = 0
+    for t in new:
+        prev = by_key.get((t["type"], _norm_title(t["title"])))
+        if prev is not None and str(prev.get("id")) not in used:
+            item = {**prev, "title": t["title"]}
+        else:
+            max_num[t["type"]] = max_num.get(t["type"], 0) + 1
+            item = {"id": f"{_OWN_TYPE_PREFIX[t['type']]}{max_num[t['type']]}", "type": t["type"], "title": t["title"]}
+            added += 1
+        used.add(str(item["id"]))
+        merged.append(item)
+
+    kept_with_material = 0
+    removed = 0
+    for t in old:
+        if str(t.get("id")) in used:
+            continue
+        if str(t.get("id") or "").lower() in keep_codes:
+            merged.append(dict(t))
+            used.add(str(t.get("id")))
+            kept_with_material += 1
+        else:
+            removed += 1
+    merged.sort(key=lambda x: order.index(x.get("type")) if x.get("type") in order else len(order))
+    stats = {
+        "added": added,
+        "removed": removed,
+        "kept_with_material": kept_with_material,
+        "total": len(merged),
+        "counters": max_num,
+    }
+    return merged, stats
+
+
+@router.patch("/course-syllabuses/own/{pk}/")
+def update_own_syllabus(
+    pk: int,
+    payload: OwnSyllabusUpdateRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    auth=Depends(require_roles("hodim")),
+) -> dict:
+    """O'qituvchi o'z fanini tahrirlaydi: nom, o'qitish tili, yangi Excel.
+
+    Faqat o'zi yuklagan fanda. Yangi Excel eski mavzular bilan nomi bo'yicha
+    birlashtiriladi (`_merge_own_topics`) — materiallar yo'qolmaydi.
+    """
+    owner = auth.user.username
+    obj = db.get(CourseSyllabus, pk)
+    if obj is None or not obj.created_by or obj.created_by != owner or not obj.is_active:
+        raise HTTPException(status_code=404, detail="Fan topilmadi.")
+
+    stats: dict = {}
+    topics_changed = False
+    if payload.subject_name is not None:
+        name = " ".join(payload.subject_name.split())[:255]
+        clash = db.execute(
+            select(CourseSyllabus.id).where(
+                CourseSyllabus.created_by == owner,
+                CourseSyllabus.is_active.is_(True),
+                CourseSyllabus.subject_name == name,
+                CourseSyllabus.id != pk,
+            )
+        ).first()
+        if clash is not None:
+            raise HTTPException(status_code=409, detail="Bu nomdagi fan sizda allaqachon bor.")
+        if name != obj.subject_name:
+            obj.subject_name = name
+            obj.name_i18n = {}
+            topics_changed = True
+    if payload.instruction_language is not None:
+        lang = payload.instruction_language.strip().lower()
+        if lang in ("uz", "en", "ru") and lang != obj.instruction_language:
+            obj.instruction_language = lang
+            topics_changed = True
+    if payload.topics is not None:
+        new_topics = _own_topics(payload)
+        if not new_topics:
+            raise HTTPException(status_code=400, detail="Faylda mavzu topilmadi.")
+        variants = [dict(v) for v in _valid_variants(obj)] or [
+            {"label": "asosiy", "file_name": obj.file_name, "topics": obj.topics or []}
+        ]
+        merged, stats = _merge_own_topics(
+            list(variants[0].get("topics") or []),
+            new_topics,
+            _codes_with_materials(db, pk),
+            variants[0].get("code_counters") or {},
+        )
+        counters = stats.pop("counters", {})
+        file_name = (payload.file_name or variants[0].get("file_name") or obj.file_name or "").strip()[:512]
+        variants[0] = {**variants[0], "topics": merged, "file_name": file_name, "code_counters": counters}
+        obj.variants = variants
+        _sync_legacy_fields(obj)
+        topics_changed = True
+
+    obj.updated_at = dt.datetime.now(dt.timezone.utc)
+    db.commit()
+    db.refresh(obj)
+    if topics_changed:
+        background.add_task(_translate_syllabus_bg, obj.id)
+    return {"syllabus": _full_out(obj).model_dump(), "stats": stats}
+
+
+@router.delete(
+    "/course-syllabuses/own/{pk}/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_own_syllabus(
+    pk: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_roles("hodim")),
+) -> None:
+    """O'qituvchi o'zi yuklagan fanni o'chiradi.
+
+    Fan bazadan o'chirilmaydi — faqat yashiriladi (`is_active=False`) va
+    ro'yxatdan olinadi. Unga yuklangan tarqatma, video va testlar saqlanib
+    qoladi: xato bosilgan bo'lsa admin qaytara oladi. Boshqaning fanini
+    o'chirishga urinish "topilmadi" deb javob oladi.
+    """
+    owner = auth.user.username
+    obj = db.get(CourseSyllabus, pk)
+    if obj is None or not obj.created_by or obj.created_by != owner:
+        raise HTTPException(status_code=404, detail="Fan topilmadi.")
+    obj.is_active = False
+    obj.updated_at = dt.datetime.now(dt.timezone.utc)
+    # Faqat egasining tanlovi. Boshqa (admin biriktirgan) qatorlar qoladi —
+    # fan faol emasligi uchun ro'yxatlarda baribir ko'rinmaydi, qaytarilsa tiklanadi.
+    db.execute(
+        delete(StaffCourseSelection).where(
+            StaffCourseSelection.syllabus_id == pk, StaffCourseSelection.owner_key == owner
+        )
+    )
+    db.commit()
+
+
 @router.get("/admin/staff-course-selections/")
 def admin_list_course_selections(
     request: Request,
@@ -402,9 +826,17 @@ def admin_assign_course_selection(
     syllabus = db.get(CourseSyllabus, payload.syllabus_id)
     if syllabus is None:
         raise HTTPException(status_code=404, detail="Fan topilmadi.")
+    # Cheklangan (o'qituvchining shaxsiy) fani ro'yxatda bo'lmagan xodimga
+    # biriktirilmaydi: u fanni ko'rardi-yu, materiallari 404 berar va o'z
+    # fanlar ro'yxatini saqlay olmay qolardi.
+    if not _visible_to(syllabus.allowed_owner_keys, owner, "hodim"):
+        raise HTTPException(
+            status_code=400,
+            detail="Bu fan boshqa o'qituvchiga tegishli (shaxsiy fan) — uni boshqaga biriktirib bo'lmaydi.",
+        )
 
     available = [
-        (v.get("label") or "").strip() for v in (syllabus.variants or []) if (v.get("label") or "").strip()
+        (v.get("label") or "").strip() for v in _valid_variants(syllabus) if (v.get("label") or "").strip()
     ]
     labels = [lbl.strip() for lbl in payload.variant_labels if lbl.strip()]
     labels = list(dict.fromkeys(labels))
@@ -658,6 +1090,17 @@ def admin_delete_syllabus(
     obj = db.get(CourseSyllabus, pk)
     if obj is None:
         raise HTTPException(status_code=404, detail="Topilmadi.")
+
+    # O'qituvchi o'zi yuklagan fan bazadan o'chirilmaydi — yashiriladi.
+    # Butunlay o'chirilsa uning tarqatma/video/taqdimot fayllari (ular fanga
+    # faqat `topic_norm` orqali bog'langan) yetim qolib, `own-<telefon>` kodi
+    # boshqa fanga qayta berilishi mumkin edi. Tanlovlar olinadi.
+    if obj.created_by:
+        obj.is_active = False
+        obj.updated_at = dt.datetime.now(dt.timezone.utc)
+        db.execute(delete(StaffCourseSelection).where(StaffCourseSelection.syllabus_id == pk))
+        db.commit()
+        return
 
     # Bog'liq yozuvlarni avval tozalash (Postgres FK da ON DELETE yo'q — RESTRICT).
     db.execute(sa_delete(StaffCourseSelection).where(StaffCourseSelection.syllabus_id == pk))

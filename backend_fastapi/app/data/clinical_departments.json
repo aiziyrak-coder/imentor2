@@ -1,0 +1,21 @@
+{
+  "_izoh": "Farg'ona jamoat salomatligi tibbiyot institutining RASMIY klinik kafedralar ro'yxati (institut hujjati, 2026-09-25). Faqat shu kafedralar bemor yonida dars o'tadi — AI material shu ro'yxatga qarab klinik yoki klinik emas deb yoziladi.",
+  "departments": [
+    { "name": "Umumiy jarrohlik kafedrasi", "base": "2-shahar shifoxonasi" },
+    { "name": "Fakultet va gospital jarrohlik kafedrasi", "base": "RShtYoiM Farg'ona filiali" },
+    { "name": "Terapiya yo'nalishidagi fanlar kafedrasi", "base": "2-shahar shifoxonasi" },
+    { "name": "Nevrologiya va psixiatriya", "base": "2-shahar shifoxonasi" },
+    { "name": "Ichki kasallalliklar propedevtikasi kafedrasi", "base": "RShtYoiM Farg'ona filiali",
+      "aliases": ["Ichki kasalliklar propedevtikasi", "Ichki kasallilar propedevtikasi"] },
+    { "name": "Gospital terapiya (laboratoriya) kafedrasi", "base": "RShtYoiM Farg'ona filiali" },
+    { "name": "Pediatriya kafedrasi", "base": "Viloyat bolalar shifoxonasi" },
+    { "name": "Urologiya va onkologiya kafedrasi", "base": "MDM klinikasi" },
+    { "name": "Akusherlik va ginekologiya kafedrasi", "base": "Viloyat perinatal tug'ruqxona shifoxonasi" },
+    { "name": "Stomatologiya va otoloringologiya kafedrasi", "base": "Viloyat ko'p tarmoqli shifoxonasi" },
+    { "name": "Travmatologiya va ortopediya kafedrasi", "base": "Viloyat ko'p tarmoqli shifoxonasi (Qirguli)" },
+    { "name": "Dermatovenerologiya va allergologiya kafedrasi", "base": "Farg'ona shahar teri-tanosil kasalliklari dispenseri" },
+    { "name": "Pediatriya 2 kafedrasi", "base": "Viloyat bolalar shifoxonasi" },
+    { "name": "Endokrinologiya, gemotologiya va ftiziatriya kafedrasi", "base": "Farg'ona viloyati endokrinologiya dispanseri" },
+    { "name": "Epidemiologiya va yuqumli kasalliklar, hamshiralik ishi kafedrasi", "base": "Viloyat yuqumli kasalliklar shifoxonasi" }
+  ]
+}

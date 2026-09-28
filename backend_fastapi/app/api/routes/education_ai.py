@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -9,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, require_roles
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.throttling import throttle_education_ai
+from app.core.throttling import throttle_education_ai, _redis
 from app.schemas.education_ai import (
     EducationAiBookReferencesRequest,
     EducationAiBookReferencesResponse,
@@ -19,13 +21,69 @@ from app.schemas.education_ai import (
     EducationAiCompletionResponse,
 )
 from app.services import book_retrieval as rag
+from app.services import protocol_library as protocols
 from app.services import external_literature as extlit
 from app.services import openai_client as oai
 from app.services.education_ai_utils import clip_education_messages
 
 router = APIRouter()
+logger = logging.getLogger("imentor.education_ai")
+
+AI_CACHE_TTL_SECONDS = 60 * 60 * 24 * 14
+AI_MAX_OUTPUT_TOKENS = oai.ECONOMY_MAX_OUTPUT_TOKENS
+AI_STREAM_MAX_OUTPUT_TOKENS = oai.ECONOMY_MAX_OUTPUT_TOKENS
 
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
+
+
+def _economy_model(requested: str, settings) -> str:
+    """iMentor ommaviy ishlatiladi: oddiy AI generatsiyalar eng arzon modelda yuradi."""
+    return "gpt-4.1-nano"
+
+
+def _clamped_tokens(value: int, *, stream: bool = False) -> int:
+    limit = AI_STREAM_MAX_OUTPUT_TOKENS if stream else AI_MAX_OUTPUT_TOKENS
+    return max(256, min(int(value or limit), limit))
+
+
+def _cache_key(auth: AuthContext, payload: EducationAiCompletionRequest, messages: list[dict], *, stream: bool = False) -> str:
+    body = {
+        "stream": stream,
+        "version": 2,
+        "owner": auth.user.username,
+        "model": "gpt-4.1-nano",
+        "purpose": payload.purpose,
+        "messages": messages,
+        "subject_code": payload.subject_code.strip(),
+        "topic_query": payload.topic_query.strip(),
+        "response_format": payload.response_format,
+        "temperature": round(float(payload.temperature or 0.35), 2),
+        "max_tokens": _clamped_tokens(payload.max_tokens, stream=stream),
+    }
+    raw = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "education_ai:cache:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str) -> dict | None:
+    try:
+        raw = _redis().get(key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, value: dict) -> None:
+    try:
+        _redis().setex(key, AI_CACHE_TTL_SECONDS, json.dumps(value, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _validated_messages(messages):
+    try:
+        return clip_education_messages(messages)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _release_db(db: Session) -> None:
@@ -44,6 +102,28 @@ def _release_db(db: Session) -> None:
         pass
 
 
+def _protocol_message(db: Session, subject_code: str, topic_query: str, api_key: str) -> tuple[str, list[dict]]:
+    """Kafedra protokollari (milliy klinik protokol, SanPin, SSV buyrug'i) — majburiy manba.
+
+    Kafedra "javoblar bizning davolash protokollarimizga to'g'ri kelmayapti" deb
+    shikoyat qilgan (2026-09-24). Endi kafedrada protokol bo'lsa, u darslik
+    parchalaridan OLDIN qo'yiladi va ziddiyatda ustun deb ko'rsatiladi.
+    """
+    if not subject_code or not topic_query:
+        return "", []
+    try:
+        dept_id = rag.resolve_book_department_id(db, subject_code)
+        if not protocols.has_protocols(db, dept_id):
+            return "", []
+        chunks = protocols.retrieve(db, department_id=dept_id, queries=[topic_query], api_key=api_key)
+    except Exception:  # noqa: BLE001 — protokol topilmasa generatsiya to'xtamaydi
+        logger.exception("protokol konteksti olinmadi")
+        return "", []
+    block = protocols.context_block(chunks)
+    refs = [{"title": c["title"], "kind": "protocol"} for c in chunks]
+    return block, refs
+
+
 @router.post("/education-ai/completion/", response_model=EducationAiCompletionResponse)
 def education_ai_completion(
     payload: EducationAiCompletionRequest,
@@ -59,7 +139,7 @@ def education_ai_completion(
             detail="OpenAI API kaliti serverda sozlanmagan.",
         )
 
-    messages = clip_education_messages(payload.messages)
+    messages = _validated_messages(payload.messages)
     if not messages:
         raise HTTPException(status_code=400, detail="Xabarlar bo'sh.")
 
@@ -70,21 +150,28 @@ def education_ai_completion(
         chunks = rag.retrieve_book_context(db, subject_code, topic_query)
         context_message = rag.format_book_context_message(chunks)
         if context_message:
-            messages = [{"role": "system", "content": context_message}] + messages
+            messages = [m for m in messages if m.get("role") == "system"] + [{"role": "system", "content": context_message}] + [m for m in messages if m.get("role") != "system"]
             book_references = rag.book_references_from_chunks(chunks)
+        protocol_block, protocol_refs = _protocol_message(db, subject_code, topic_query, api_key)
+        if protocol_block:
+            # Protokol darslikdan KEYIN qo'shiladi — ya'ni modelga oxirgi va eng kuchli ko'rsatma.
+            messages = [m for m in messages if m.get("role") == "system"] + [{"role": "system", "content": protocol_block}] + [m for m in messages if m.get("role") != "system"]
+            book_references = protocol_refs + book_references
+    messages = _validated_messages(messages)
 
     _release_db(db)
 
-    model = payload.model.strip() or settings.openai_chat_model
+    model = _economy_model(payload.model, settings)
     try:
         content = oai.generate_openai_chat(
             api_key,
             messages=messages,
             model=model,
-            max_tokens=payload.max_tokens,
-            temperature=payload.temperature,
+            max_tokens=_clamped_tokens(payload.max_tokens),
+            temperature=min(float(payload.temperature or 0.35), 0.7),
             timeout_sec=280,
             response_format=payload.response_format,
+            usage_kind=payload.purpose or "chat",
         )
     except oai.OpenAiClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -110,7 +197,7 @@ def education_ai_completion_stream(
             detail="OpenAI API kaliti serverda sozlanmagan.",
         )
 
-    messages = clip_education_messages(payload.messages)
+    messages = _validated_messages(payload.messages)
     if not messages:
         raise HTTPException(status_code=400, detail="Xabarlar bo'sh.")
 
@@ -121,8 +208,14 @@ def education_ai_completion_stream(
         chunks = rag.retrieve_book_context(db, subject_code, topic_query)
         context_message = rag.format_book_context_message(chunks)
         if context_message:
-            messages = [{"role": "system", "content": context_message}] + messages
+            messages = [m for m in messages if m.get("role") == "system"] + [{"role": "system", "content": context_message}] + [m for m in messages if m.get("role") != "system"]
             book_references = rag.book_references_from_chunks(chunks)
+        protocol_block, protocol_refs = _protocol_message(db, subject_code, topic_query, api_key)
+        if protocol_block:
+            # Protokol darslikdan KEYIN qo'shiladi — ya'ni modelga oxirgi va eng kuchli ko'rsatma.
+            messages = [m for m in messages if m.get("role") == "system"] + [{"role": "system", "content": protocol_block}] + [m for m in messages if m.get("role") != "system"]
+            book_references = protocol_refs + book_references
+    messages = _validated_messages(messages)
 
     # Stream javobida `Depends(get_db)` tozalanishi butun oqim tugagunicha
     # kechikadi — ulanishni shu yerda qo'lda qaytaramiz.
@@ -130,7 +223,15 @@ def education_ai_completion_stream(
 
     model = payload.model.strip() or settings.openai_chat_model
 
+    stream_key = _cache_key(auth, payload, messages, stream=True)
+
     def _gen():
+        cached = _cache_get(stream_key)
+        if cached and cached.get("content"):
+            yield f"data: {json.dumps({'delta': cached['content']})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
+            return
+        parts = []
         try:
             for delta in oai.stream_openai_chat(
                 api_key,
@@ -140,10 +241,13 @@ def education_ai_completion_stream(
                 temperature=payload.temperature,
                 timeout_sec=280,
             ):
+                parts.append(delta)
                 yield f"data: {json.dumps({'delta': delta})}\n\n"
         except oai.OpenAiClientError as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
+        if parts:
+            _cache_set(stream_key, {"content": "".join(parts)})
         yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
 
     return StreamingResponse(

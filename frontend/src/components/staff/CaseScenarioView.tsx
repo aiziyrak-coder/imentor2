@@ -1,7 +1,7 @@
 import React from 'react';
 import type { AppLanguage } from '../../i18n/language';
 import type { CaseStudyFocus } from '../../utils/generationVariety';
-import type { SubjectDomain } from '../../utils/subjectDomain';
+import { isPatientFree, type SubjectDomain } from '../../utils/subjectDomain';
 import { parseCaseScenario } from '../../utils/parseCaseScenario';
 import { useUiText } from '../../i18n/useUiText';
 import type { UiTextKey } from '../../i18n/translations';
@@ -36,7 +36,7 @@ export default function CaseScenarioView({
 }: Props) {
   const { t } = useUiText();
   const blocks = parseCaseScenario(text, language);
-  const keys = domain === 'academic' ? TASK_KEY_ACADEMIC : TASK_KEY;
+  const keys = isPatientFree(domain) ? TASK_KEY_ACADEMIC : TASK_KEY;
   const task = focus ? t(keys[focus]) : '';
   const taskLabel = t('case.taskLabel');
 

@@ -18,6 +18,8 @@ class SubjectBookOut(BaseModel):
     language: str
     page_count: int
     chunk_count: int
+    # "book" — darslik; "protocol" — milliy klinik protokol / SanPin / SSV buyrug'i.
+    kind: str = "book"
     is_active: bool
     created_at: dt.datetime
 
@@ -28,6 +30,7 @@ class DepartmentBookStats(BaseModel):
     name: str
     books_count: int
     chunks_count: int
+    protocols_count: int = 0
 
 
 class SubjectBookStatsOut(BaseModel):

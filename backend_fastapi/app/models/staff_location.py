@@ -82,6 +82,9 @@ class StaffProfile(Base):
     participant_kind: Mapped[str] = mapped_column(String(16), default="")
     study_group: Mapped[str] = mapped_column(String(128), default="")
     job_title: Mapped[str] = mapped_column(String(255), default="")
+    # HEMIS'dagi ish holati: "Ishlamoqda" / "Ta’tilda" / "Bo‘shagan" (`hemis_staff`).
+    hemis_status: Mapped[str] = mapped_column(String(32), default="", server_default="")
+    hemis_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
     academic_department = relationship("AcademicDepartment", lazy="joined")

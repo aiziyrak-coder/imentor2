@@ -111,9 +111,10 @@ def _restore_words_batch(api_key: str, model: str, items: list[str]) -> dict[str
                         "same length, same order."
                     ),
                 },
-                {"role": "user", "content": json.dumps(items, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(items, ensure_ascii=False, separators=(",", ":"))},
             ],
             model=model,
+            usage_kind="topic_text_repair",
             max_tokens=6000,
             temperature=0.0,
             timeout_sec=180,

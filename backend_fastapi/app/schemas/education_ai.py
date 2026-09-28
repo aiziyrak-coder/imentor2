@@ -12,6 +12,10 @@ class EducationAiCompletionRequest(BaseModel):
     topic_query: str = ""
     # OpenAI chat completions `response_format` (masalan json_schema) — ixtiyoriy.
     response_format: dict | None = None
+    # Qaysi funksiya chaqiryapti ("test_generate", "case_generate" ...) —
+    # sarf jadvalida funksiya bo'yicha ko'rinishi uchun. Javobga ta'sir qilmaydi.
+    purpose: str = Field(default="", max_length=64)
+    cache_bypass: bool = False
 
 
 class EducationAiCompletionResponse(BaseModel):

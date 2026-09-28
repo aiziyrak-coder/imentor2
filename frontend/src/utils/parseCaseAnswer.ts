@@ -21,11 +21,11 @@ const REFS_HEADING_RE =
 const LETTER_RE = /^([a-e])\)\s*(.+)$/i;
 
 const HEADING_PATTERNS: { key: CaseAnswerSectionKey; re: RegExp }[] = [
-  { key: 'a', re: /^(?:#{1,3}\s*)?(klinik\s+(?:tashxis|xulosa)|clinical\s+diagnosis|клиническ)/i },
-  { key: 'b', re: /^(?:#{1,3}\s*)?(differensial|differential|дифференциал)/i },
-  { key: 'c', re: /^(?:#{1,3}\s*)?(qo'?shimcha\s+tekshiruv|keyingi\s+tekshiruv|additional\s+invest|дополнительн)/i },
-  { key: 'd', re: /^(?:#{1,3}\s*)?(davolash|taktika|management|лечение|тактика)/i },
-  { key: 'e', re: /^(?:#{1,3}\s*)?(amaliy\s+tavsiya|kuzatuv|recommendation|практическ|прогноз)/i },
+  { key: 'a', re: /^(?:#{1,3}\s*)?(klinik\s+(?:tashxis|xulosa)|asosiy\s+xulosa|xulosa|clinical\s+(?:diagnosis|impression)|main\s+conclusion|клиническ|главн)/i },
+  { key: 'b', re: /^(?:#{1,3}\s*)?(differensial|boshqa\s+tushuntirish|muqobil|differential|other\s+explanation|дифференциал|друг)/i },
+  { key: 'c', re: /^(?:#{1,3}\s*)?(qo'?shimcha\s+tekshiruv|keyingi\s+tekshiruv|qanday\s+tekshirish|tekshirish\s+qadam|additional\s+invest|how\s+to\s+check|дополнительн|как проверить)/i },
+  { key: 'd', re: /^(?:#{1,3}\s*)?(davolash|taktika|qanday\s+yechish|yechim|management|how\s+to\s+solve|лечение|тактика|как решить)/i },
+  { key: 'e', re: /^(?:#{1,3}\s*)?(amaliy\s+tavsiya|kuzatuv|xatolikni\s+oldini|oldini\s+olish|recommendation|prevent|практическ|прогноз|не допустить)/i },
 ];
 
 function matchHeading(line: string): { key: CaseAnswerSectionKey; title: string } | null {

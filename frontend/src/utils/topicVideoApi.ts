@@ -13,6 +13,8 @@ export type TopicVideo = {
   embed_url: string;
   author_name: string;
   created_at: string;
+  /** Qo'shgan o'qituvchi yoki admin — o'chirish tugmasi faqat shunda. */
+  can_delete?: boolean;
 };
 
 function apiBaseUrl(): string {
@@ -58,6 +60,52 @@ export async function fetchTopicVideos(params: {
   } catch {
     return [];
   }
+}
+
+/** O'qituvchi: mavzuga YouTube video qo'shadi (taqdimot yuklagani kabi). */
+export async function createTopicVideo(payload: {
+  syllabusId: number;
+  variantLabel: string;
+  topicCode: string;
+  topic: string;
+  title?: string;
+  youtubeUrl: string;
+}): Promise<TopicVideo> {
+  const token = await getBackendAccessToken();
+  if (!token) throw new Error('no-backend-token');
+  return httpJson<TopicVideo>(`${apiBaseUrl()}/v1/topic-videos/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: {
+      syllabus_id: payload.syllabusId,
+      variant_label: payload.variantLabel.trim() || 'asosiy',
+      topic_code: payload.topicCode,
+      topic: payload.topic,
+      title: payload.title || '',
+      youtube_url: payload.youtubeUrl,
+    },
+    timeoutMs: 20000,
+  });
+}
+
+/** O'qituvchi: o'zi qo'shgan videoni o'chiradi (server boshqasinikini rad etadi). */
+export async function deleteTopicVideo(id: number): Promise<void> {
+  const token = await getBackendAccessToken();
+  if (!token) throw new Error('no-backend-token');
+  await httpJson<unknown>(`${apiBaseUrl()}/v1/topic-videos/${Number(id)}/`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+    timeoutMs: 20000,
+  });
+}
+
+/** YouTube havolasidan video ID (server ham xuddi shunday tekshiradi). */
+export function youtubeIdFromUrl(url: string): string {
+  const s = url.trim();
+  const m =
+    s.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/) ||
+    s.match(/^([A-Za-z0-9_-]{11})$/);
+  return m ? m[1] : '';
 }
 
 /** Admin: barcha videolar */

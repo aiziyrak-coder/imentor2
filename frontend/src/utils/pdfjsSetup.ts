@@ -1,4 +1,5 @@
-import * as pdfjsLib from 'pdfjs-dist';
+// Legacy build — Chrome 85 (sinf monitorlari) uchun; sababi `pdfWorkerEntry.ts` da.
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 // Worker ataylab o'z kirish nuqtamiz orqali yuklanadi — u pdf.js worker'idan
 // oldin `Uint8Array` polifillarini o'rnatadi (eskiroq brauzerlar uchun).
 import PdfWorker from './pdfWorkerEntry?worker';

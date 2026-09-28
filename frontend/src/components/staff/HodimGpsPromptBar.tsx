@@ -52,7 +52,7 @@ export default function HodimGpsPromptBar() {
     typeof window !== 'undefined' && !window.isSecureContext && !/^localhost$|^127\./.test(window.location.hostname);
 
   return (
-    <div className="ios-glass rounded-2xl border border-sky-200/90 bg-gradient-to-r from-sky-50/95 to-emerald-50/90 px-3 py-2.5 shadow-sm print:hidden">
+    <div className="rounded-xl bg-sky-50/70 px-3.5 py-2.5 ring-1 ring-sky-100 print:hidden">
       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white shadow-sm">

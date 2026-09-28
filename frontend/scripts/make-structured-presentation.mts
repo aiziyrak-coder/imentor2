@@ -20,7 +20,9 @@ if (typeof globalThis.File === 'undefined') {
     name: string;
     lastModified: number;
     constructor(bits: BlobPart[], name: string, options?: FilePropertyBag) {
-      super(bits as BlobPart[], options);
+      // Node'ning `Blob` i DOM `BlobPart` ini bilmaydi - bu shim faqat
+      // skript uchun, shuning uchun tur tekshiruvi chetlab o'tiladi.
+      super(bits as unknown as ConstructorParameters<typeof NodeBlob>[0], options);
       this.name = name;
       this.lastModified = options?.lastModified ?? Date.now();
     }
@@ -117,7 +119,7 @@ async function main() {
     const ai = (await req('POST', '/v1/education-ai/completion/', {
       token,
       body: {
-        model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o',
+        model: process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-nano',
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -137,7 +139,7 @@ async function main() {
     const ai = (await req('POST', '/v1/education-ai/completion/', {
       token,
       body: {
-        model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o',
+        model: process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-nano',
         messages: [
           { role: 'system', content: system + ' Return ONLY valid JSON.' },
           { role: 'user', content: user },

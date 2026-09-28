@@ -13,6 +13,8 @@ class StaffCourseSelectionOut(BaseModel):
     syllabus: dict
     variant_label: str
     selected_at: dt.datetime
+    # O'qituvchi bu fanni Excel'dan o'zi yuklagan — "O'chirish" faqat shunda.
+    is_own: bool = False
 
 
 class AdminStaffCourseSelectionOut(BaseModel):

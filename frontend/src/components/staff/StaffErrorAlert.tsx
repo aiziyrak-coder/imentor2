@@ -30,14 +30,14 @@ export default function StaffErrorAlert({ message, actionLabel, onAction, action
   }, [message, t]);
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-center gap-3 px-4 py-3 rounded-xl bg-rose-50 border border-rose-100">
+    <div className="flex flex-col justify-center gap-3 rounded-xl bg-rose-50 px-4 py-3 sm:flex-row sm:items-center">
       <p className="text-[13px] text-rose-700 font-medium text-center sm:text-left">{message}</p>
       {actionLabel && onAction && (
         <button
           type="button"
           onClick={onAction}
           disabled={actionBusy}
-          className="shrink-0 self-center rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-[12.5px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+          className="shrink-0 self-center text-[12.5px] font-semibold text-rose-700 underline underline-offset-2 transition-colors hover:text-rose-900 disabled:opacity-50"
         >
           {actionLabel}
         </button>

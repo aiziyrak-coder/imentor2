@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import AuthContext, require_roles
+from app.api.deps import AuthContext, get_auth_allow_pending_password, require_roles
 from app.core.db import get_db
 from app.core.security import hash_password, verify_password
+from app.core.staff_login import normalize_listener_login
 from app.models.staff_location import StaffProfile
 from app.models.user import User
 from app.schemas.staff_admin import (
@@ -22,6 +23,7 @@ from app.schemas.staff_admin import (
     MeOut,
 )
 from app.services import auth_service
+from app.services import password_policy_service as pwd_policy
 from app.services import file_storage as storage
 from app.services import staff_department as staff_dept
 from app.services import staff_profile
@@ -46,15 +48,67 @@ def me(db: Session = Depends(get_db), auth: AuthContext = Depends(require_roles(
     )
 
 
+# Parol uchun eng kam uzunlik. Frontend ham shuni tekshiradi, lekin
+# server tekshirmasa to'g'ridan-to'g'ri so'rov bilan bitta harfli parol
+# qo'yish mumkin edi.
+MIN_PASSWORD_LENGTH = 6
+
+
 @router.post("/auth/change-password/")
 def change_password(
     payload: ChangePasswordRequest,
     db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    # Talaba ham kiradi: uning paroli tashqi tizimda va bu yerda
+    # o'zgartirib bo'lmaydi — lekin buni AYTIB berish kerak. Ilgari u
+    # 403 olardi va ekranda "joriy parol noto'g'ri" deb ko'rinardi.
+    #
+    # Parolni majburiy almashtirish kutilayotgan token ham o'tadi — aks
+    # holda bunday foydalanuvchi hech qachon o'z parolini qo'ya olmasdi.
+    auth: AuthContext = Depends(get_auth_allow_pending_password),
 ) -> dict:
-    if not verify_password(payload.current_password, auth.user.password):
+    if auth.role not in ALL_ROLES:
+        raise HTTPException(status_code=403, detail="Ruxsat yo'q.")
+    stored = auth.user.password or ""
+    pending = pwd_policy.must_change(db, auth.user.username)
+
+    # Django "ishlatib bo'lmaydigan parol" ni "!" bilan boshlanadigan qatorda
+    # saqlaydi; tashqi tizim orqali kiradigan hisoblarda esa u umuman bo'sh.
+    if not stored or stored.startswith("!"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Bu hisobda mahalliy parol yo'q — siz tizimga tashqi hisob "
+                "orqali kirasiz. Parolni o'sha tizimdan o'zgartiring yoki "
+                "administratorga murojaat qiling."
+            ),
+        )
+
+    current_ok = verify_password(payload.current_password, stored)
+    if not current_ok and pending:
+        # Boshlang'ich parol pasport bo'lsa, uni "AD 2383789" deb ham yozishadi.
+        current_ok = verify_password(normalize_listener_login(payload.current_password), stored)
+    if not current_ok:
         raise HTTPException(status_code=400, detail="Joriy parol noto'g'ri.")
-    auth.user.password = hash_password(payload.new_password)
+
+    new_password = payload.new_password
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yangi parol kamida {MIN_PASSWORD_LENGTH} belgidan iborat bo'lishi kerak.",
+        )
+    if new_password == payload.current_password or verify_password(new_password, stored):
+        raise HTTPException(
+            status_code=400, detail="Yangi parol eskisidan farq qilishi kerak."
+        )
+    # Login bilan bir xil parol — pasport raqami yoki telefon — ro'yxatlarda
+    # ochiq yuradi, ya'ni bu parol emas.
+    if normalize_listener_login(new_password) == normalize_listener_login(auth.user.username):
+        raise HTTPException(
+            status_code=400, detail="Parol loginingiz bilan bir xil bo'lmasin."
+        )
+
+    auth.user.password = hash_password(new_password)
+    pwd_policy.clear(db, auth.user.username)
     db.commit()
     return {"ok": True}
 
@@ -253,6 +307,13 @@ def admin_staff_list(
                 is_active=u.is_active,
                 date_joined=u.date_joined,
                 last_login=u.last_login,
+                # Hech qachon kirmagan + mahalliy paroli bor = boshlang'ich
+                # parol hamon amalda. Kirgan bo'lsa parolini o'zi biladi.
+                password_is_initial=(
+                    u.last_login is None
+                    and bool(u.password)
+                    and not u.password.startswith("!")
+                ),
             ).model_dump()
         )
     return paginate(rows, request, default_page_size=200, max_page_size=1000)

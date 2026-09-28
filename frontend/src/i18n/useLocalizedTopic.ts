@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useUiText } from './useUiText';
-import { localizedSubjectName, localizedTopicTitle } from '../utils/syllabusI18n';
+import { localizedSubjectName, localizedTopicTitle, requestSyllabusTranslation } from '../utils/syllabusI18n';
 import {
   cacheSyllabusRows,
   getCachedSyllabusRow,
@@ -47,6 +47,14 @@ export function useLocalizedTopic(topic: SyllabusTopicContext | null): StaffTopi
       cancelled = true;
     };
   }, [syllabusId]);
+
+  // Direct navigation and leaving the subject page must not strand a missing translation.
+  useEffect(() => {
+    if (!row || !topic || (row.instruction_language || 'uz') === language) return;
+    if (!row.topics_i18n?.[language]?.[topic.title]) {
+      void requestSyllabusTranslation(row.id, language);
+    }
+  }, [row, topic, language]);
 
   return useMemo(() => {
     if (!topic) return null;

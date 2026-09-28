@@ -1,3 +1,5 @@
+import { translatePreparedContent } from '../utils/preparedContentStore';
+import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import {
   Sparkles,
@@ -11,7 +13,10 @@ import {
   KeyRound,
   Lock,
   ArrowLeft,
+  ClipboardList,
+  ScanFace,
 } from 'lucide-react';
+import FaceLogin from './auth/FaceLogin';
 import { motion } from 'motion/react';
 import { aiService, TestSession, TestQuestion } from '../services/aiService';
 import { AppLanguageContext, GlobalTopicContext } from '../App';
@@ -45,6 +50,7 @@ import {
   staffExplainBox,
   staffExplainTitle,
   staffIndexBadge,
+  staffInput,
   staffOptionCorrect,
   staffOptionNeutral,
   staffQuestionText,
@@ -61,6 +67,12 @@ import {
   createLiveTestSessionOnServer,
   type StudentTestQuestion,
 } from '../utils/liveTestApi';
+import { postActivityEvents } from '../utils/analyticsApi';
+import {
+  bindLiveTestVisibilityTracking,
+  flushLiveTestEvents,
+  pushLiveTestEvent,
+} from '../utils/liveTestAnticheat';
 import QRCode from 'qrcode';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
 import MedicalReferencesList from './staff/MedicalReferencesList';
@@ -72,7 +84,7 @@ import { gradeBadgeClass, scoreToGrade } from '../utils/testGrading';
 import { stripOptionLetterPrefix } from '../utils/testOptionText';
 import { DEFAULT_TEST_DIFFICULTY, DEFAULT_TEST_QUESTION_COUNT } from '../utils/testDifficulty';
 import { loadLatestLectureText } from '../utils/lectureExcerpt';
-import { makeGenerationScope } from '../utils/subjectDomain';
+import { hydrateGenerationScope, makeGenerationScope } from '../utils/subjectDomain';
 
 interface LiveTestSessionDoc {
   topic: string;
@@ -225,7 +237,19 @@ export default function TestQuestions() {
   const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [versions, setVersions] = useState<PreparedContentSummary[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
   const [viewLang, setViewLang] = useState<AppLanguage>(language);
+
+  const generationDomain = useMemo(
+    () =>
+      makeGenerationScope({
+        topic,
+        subjectName: globalTopic?.subjectName,
+        departmentName: globalTopic?.departmentName,
+        subjectCode: globalTopic?.subjectCode,
+      }).domain,
+    [topic, globalTopic?.subjectName, globalTopic?.departmentName, globalTopic?.subjectCode],
+  );
 
   useEffect(() => {
     setViewLang(language);
@@ -235,8 +259,23 @@ export default function TestQuestions() {
     if (!testSession) return [];
     const primary = testSession.primaryLanguage || language;
     const langs: AppLanguage[] = ['uz', 'ru', 'en'];
-    return langs.filter((l) => l === primary || Boolean(testSession.translations?.[l]));
+    return langs;
   }, [testSession, language]);
+
+  const selectTestLanguage = async (target: AppLanguage) => {
+    if (!testSession || translating) return;
+    if (target === (testSession.primaryLanguage || language) || testSession.translations?.[target]) {
+      setViewLang(target); return;
+    }
+    if (!activeVersionId) return;
+    setTranslating(true);
+    try {
+      const translated = await translatePreparedContent<TestSession>(activeVersionId, target);
+      setTestSession(translated);
+      setViewLang(target);
+    } catch (err) { setError(messageFromAiError(err, t('test.errorGenerate'), language)); }
+    finally { setTranslating(false); }
+  };
 
   const displayedTest = useMemo(() => {
     if (!testSession) return null;
@@ -316,6 +355,8 @@ export default function TestQuestions() {
   const [studentLastName, setStudentLastName] = useState('');
   const [studentLoginId, setStudentLoginId] = useState('');
   const [studentLoginPassword, setStudentLoginPassword] = useState('');
+  // Talaba QR'ni skanerlagach avval yuz orqali kiradi; login-parol — zaxira yo'l.
+  const [studentLoginMode, setStudentLoginMode] = useState<'face' | 'password'>('face');
   const [studentAuthLoading, setStudentAuthLoading] = useState(false);
   const [studentAuthed, setStudentAuthed] = useState(() => {
     const u = getCurrentLocalUser();
@@ -329,6 +370,7 @@ export default function TestQuestions() {
   const [sessionLoading, setSessionLoading] = useState(isStudentMode && !!studentSessionId);
   const serverSessionSyncedRef = useRef<string | null>(null);
   const participantKeyRef = useRef('');
+  const testStartedAtRef = useRef<number | null>(null);
   const enrichTokenRef = useRef<symbol | null>(null);
   // Variant izohlari va tarjimalar test ko'ringandan KEYIN, fonda keladi.
   // Bu ko'rsatkichsiz o'qituvchi bo'sh izohlarni ko'rib "ishlamayapti" deb
@@ -414,6 +456,8 @@ export default function TestQuestions() {
           saveStudentSession(studentSessionId, doc);
           setStudentTest(doc);
           setStudentAnswers(new Array(doc.questions.length).fill(-1));
+          testStartedAtRef.current = Date.now();
+          void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
           void upsertLiveTestDraftOnServer(studentSessionId, {
             participantKey: participantKeyRef.current,
@@ -437,6 +481,8 @@ export default function TestQuestions() {
           };
           setStudentTest(safe);
           setStudentAnswers(new Array(local.questions.length).fill(-1));
+          testStartedAtRef.current = Date.now();
+          void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
           void upsertLiveTestDraftOnServer(studentSessionId, {
             participantKey: participantKeyRef.current,
@@ -483,6 +529,11 @@ export default function TestQuestions() {
     studentLastName,
     studentAnswers,
   ]);
+
+  useEffect(() => {
+    if (!isStudentMode || !studentSessionId || !studentTest || studentSubmitted || sessionClosed) return;
+    return bindLiveTestVisibilityTracking(studentSessionId);
+  }, [isStudentMode, studentSessionId, studentTest, studentSubmitted, sessionClosed]);
 
   useEffect(() => {
     if (isStudentMode || !teacherSessionId) return;
@@ -728,12 +779,11 @@ export default function TestQuestions() {
     try {
       const count = DEFAULT_TEST_QUESTION_COUNT;
       // Asosiy til = UI tili (header dagi uz/ru/en). Qolgan 2 til — fonda tarjima.
-      const contentLanguage = language;
+      const contentLanguage = contentLanguageFor(globalTopic, language);
       const lectureText = await loadLatestLectureText(globalTopic ?? topic);
-      const scope = makeGenerationScope({
+      const scope = await hydrateGenerationScope({
         topic,
-        subjectName: globalTopic.subjectName,
-        departmentName: globalTopic.departmentName,
+        context: globalTopic,
         lectureText,
       });
       const data = await aiService.generateTests(
@@ -743,6 +793,10 @@ export default function TestQuestions() {
         globalTopic.subjectCode,
         DEFAULT_TEST_DIFFICULTY,
         scope,
+        undefined,
+        // Pastda fonda `enrichTestSession` har savolga to'liq tahlil yozadi va
+        // bu izohni almashtiradi — shuning uchun bu yerda qisqasi yetadi.
+        true,
       );
       setTestSession(data);
       setViewLang(data.primaryLanguage || contentLanguage);
@@ -800,6 +854,14 @@ export default function TestQuestions() {
 
   const handleStudentAnswer = (questionIndex: number, optionIndex: number) => {
     if (studentSubmitted) return;
+    const prev = studentAnswers[questionIndex];
+    if (studentSessionId) {
+      pushLiveTestEvent(studentSessionId, {
+        event_type: prev >= 0 && prev !== optionIndex ? 'answer_change' : 'answer_select',
+        question_index: questionIndex,
+        option_index: optionIndex,
+      });
+    }
     const next = [...studentAnswers];
     next[questionIndex] = optionIndex;
     setStudentAnswers(next);
@@ -876,6 +938,21 @@ export default function TestQuestions() {
     }
   };
 
+  const handleStudentFaceLogin = async () => {
+    const u = getCurrentLocalUser();
+    if (normalizeUserRole(u) !== 'student' || !u) {
+      // Yuz xodimniki chiqdi — test talaba uchun; login-parol bilan kirsin.
+      setStudentLoginMode('password');
+      setError(t('test.studentLoginForbidden'));
+      return;
+    }
+    setError(null);
+    setStudentFirstName(u.firstName || '');
+    setStudentLastName(u.lastName || '');
+    setStudentAuthed(true);
+    await getBackendAccessToken();
+  };
+
   useEffect(() => {
     if (!isStudentMode || !studentAuthed) return;
     const u = getCurrentLocalUser();
@@ -909,11 +986,15 @@ export default function TestQuestions() {
     setStudentLoading(true);
     setError(null);
     try {
+      await flushLiveTestEvents(studentSessionId, participantKeyRef.current);
+      const started = testStartedAtRef.current ?? Date.now();
       await submitLiveTestOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
         firstName: studentFirstName.trim(),
         lastName: studentLastName.trim(),
         answers: studentAnswers,
+        started_at_ms: started,
+        duration_sec: Math.max(0, Math.round((Date.now() - started) / 1000)),
       });
       const item: TestSubmissionDoc = {
         sessionId: studentSessionId,
@@ -939,19 +1020,26 @@ export default function TestQuestions() {
       <div className="h-full flex flex-col bg-[#f2f2f7] p-3 sm:p-5 lg:p-6 overflow-y-auto">
         <div className="w-full space-y-6 pb-20">
           <div className="text-center space-y-2">
-            <h1 className="text-3xl font-bold text-gray-900">{t('test.studentTitle')}</h1>
+            <h1 className="text-[22px] font-semibold tracking-tight text-slate-900 sm:text-[24px]">{t('test.studentTitle')}</h1>
             {/* Avval har doim (login bosqichida ham) "ism-familiyangizni kiriting"
                 degan matn ko'rsatilardi — aslida bu bosqichda login talab
                 qilinadi, ism-familiya keyingi qadamda so'raladi. Matn holatga
                 mos bo'lishi uchun shartli qilindi. */}
-            <p className="text-gray-500">
+            <p className="text-slate-400">
               {studentAuthed ? t('test.studentSubtitle') : t('test.studentLoginHint')}
             </p>
           </div>
-          {!studentAuthed ? (
+          {!studentAuthed && studentLoginMode === 'face' ? (
+            <div className="rounded-2xl bg-white px-4 py-6 ring-1 ring-slate-900/[0.06] sm:px-8">
+              <FaceLogin
+                onUsePassword={() => setStudentLoginMode('password')}
+                onLoggedIn={() => void handleStudentFaceLogin()}
+              />
+            </div>
+          ) : !studentAuthed ? (
             <form
               onSubmit={handleStudentLogin}
-              className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-100 space-y-4 max-w-md mx-auto w-full"
+              className="mx-auto w-full max-w-md space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-900/[0.06] sm:p-8"
             >
               <div className="flex items-center gap-2 text-blue-700 font-semibold">
                 <KeyRound size={20} />
@@ -962,7 +1050,7 @@ export default function TestQuestions() {
                 onChange={(e) => setStudentLoginId(e.target.value)}
                 placeholder={t('test.studentLoginId')}
                 autoComplete="username"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-400"
+                className={staffInput}
               />
               <input
                 type="password"
@@ -970,7 +1058,7 @@ export default function TestQuestions() {
                 onChange={(e) => setStudentLoginPassword(e.target.value)}
                 placeholder={t('test.studentLoginPassword')}
                 autoComplete="current-password"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-400"
+                className={staffInput}
               />
               {error && (
                 <div className="bg-rose-50 text-rose-700 border border-rose-200 p-3 rounded-xl text-sm">
@@ -980,45 +1068,56 @@ export default function TestQuestions() {
               <button
                 type="submit"
                 disabled={studentAuthLoading}
-                className="w-full h-12 bg-blue-600 text-white rounded-2xl font-semibold hover:bg-blue-500 flex items-center justify-center gap-2"
+                className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 h-12 w-full text-[14px]"
               >
                 {studentAuthLoading ? <Loader2 size={18} className="animate-spin" /> : null}
                 {t('test.studentLoginBtn')}
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setStudentLoginMode('face');
+                }}
+                className="inline-flex h-10 w-full items-center justify-center gap-2 text-[13.5px] font-semibold text-slate-500 hover:text-sky-700"
+              >
+                <ScanFace size={16} />
+                {t('auth.face.title')}
+              </button>
             </form>
           ) : sessionLoading ? (
-            <div className="bg-white rounded-3xl p-8 border border-gray-100 text-center">
+            <div className="py-12 text-center">
               <Loader2 className="animate-spin text-blue-600 mx-auto mb-3" />
-              <p className="text-gray-600">{t('test.studentLoading')}</p>
+              <p className="text-slate-600">{t('test.studentLoading')}</p>
             </div>
           ) : error && !studentTest ? (
-            <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-3xl p-6 text-center font-medium">
+            <div className="rounded-xl bg-rose-50 px-5 py-4 text-center text-[13.5px] font-medium text-rose-700">
               {error}
             </div>
           ) : sessionClosed ? (
-            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-3xl p-8 text-center space-y-3">
+            <div className="space-y-3 rounded-xl bg-amber-50 px-5 py-6 text-center text-amber-900">
               <Lock size={32} className="mx-auto text-amber-700" />
               <p className="font-bold text-lg">{t('test.sessionClosedStudent')}</p>
               <p className="text-sm text-amber-800/80">{t('test.sessionClosedStudentHint')}</p>
             </div>
           ) : studentTest ? (
             <>
-              <div className="bg-white rounded-3xl p-6 border border-gray-100">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">{studentTest.topic}</h2>
+              <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-900/[0.06]">
+                <h2 className="mb-4 text-[17px] font-semibold tracking-tight text-slate-900">{studentTest.topic}</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <input
                     value={studentFirstName}
                     onChange={(e) => setStudentFirstName(e.target.value)}
                     placeholder={t('test.studentFirstName')}
                     disabled={studentSubmitted || sessionClosed}
-                    className="px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-400"
+                    className={staffInput}
                   />
                   <input
                     value={studentLastName}
                     onChange={(e) => setStudentLastName(e.target.value)}
                     placeholder={t('test.studentLastName')}
                     disabled={studentSubmitted || sessionClosed}
-                    className="px-4 py-3 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-400"
+                    className={staffInput}
                   />
                 </div>
               </div>
@@ -1027,7 +1126,7 @@ export default function TestQuestions() {
                 {/* Talaba ko'rinishi ham o'qituvchinikidek: raqam nishoni,
                     qalin savol matni, bir xil variant o'lchamlari. */}
                 {studentTest.questions.map((q, i) => (
-                  <div key={i} className="bg-white rounded-3xl p-5 sm:p-6 border border-gray-100 space-y-4">
+                  <div key={i} className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-900/[0.06] sm:p-6">
                     <div className="flex items-start gap-3">
                       <div className={staffIndexBadge}>{i + 1}</div>
                       <p className={staffQuestionText}>{q.question}</p>
@@ -1041,7 +1140,7 @@ export default function TestQuestions() {
                           className={`w-full text-left text-[14px] leading-relaxed p-3 rounded-xl border transition-colors ${
                             studentAnswers[i] === optIdx
                               ? 'border-blue-500 bg-blue-50 text-blue-900 font-semibold'
-                              : 'border-black/10 bg-white text-[#083047]/85 hover:bg-black/[0.02]'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
                           }`}
                         >
                           <span className="font-bold">{String.fromCharCode(65 + optIdx)})</span>{' '}
@@ -1057,7 +1156,7 @@ export default function TestQuestions() {
                 <button
                   onClick={handleStudentSubmit}
                   disabled={studentLoading}
-                  className="w-full h-12 bg-blue-600 text-white rounded-2xl font-semibold hover:bg-blue-500 flex items-center justify-center gap-2"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 h-12 w-full text-[14px]"
                 >
                   {studentLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                   {t('test.studentSubmit')}
@@ -1091,7 +1190,12 @@ export default function TestQuestions() {
   );
 
   return (
-    <StaffPageLayout spacious>
+    <StaffPageLayout
+      title={t('nav.tests')}
+      icon={ClipboardList}
+      accent="emerald"
+       spacious
+    >
       <ContentTopicToolbar
         moduleLabel={t('test.teacherBadge', { count: DEFAULT_TEST_QUESTION_COUNT })}
         topic={staffTopic}
@@ -1103,7 +1207,13 @@ export default function TestQuestions() {
         loading={loading}
         onCreate={() => void handleGenerate()}
         lockTopicFromSyllabus={Boolean(staffTopic)}
-        hint={t('test.heroSubtitle')}
+        hint={`${t('test.heroSubtitle')} ${t(
+          generationDomain === 'academic'
+            ? 'test.modeAcademic'
+            : generationDomain === 'biomedical'
+              ? 'test.modeBiomedical'
+              : 'test.modeClinical',
+        )}`}
         versions={versions}
         activeVersionId={activeVersionId}
         onSelectVersion={handleSelectVersion}
@@ -1139,17 +1249,18 @@ export default function TestQuestions() {
                 </h2>
                 <div className="flex flex-wrap gap-2 shrink-0">
                   {availableTestLangs.length > 1 && (
-                    <div className="flex rounded-lg border border-gray-200 overflow-hidden shrink-0">
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden shrink-0">
                       {availableTestLangs.map((l) => (
                         <button
                           key={l}
                           type="button"
-                          onClick={() => setViewLang(l)}
+                          disabled={translating || !activeVersionId}
+                          onClick={() => void selectTestLanguage(l)}
                           className={`px-3 py-1.5 text-xs font-semibold uppercase ${
-                            viewLang === l ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
+                            viewLang === l ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 hover:text-slate-900'
                           }`}
                         >
-                          {l}
+                          {translating ? "…" : l}
                         </button>
                       ))}
                     </div>
@@ -1181,7 +1292,7 @@ export default function TestQuestions() {
               {joinUrl && !sessionClosed && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
                   <div className="lg:col-span-1 flex justify-center">
-                    <div className="bg-white border-4 border-blue-200 rounded-2xl p-4 shadow-md">
+                    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-900/[0.08]">
                       {joinQrDataUrl ? (
                         <img
                           src={joinQrDataUrl}
@@ -1189,21 +1300,21 @@ export default function TestQuestions() {
                           className="w-72 h-72 sm:w-80 sm:h-80 object-contain"
                         />
                       ) : (
-                        <div className="w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center text-sm text-gray-500">
+                        <div className="w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center text-sm text-slate-400">
                           QR…
                         </div>
                       )}
                     </div>
                   </div>
                   <div className="lg:col-span-2 space-y-3">
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-slate-600">
                       {t('test.qrInstructions')}
                     </p>
                     <div className="flex gap-2">
                       <input
                         value={joinUrl}
                         readOnly
-                        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs"
+                        className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
                       />
                       <button
                         type="button"
@@ -1212,7 +1323,7 @@ export default function TestQuestions() {
                           const ok = await copyTextToClipboard(joinUrl);
                           if (!ok) setError(t('common.copyFailed'));
                         }}
-                        className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold flex items-center gap-2"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2 text-[13.5px]"
                       >
                         <Copy size={16} /> {t('common.link')}
                       </button>
@@ -1230,7 +1341,7 @@ export default function TestQuestions() {
                     type="button"
                     onClick={() => void handleStartLiveSession()}
                     disabled={startingSession}
-                    className="px-4 py-2 rounded-xl font-semibold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 shrink-0"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 shrink-0 px-4 py-2 text-[13.5px]"
                   >
                     {startingSession ? (
                       <Loader2 size={16} className="inline mr-1 animate-spin" />
@@ -1247,7 +1358,7 @@ export default function TestQuestions() {
                   <button
                     type="button"
                     onClick={handleToggleResultsView}
-                    className={`px-4 py-2 rounded-xl font-semibold ${!showAnalysis ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    className={`rounded-lg px-4 py-2 text-[13.5px] font-semibold transition-colors ${!showAnalysis ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.08] hover:text-slate-900'}`}
                   >
                     {!showAnalysis ? (
                       <Brain size={16} className="inline mr-1" />
@@ -1273,7 +1384,7 @@ export default function TestQuestions() {
 
             {!showAnalysis ? (
               <StaffPanel className="overflow-hidden">
-                <div className="px-4 py-3 border-b border-black/5 bg-black/[0.02] flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-900/[0.07] px-4 py-3">
                   <div className="flex items-center gap-3 flex-wrap">
                     <button type="button" onClick={handleBackToQuestions} className={staffBtnGhost}>
                       <ArrowLeft size={16} />
@@ -1292,7 +1403,7 @@ export default function TestQuestions() {
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
-                      <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45 border-b border-black/5">
+                      <tr className="border-b border-slate-900/[0.07] text-left text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                         <th className="px-4 py-3">{t('test.studentColumn')}</th>
                         <th className="px-4 py-3">{t('test.scoreColumn')}</th>
                         <th className="px-4 py-3">{t('test.gradeColumn')}</th>
@@ -1305,9 +1416,9 @@ export default function TestQuestions() {
                         const total = testSession.questions.length;
                         const grade = scoreToGrade(score, total);
                         return (
-                        <tr key={idx} className="border-b border-black/5 last:border-b-0">
-                          <td className="px-4 py-3 font-semibold text-[#083047]">{s.firstName} {s.lastName}</td>
-                          <td className="px-4 py-3 font-semibold tabular-nums text-[#083047]/85">
+                        <tr key={idx} className="border-b border-slate-900/[0.05] last:border-b-0">
+                          <td className="px-4 py-3 font-semibold text-slate-900">{s.firstName} {s.lastName}</td>
+                          <td className="px-4 py-3 font-semibold tabular-nums text-slate-700">
                             {score} / {total}
                           </td>
                           <td className="px-4 py-3">
@@ -1315,7 +1426,7 @@ export default function TestQuestions() {
                               {grade}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-black/45 tabular-nums">
+                          <td className="px-4 py-3 text-slate-400 tabular-nums">
                             {new Date(s.submittedAt).toLocaleString(locale)}
                           </td>
                         </tr>
@@ -1323,7 +1434,7 @@ export default function TestQuestions() {
                       })}
                       {submissions.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="px-4 py-8 text-center text-black/40">
+                          <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
                             {t('test.noSubmissionsRow')}
                           </td>
                         </tr>
@@ -1404,7 +1515,7 @@ export default function TestQuestions() {
                   type="button"
                   onClick={() => void handleGenerate()}
                   disabled={loading}
-                  className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2.5 text-[13.5px]"
                 >
                   {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
                   {t('test.createNewAfterClose')}
@@ -1414,7 +1525,7 @@ export default function TestQuestions() {
                   type="button"
                   onClick={() => void handleGenerate()}
                   disabled={loading}
-                  className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2.5 text-[13.5px]"
                 >
                   {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
                   {t('test.createAnother')}

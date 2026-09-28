@@ -1,5 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, Loader2, MapPin, Plus, Radio, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Building2,
+  CalendarClock,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Loader2,
+  MapPin,
+  Navigation,
+  Plus,
+  Radio,
+  Trash2,
+  Users,
+  XCircle,
+} from 'lucide-react';
 import { fetchStaffDirectory, type StaffDirectoryEntry } from '../../utils/staffDirectoryApi';
 import AdminStaffLiveMapPanel from './AdminStaffLiveMapPanel';
 import { useUiText } from '../../i18n/useUiText';
@@ -7,6 +22,7 @@ import type { UiTextKey } from '../../i18n/translations';
 import {
   bulkReplaceAdminStaffSchedule,
   deleteAdminStaffSchedule,
+  fetchLiveTeachingStatus,
   getScheduleWeekInfo,
   HttpError,
   listAdminStaffAlerts,
@@ -16,6 +32,7 @@ import {
   patchAdminStaffSchedule,
   type BulkScheduleSlotPayload,
   type CampusBuildingDto,
+  type LiveTeachingStatusDto,
   type ScheduleWeekInfoDto,
   type StaffLocationAlertDto,
   type StaffLocationPingDto,
@@ -41,7 +58,13 @@ function formatApiErrorLocal(err: unknown, t: (key: UiTextKey) => string): strin
 
 const PHASE_ORDER: WeekPhase[] = ['every', 'upper', 'lower'];
 
-type Tab = 'schedule' | 'livemap' | 'pings' | 'alerts';
+type Tab = 'today' | 'schedule' | 'livemap' | 'pings' | 'alerts';
+
+/** t() ning to'liq imzosi — parametrli kalitlar uchun ham. */
+type TFn = (key: UiTextKey, params?: Record<string, string | number>) => string;
+
+/** Jonli holat necha soniyada yangilanadi. */
+const TODAY_POLL_SEC = 60;
 type EditorMode = 'single' | 'alternating';
 
 type IntervalRow = {
@@ -163,6 +186,120 @@ function intervalsToPayload(
   return { slots: out, error: null };
 }
 
+/** Telefon raqam o'rniga hodim ismini ko'rsatish — admin raqamni emas,
+ *  odamni ko'radi. Katalog allaqachon yuklangan, qo'shimcha so'rov shart emas. */
+function makeNameLookup(directory: StaffDirectoryEntry[]) {
+  const byDigits = new Map<string, StaffDirectoryEntry>();
+  for (const e of directory) byDigits.set(e.phone_digits, e);
+  return (ownerKey: string) => byDigits.get((ownerKey || '').replace(/\D/g, ''));
+}
+
+/** Ruxsat radiusidan qancha chiqib ketgani — chetlanish darajasi. */
+function severityOf(distanceM: number, radiusM: number): 'mild' | 'moderate' | 'severe' {
+  const over = radiusM > 0 ? distanceM / radiusM : 1;
+  if (over <= 2) return 'mild';
+  if (over <= 6) return 'moderate';
+  return 'severe';
+}
+
+const SEVERITY_STYLE: Record<'mild' | 'moderate' | 'severe', { chip: string; border: string; key: UiTextKey }> = {
+  mild: { chip: 'bg-amber-100 text-amber-800', border: 'border-amber-200/80', key: 'admin.gpsSeverityMild' },
+  moderate: { chip: 'bg-orange-100 text-orange-800', border: 'border-orange-200/80', key: 'admin.gpsSeverityModerate' },
+  severe: { chip: 'bg-rose-100 text-rose-800', border: 'border-rose-200/80', key: 'admin.gpsSeveritySevere' },
+};
+
+/** GPS aniqligi — past aniqlikdagi ping bo'yicha xulosa chiqarish xato bo'ladi. */
+function accuracyBand(m: number | null): { key: UiTextKey; chip: string } {
+  if (m == null) return { key: 'admin.gpsAccuracyOk', chip: 'bg-slate-100 text-slate-600' };
+  if (m <= 30) return { key: 'admin.gpsAccuracyGood', chip: 'bg-emerald-50 text-emerald-700' };
+  if (m <= 100) return { key: 'admin.gpsAccuracyOk', chip: 'bg-sky-50 text-sky-700' };
+  return { key: 'admin.gpsAccuracyPoor', chip: 'bg-amber-50 text-amber-700' };
+}
+
+function GpsStatTile({
+  icon,
+  label,
+  value,
+  tone = 'plain',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone?: 'plain' | 'good' | 'bad';
+}) {
+  const valueTone =
+    tone === 'good' ? 'text-emerald-700' : tone === 'bad' ? 'text-rose-700' : 'text-black/90';
+  return (
+    <div className="ios-glass rounded-2xl border border-white/60 px-4 py-3 min-w-0">
+      <p className="text-[11px] font-semibold text-black/45 flex items-center gap-1.5 truncate">
+        {icon}
+        {label}
+      </p>
+      <p className={`mt-1 text-[22px] font-bold tabular-nums leading-none ${valueTone}`}>{value}</p>
+    </div>
+  );
+}
+
+/** Bugungi dars qatori — kim, qaysi dars, qayerda bo'lishi kerak, joyidami. */
+function LessonPresenceRow({
+  row,
+  t,
+}: {
+  row: {
+    owner_key: string;
+    display_name: string;
+    department: string;
+    building_name: string;
+    slot_start: string;
+    slot_end: string;
+    title: string;
+    present: boolean;
+    ping_age_min: number | null;
+  };
+  t: TFn;
+}) {
+  const signal =
+    row.ping_age_min == null
+      ? t('admin.gpsPingNone')
+      : t('admin.gpsPingFresh', { min: Math.round(row.ping_age_min) });
+  return (
+    <div
+      className={`ios-glass rounded-2xl border p-4 flex items-center gap-3 flex-wrap ${
+        row.present ? 'border-emerald-200/70' : 'border-rose-200/80 bg-rose-50/30'
+      }`}
+    >
+      {row.present ? (
+        <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+      ) : (
+        <XCircle size={20} className="text-rose-500 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-black/90 truncate">{row.display_name}</p>
+        <p className="text-[12px] text-black/50 truncate">
+          {row.department ? `${row.department} · ` : ''}
+          {row.title || t('admin.gpsLesson')}
+        </p>
+      </div>
+      <span className="inline-flex items-center gap-1.5 text-[12px] text-black/60 shrink-0 tabular-nums">
+        <Clock size={13} className="text-black/35" />
+        {row.slot_start}–{row.slot_end}
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-[12px] text-black/60 shrink-0 min-w-0">
+        <Building2 size={13} className="text-black/35 shrink-0" />
+        <span className="truncate max-w-[160px]">{row.building_name || '—'}</span>
+      </span>
+      <span
+        className={`shrink-0 text-[11.5px] font-bold px-2.5 py-1 rounded-full ${
+          row.present ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+        }`}
+      >
+        {row.present ? t('admin.gpsPresent') : t('admin.gpsAbsent')}
+      </span>
+      <span className="shrink-0 text-[11px] text-black/40 tabular-nums">{signal}</span>
+    </div>
+  );
+}
+
 export default function AdminStaffLocationConsole() {
   const { t, locale } = useUiText();
 
@@ -188,7 +325,7 @@ export default function AdminStaffLocationConsole() {
     [t],
   );
 
-  const [tab, setTab] = useState<Tab>('schedule');
+  const [tab, setTab] = useState<Tab>('today');
   /** 12 raqam (998...) yoki bo'sh: barcha hodimlar */
   const [staffOwnerDigits, setStaffOwnerDigits] = useState('');
   const [staffOptions, setStaffOptions] = useState<StaffDirectoryEntry[]>([]);
@@ -208,6 +345,7 @@ export default function AdminStaffLocationConsole() {
   const [intervalsUpper, setIntervalsUpper] = useState<IntervalsByWeekday>(() => emptyIntervals());
   const [intervalsLower, setIntervalsLower] = useState<IntervalsByWeekday>(() => emptyIntervals());
   const [liveMapUpdated, setLiveMapUpdated] = useState<Date | null>(null);
+  const [liveStatus, setLiveStatus] = useState<LiveTeachingStatusDto | null>(null);
 
   const LIVE_MAP_POLL_SEC = 5;
 
@@ -267,12 +405,56 @@ export default function AdminStaffLocationConsole() {
   const showAlternatingHint =
     hasAlternatingData && tab === 'schedule' && ownerFilterApplied.length >= 12;
 
+  /** owner_key (telefon raqam) -> hodim kartasi. */
+  const nameOf = useMemo(() => makeNameLookup(staffOptions), [staffOptions]);
+
+  /** Sana yorlig'i — "Bugun" / "Kecha" / to'liq sana. */
+  const dayLabel = useCallback(
+    (d: Date): string => {
+      const today = new Date();
+      const same = (a: Date, b: Date) =>
+        a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+      if (same(d, today)) return t('admin.gpsToday');
+      const yest = new Date(today);
+      yest.setDate(today.getDate() - 1);
+      if (same(d, yest)) return t('admin.gpsYesterday');
+      return d.toLocaleDateString(locale);
+    },
+    [t, locale],
+  );
+
+  const alertSummary = useMemo(() => {
+    const today = new Date();
+    const isToday = (iso: string) => {
+      const d = new Date(iso);
+      return (
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      );
+    };
+    return {
+      total: alerts.length,
+      today: alerts.filter((a) => isToday(a.created_at)).length,
+      staff: new Set(alerts.map((a) => a.owner_key)).size,
+    };
+  }, [alerts]);
+
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
     try {
       const o = ownerFilterApplied.length >= 12 ? ownerFilterApplied : undefined;
-      if (tab === 'schedule') {
+      if (tab === 'today') {
+        // Jadval + oxirgi ping backendda solishtiriladi — bu sahifaning
+        // asosiy savoli: dars vaqtida o'qituvchi joyidami?
+        const [live, a] = await Promise.all([
+          fetchLiveTeachingStatus(),
+          listAdminStaffAlerts(o).catch(() => []),
+        ]);
+        setLiveStatus(live);
+        setAlerts(a);
+      } else if (tab === 'schedule') {
         const [rows, wi, b] = await Promise.all([
           listAdminStaffSchedule(o),
           getScheduleWeekInfo().catch(() => null),
@@ -321,6 +503,19 @@ export default function AdminStaffLocationConsole() {
     const id = window.setInterval(() => void refreshLiveMapPings(), LIVE_MAP_POLL_SEC * 1000);
     return () => window.clearInterval(id);
   }, [tab, refreshLiveMapPings]);
+
+  // Bugungi holat o'zi yangilanib turadi — admin sahifani qayta ochmasin.
+  useEffect(() => {
+    if (tab !== 'today') return;
+    const id = window.setInterval(() => {
+      void fetchLiveTeachingStatus()
+        .then(setLiveStatus)
+        .catch(() => {
+          /* tarmoq uzilishi — keyingi urinishda tiklanadi */
+        });
+    }, TODAY_POLL_SEC * 1000);
+    return () => window.clearInterval(id);
+  }, [tab]);
 
   const setIntervals = (which: 'every' | 'upper' | 'lower', fn: (p: IntervalsByWeekday) => IntervalsByWeekday) => {
     if (which === 'every') setIntervalsEvery((p) => fn(p));
@@ -607,6 +802,7 @@ export default function AdminStaffLocationConsole() {
       <div className="flex flex-wrap gap-2">
         {(
           [
+            ['today', t('admin.gpsTabToday')],
             ['schedule', t('admin.schedule')],
             ['livemap', t('admin.liveMap')],
             ['pings', t('admin.pings')],
@@ -626,7 +822,7 @@ export default function AdminStaffLocationConsole() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className={`flex-col gap-1 ${tab === 'today' ? 'hidden' : 'flex'}`}>
         {kafedraOptions.length > 1 ? (
           <label className="flex flex-col gap-1 text-[12px] font-medium text-black/60 flex-1 min-w-[200px]">
             {t('admin.filterByKafedra')}
@@ -665,7 +861,7 @@ export default function AdminStaffLocationConsole() {
         ) : null}
       </div>
 
-      {tab !== 'livemap' ? (
+      {tab !== 'livemap' && tab !== 'today' ? (
         <button
           type="button"
           onClick={() => setTab('livemap')}
@@ -712,7 +908,60 @@ export default function AdminStaffLocationConsole() {
         </div>
       )}
 
-      {tab === 'schedule' && buildings.length === 0 && !loading ? (
+      {tab === 'today' ? (
+        loading && !liveStatus ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="animate-spin text-sky-600" size={40} />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              <GpsStatTile
+                icon={<CalendarClock size={13} />}
+                label={t('admin.gpsNowTeaching')}
+                value={String(liveStatus?.jami ?? 0)}
+              />
+              <GpsStatTile
+                icon={<CheckCircle2 size={13} />}
+                label={t('admin.gpsPresent')}
+                value={String(liveStatus?.joyida ?? 0)}
+                tone="good"
+              />
+              <GpsStatTile
+                icon={<XCircle size={13} />}
+                label={t('admin.gpsAbsent')}
+                value={String(liveStatus?.joyida_emas ?? 0)}
+                tone={(liveStatus?.joyida_emas ?? 0) > 0 ? 'bad' : 'plain'}
+              />
+              <GpsStatTile
+                icon={<Users size={13} />}
+                label={t('admin.gpsCompliance')}
+                value={
+                  liveStatus && liveStatus.jami > 0
+                    ? `${Math.round((liveStatus.joyida / liveStatus.jami) * 100)}%`
+                    : '—'
+                }
+              />
+            </div>
+
+            <p className="text-[11px] text-black/40">{t('admin.gpsAutoRefresh', { sec: TODAY_POLL_SEC })}</p>
+
+            {!liveStatus || liveStatus.royxat.length === 0 ? (
+              <div className="ios-glass rounded-2xl border border-white/60 p-10 text-center">
+                <CalendarClock size={30} className="mx-auto text-black/20 mb-3" />
+                <p className="text-[14px] font-semibold text-black/60">{t('admin.gpsNoLessonNow')}</p>
+                <p className="text-[12px] text-black/40 mt-1">{t('admin.gpsNoLessonNowHint')}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {liveStatus.royxat.map((row) => (
+                  <LessonPresenceRow key={`${row.owner_key}-${row.slot_start}`} row={row} t={t} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      ) : tab === 'schedule' && buildings.length === 0 && !loading ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[13px] text-rose-900">
           {t('admin.error.noBuildingsCatalog')}
         </div>
@@ -870,48 +1119,123 @@ export default function AdminStaffLocationConsole() {
           />
         </div>
       ) : tab === 'pings' ? (
-        <div className="ios-glass rounded-2xl border border-white/60 overflow-x-auto">
-          <table className="w-full text-left text-[12px] min-w-[640px]">
-            <thead className="bg-black/[0.03] text-black/55">
-              <tr>
-                <th className="px-3 py-2">{t('admin.recorded')}</th>
-                <th className="px-3 py-2">{t('admin.staffMember')}</th>
-                <th className="px-3 py-2">{t('admin.lat')}</th>
-                <th className="px-3 py-2">{t('admin.lng')}</th>
-                <th className="px-3 py-2">{t('admin.accuracy')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pings.map((p) => (
-                <tr key={p.id} className="border-t border-black/5">
-                  <td className="px-3 py-2 whitespace-nowrap">{new Date(p.recorded_at).toLocaleString(locale)}</td>
-                  <td className="px-3 py-2 font-mono">{p.owner_key}</td>
-                  <td className="px-3 py-2 font-mono">{p.latitude.toFixed(5)}</td>
-                  <td className="px-3 py-2 font-mono">{p.longitude.toFixed(5)}</td>
-                  <td className="px-3 py-2">{p.accuracy_m != null ? Math.round(p.accuracy_m) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-2">
+          {pings.map((p) => {
+            const person = nameOf(p.owner_key);
+            const acc = accuracyBand(p.accuracy_m);
+            const when = new Date(p.recorded_at);
+            return (
+              <div key={p.id} className="ios-glass rounded-2xl border border-white/60 p-4 flex items-center gap-3 flex-wrap">
+                <Radio size={16} className="text-sky-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13.5px] font-semibold text-black/90 truncate">
+                    {person?.display_name || t('admin.gpsUnknownStaff')}
+                  </p>
+                  <p className="text-[11.5px] text-black/45 truncate">
+                    {person?.department || person?.phone_display || p.owner_key}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[12px] text-black/60 tabular-nums">
+                  {dayLabel(when)} · {when.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full ${acc.chip}`}>
+                  {t(acc.key)}
+                  {p.accuracy_m != null ? ` ±${Math.round(p.accuracy_m)} m` : ''}
+                </span>
+                <a
+                  href={`https://www.openstreetmap.org/?mlat=${p.latitude}&mlon=${p.longitude}#map=17/${p.latitude}/${p.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold text-sky-700 hover:underline"
+                >
+                  <MapPin size={13} />
+                  {t('admin.gpsOpenInMap')}
+                </a>
+              </div>
+            );
+          })}
           {pings.length === 0 && (
-            <div className="px-4 py-8 text-center text-black/45 text-[13px]">{t('admin.noPingsYet')}</div>
+            <div className="ios-glass rounded-2xl border border-white/60 p-8 text-center text-black/45 text-[13px]">
+              {t('admin.noPingsYet')}
+            </div>
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {alerts.map((a) => (
-            <div key={a.id} className="ios-glass rounded-2xl border border-amber-200/80 bg-amber-50/40 p-4">
-              <div className="flex justify-between gap-2 flex-wrap text-[12px] text-black/50">
-                <span className="font-mono">{a.owner_key}</span>
-                <span>{new Date(a.created_at).toLocaleString(locale)}</span>
-              </div>
-              <p className="text-[14px] font-medium text-black/85 mt-2">{a.building_name || t('admin.buildingDefaultName')}</p>
-              <p className="text-[13px] text-black/70 mt-1">{a.message}</p>
-              <p className="text-[11px] text-black/45 mt-2">
-                {t('admin.alertDistance', { distance: a.distance_m, radius: a.radius_m })}
-              </p>
+        <div className="space-y-4">
+          {alerts.length > 0 && (
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
+              <GpsStatTile
+                icon={<AlertCircle size={13} />}
+                label={t('admin.gpsAlertsToday')}
+                value={String(alertSummary.today)}
+                tone={alertSummary.today > 0 ? 'bad' : 'plain'}
+              />
+              <GpsStatTile
+                icon={<AlertCircle size={13} />}
+                label={t('admin.gpsAlertsTotal')}
+                value={String(alertSummary.total)}
+              />
+              <GpsStatTile
+                icon={<Users size={13} />}
+                label={t('admin.gpsAlertsStaff')}
+                value={String(alertSummary.staff)}
+              />
             </div>
-          ))}
+          )}
+
+          {alerts.map((a) => {
+            const person = nameOf(a.owner_key);
+            const sev = SEVERITY_STYLE[severityOf(a.distance_m, a.radius_m)];
+            const when = new Date(a.created_at);
+            return (
+              <div key={a.id} className={`ios-glass rounded-2xl border p-4 ${sev.border}`}>
+                <div className="flex items-start gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-bold text-black/90 truncate">
+                      {person?.display_name || t('admin.gpsUnknownStaff')}
+                    </p>
+                    <p className="text-[12px] text-black/50 truncate">
+                      {person?.department || person?.phone_display || a.owner_key}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full ${sev.chip}`}>
+                    {t(sev.key)}
+                  </span>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-black/65">
+                  {a.slot_start && a.slot_end && (
+                    <span className="inline-flex items-center gap-1.5 tabular-nums">
+                      <Clock size={13} className="text-black/35" />
+                      {a.slot_start.slice(0, 5)}–{a.slot_end.slice(0, 5)}
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <Building2 size={13} className="text-black/35 shrink-0" />
+                    <span className="truncate">{a.building_name || t('admin.buildingDefaultName')}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 tabular-nums">
+                    <Navigation size={13} className="text-black/35" />
+                    {t('admin.alertDistance', { distance: Math.round(a.distance_m), radius: a.radius_m })}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-black/45">
+                    <CalendarClock size={13} className="text-black/30" />
+                    {dayLabel(when)} · {when.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                <a
+                  href={`https://www.openstreetmap.org/?mlat=${a.actual_lat}&mlon=${a.actual_lng}#map=17/${a.actual_lat}/${a.actual_lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-sky-700 hover:underline"
+                >
+                  <MapPin size={13} />
+                  {t('admin.gpsOpenInMap')}
+                </a>
+              </div>
+            );
+          })}
           {alerts.length === 0 && (
             <div className="ios-glass rounded-2xl border border-white/60 p-8 text-center text-black/45 text-[13px]">
               {t('admin.noAlertsYet')}

@@ -1,0 +1,368 @@
+{
+  "source_url": "https://docs.google.com/spreadsheets/d/14w0hQC3jladFEJnObvWXiZA-5QXeJ1-KGu6puNjCqsw/edit?usp=sharing",
+  "source_sheet": "auditoriyalar",
+  "checked_on": "2026-09-14",
+  "departments": [
+    {
+      "row": 1,
+      "department": "Kommunal va mehnat gigiyenasi kafedrasi",
+      "rooms": [
+        "Oq uy 2 qavat 204-xona",
+        "Oq uy 2 qavat 206-xona",
+        "Oq uy 2 qavat 207-xona",
+        "Oq uy 2 qavat 209-xona",
+        "Oq uy 2 qavat 210-xona",
+        "Oq uy 2 qavat 211-xona",
+        "Oq uy 3 qavat 301-xona",
+        "Oq uy 3 qavat 302-xona",
+        "Oq uy 3 qavat 303-xona",
+        "Oq uy 3 qavat 304-xona",
+        "Oq uy 3 qavat 305-xona",
+        "Oq uy 3 qavat 306-xona",
+        "Oq uy 3 qavat 307-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 2,
+      "department": "Ovqatlanish, bolalar va o’smirlar gigienasi kafedrasi",
+      "rooms": [
+        "Oq uy 2 qavat 212-xona",
+        "Oq uy 2 qavat 213-xona",
+        "Oq uy 2 qavat 214-xona",
+        "Oq uy 2 qavat 217-xona",
+        "Oq uy 2 qavat 218-xona",
+        "Oq uy 2 qavat 222-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Ovqatlanish, bolalar va o‘smirlar gigiyenasi"
+      ]
+    },
+    {
+      "row": 3,
+      "department": "Preventiv tibbiyot asoslari, jamoat salomatligi, jismoniy tarbiya va sport kafedrasi",
+      "rooms": [
+        "Oq uy 3 qavat 310-xona",
+        "Oq uy 3 qavat 312-xona",
+        "Oq uy 3 qavat 313-xona",
+        "Oq uy 3 qavat 317-xona",
+        "Oq uy 3 qavat 319-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Preventiv",
+        "Preventiv tibbiyot, Jamoat salomatligi, Jismoniy tarbiya va sport"
+      ]
+    },
+    {
+      "row": 4,
+      "department": "Epidemiologiya va yuqumli kasalliklar, hamshiralik ishi kafedrasi",
+      "rooms": [
+        "YuKSHQO'B \n(2-qavat) 219-auditoriya",
+        "YuKSHQO'B \n(2-qavat) 206- auditoriya",
+        "YuKSHQO'B \n(1-qavat) 117- auditoriya",
+        "YuKSHQO'B \n(1-qavat) 103- auditoriya"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Epidemiologiya va yuqumli kasalliklar hamshiralik ishi"
+      ]
+    },
+    {
+      "row": 5,
+      "department": "Mikrobiologiya, virusologiya va immunologiya kafedrasi",
+      "rooms": [
+        "YuKSHQO'B \n(1-qavat) 106-auditoriya",
+        "YuKSHQO'B \n(1-qavat) 108- auditoriya",
+        "YuKSHQO'B \n(1-qavat) 109- auditoriya"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Mikrobiologiya,virusologiya,immunologiya"
+      ]
+    },
+    {
+      "row": 6,
+      "department": "Xalq tabobati va farmakologiya kafedrasi",
+      "rooms": [
+        "YuKSHQO'B 210- xona",
+        "Vivariy 2- qavat"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [],
+      "extra_rooms": [
+        {
+          "monitor_id": "MON-102",
+          "room": "YuKSHQO'B 301- xona"
+        }
+      ]
+    },
+    {
+      "row": 7,
+      "department": "Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari kafedrasi",
+      "rooms": [
+        "Asosiy (2-bino) \n23-xona",
+        "Asosiy (2-bino) \n24-xona",
+        "Asosiy (2-bino) \n25-xona",
+        "Asosiy (2-bino) \n27-xona",
+        "Asosiy (2-bino) \n29-xona",
+        "Asosiy (2-bino) \n30-xona",
+        "Asosiy (2-bino) \n21-xona",
+        "Asosiy (1-bino) \n202-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 8,
+      "department": "Ichki kasallalliklar propedevtikasi (UASH) kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Ichki kasalliklar propedevtikasi kafedrasi",
+        "Ichki kasallilar propedevtikasi",
+        "Ichki kasalliklar propedevtikasi",
+        "Terapiya UASH"
+      ]
+    },
+    {
+      "row": 9,
+      "department": "Travmatologiya va ortopediya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 10,
+      "department": "Normal anatomiya, operativ jarrohlik va topografik anatomiya kafedrasi",
+      "rooms": [
+        "Asosiy (2-bino) 42-xona",
+        "Asosiy (2-bino) 46-xona",
+        "Asosiy (2-bino) 47-xona",
+        "Asosiy (2-bino) 48-xona",
+        "Asosiy (2-bino) 49-xona",
+        "Asosiy (2-bino) 50-xona",
+        "Asosiy (3-bino) 1-xona",
+        "Asosiy (3-bino) 2-xona",
+        "Asosiy (3-bino) 3-xona",
+        "Asosiy (3-bino) 4-xona",
+        "Asosiy (3-bino) 5-xona",
+        "Asosiy (3-bino) 6-xona",
+        "Asosiy (3-bino) 8-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Normal anatomiya"
+      ]
+    },
+    {
+      "row": 11,
+      "department": "Gospital terapiya (laboratoriya) kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Gospital terapiya"
+      ]
+    },
+    {
+      "row": 12,
+      "department": "Umumiy jarrohlik kafedrasi",
+      "rooms": [],
+      "extra_rooms": [
+        {
+          "monitor_id": "MON-100",
+          "room": "FJSTI klinika 2 etaj 13-xona",
+          "added_on": "2026-09-17"
+        },
+        {
+          "monitor_id": "MON-101",
+          "room": "FJSTI klinika 2 etaj 14-xona",
+          "added_on": "2026-09-17"
+        }
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Umumiy xirurgiya"
+      ]
+    },
+    {
+      "row": 13,
+      "department": "Fakultet va gospital jarrohlik kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 14,
+      "department": "Akusherlik va ginekologiya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 15,
+      "department": "Urologiya va onkologiya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 16,
+      "department": "Nevrologiya va psixiatriya",
+      "rooms": [
+        "FJSTI klinika 2 etaj 1-xona",
+        "FJSTI klinika 2 etaj 2-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Nevrologiya va psixatriya"
+      ]
+    },
+    {
+      "row": 17,
+      "department": "Pediatriya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Pediatriya 1"
+      ]
+    },
+    {
+      "row": 18,
+      "department": "Pediatriya 2 kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 19,
+      "department": "Stomatologiya va otoloringologiya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Stomatologiya va otorinolaringologiya",
+        "Stomatologiya va otorinolaringologiya kafedrasi"
+      ]
+    },
+    {
+      "row": 20,
+      "department": "Dermatovenerologiya va allergologiya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 21,
+      "department": "Endokrinologiya, gemotologiya va ftiziatriya kafedrasi",
+      "rooms": [],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 22,
+      "department": "O'zbek va xorijiy tillar kafedrasi",
+      "rooms": [
+        "Asosiy (1-bino) 3-Qavat\n305-xona",
+        "Asosiy (1-bino) 3-Qavat\n306-xona",
+        "Asosiy (1-bino) 3-Qavat\n308-xona",
+        "Asosiy (1-bino) 3-Qavat\n309-xona",
+        "Asosiy (1-bino) 3-Qavat\n310-xona",
+        "Asosiy (1-bino) 3-Qavat\n312-xona",
+        "Asosiy (1-bino) 3-Qavat\n319-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 23,
+      "department": "Lotin tili, pedagogika va psixologiya kafedrasi",
+      "rooms": [
+        "Asosiy (1-bino) 3-Qavat\n301-xona",
+        "Asosiy (1-bino) 3-Qavat\n302-xona",
+        "Asosiy (1-bino) 3-Qavat\n303-xona",
+        "Asosiy (1-bino) 3-Qavat\n311-xona",
+        "Asosiy (1-bino) 3-Qavat\n317-xona",
+        "Asosiy (1-bino) 3-Qavat\n318-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": [
+        "Lotin tili",
+        "Lotin tilli, pedagogika va psixalogiya"
+      ]
+    },
+    {
+      "row": 24,
+      "department": "Tibbiy va biologik kimyo kafedrasi",
+      "rooms": [
+        "Asosiy (1-bino) 2-Qavat\n201-xona",
+        "Asosiy (1-bino) 2-Qavat\n203-xona",
+        "Asosiy (1-bino) 2-Qavat\n204-xona",
+        "Asosiy (1-bino) 2-Qavat\n205-xona",
+        "Asosiy (1-bino) 2-Qavat\n206-xona",
+        "Asosiy (1-bino) 2-Qavat\n207-xona",
+        "Asosiy (1-bino) 2-Qavat\n208-xona",
+        "Asosiy (1-bino) 2-Qavat\n210-xona",
+        "Asosiy (1-bino) 2-Qavat\n212-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 25,
+      "department": "Ijtimoiy fanlar kafedrasi",
+      "rooms": [
+        "Asosiy (2-bino) 52-xona",
+        "Asosiy(2-bino) 55-xona",
+        "Asosiy(2-bino) 60 xona"
+      ],
+      "unavailable_rooms": [
+        "Asosiy(2-bino) 59-xona Nosoz"
+      ],
+      "aliases": []
+    },
+    {
+      "row": 26,
+      "department": "Gistologiya va biologiya kafedrasi",
+      "rooms": [
+        "9-sonli oilaviy poliklinika 9-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 27,
+      "department": "Fiziologiya kafedrasi",
+      "rooms": [
+        "Asosiy bino (3-bino) 3-qavat 25 xona (ma'ruza)",
+        "Asosiy bino (3-bino) 3-qavat 26 xona",
+        "Asosiy bino (3-bino) 3-qavat 27 xona",
+        "Asosiy bino (3-bino) 3-qavat28 xona",
+        "Asosiy bino (3-bino) 3-qavat 29 xona",
+        "Asosiy bino (3-bino) 3-qavat 30 xona (ma'ruza)",
+        "Asosiy bino (3-bino) 3-qavat 34 xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    },
+    {
+      "row": 28,
+      "department": "Patologik fiziologiya va patologik anatomiya kafedrasi",
+      "rooms": [
+        "Asosiy bino (3-bino) 3-qavat 12 xona (ma'ruza)",
+        "Asosiy bino (3-bino) 3-qavat 26 xona",
+        "Asosiy bino (3-bino) 3-qavat 13 xona",
+        "Asosiy bino (3-bino) 3-qavat 14 xona",
+        "Asosiy bino (3-bino) 3-qavat 15 xona",
+        "Asosiy bino (3-bino) 3-qavat 16 xona",
+        "Asosiy bino (3-bino) 3-qavat 17 xona (ma'ruza)",
+        "Asosiy bino (3-bino) 3-qavat 20 xona",
+        "Asosiy bino (3-bino) 3-qavat 22-xona",
+        "Asosiy bino (3-bino) 3-qavat 23-xona"
+      ],
+      "unavailable_rooms": [],
+      "aliases": []
+    }
+  ]
+}

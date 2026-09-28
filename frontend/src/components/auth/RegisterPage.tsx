@@ -31,7 +31,9 @@ interface RegisterPageProps {
 export default function RegisterPage({ onSwitchToLogin, onBackToQr }: RegisterPageProps) {
   const { t } = useUiText();
   const demoStaffPassword = (import.meta.env.VITE_DEMO_STAFF_PASSWORD || '').trim();
-  const demoDefaults = isDemoAuthEnabled() && demoStaffPassword.length >= 6
+  // Faqat mahalliy dev: productionda forma test hisobining telefoni va paroli bilan
+  // to'ldirilib kelardi va "Ro'yxatdan o'tish" bosilsa odam Test Hodim hisobiga kirib qolardi.
+  const demoDefaults = import.meta.env.DEV && isDemoAuthEnabled() && demoStaffPassword.length >= 6
     ? {
         phone: TEST_STAFF_PHONE,
         password: demoStaffPassword,

@@ -72,6 +72,9 @@ def external_test_detail(pk: int, request: Request, db: Session = Depends(get_db
     if item is None:
         raise HTTPException(status_code=404, detail="Not found.")
 
+    if lang:
+        from app.services.prepared_translation import translate_saved_content
+        item = translate_saved_content(db, item, lang)
     payload_raw = item.payload if isinstance(item.payload, dict) else {}
     available_langs = cc.available_test_languages(payload_raw)
     projected, used_lang = cc.project_test_payload_language(payload_raw, lang)
@@ -101,12 +104,29 @@ def external_questions_sample(request: Request, db: Session = Depends(get_db)) -
     count, err = cc.parse_test_question_limit(raw_count, param_name="count")
     if err:
         raise HTTPException(status_code=400, detail=err)
-    # language ixtiyoriy — berilmasa har savol languages.uz/ru/en bilan qaytadi
+    lang, err = cc.parse_test_language(params.get("language") or params.get("lang"))
+    if err:
+        raise HTTPException(status_code=400, detail=err)
 
     stmt = cc.filter_catalog_stmt(cc.published_catalog_stmt().where(PreparedContent.kind == "test"), params)
     items = db.execute(stmt).scalars().all()
+    # Prefer already translated questions. Only fill the requested sample, never
+    # translate every course material simply because the external bank is opened.
+    if lang:
+        from app.services.prepared_translation import translate_saved_content
+        target_count = count or 20
+        ready, _, _ = cc.collect_unique_questions_from_tests(items, language=lang, count=target_count)
+        if len(ready) < target_count:
+            for index in sorted(range(len(items)), key=lambda i: len((items[i].payload or {}).get("questions") or []), reverse=True):
+                item = items[index]
+                if lang in cc.available_test_languages(item.payload or {}):
+                    continue
+                items[index] = translate_saved_content(db, item, lang)
+                ready, _, _ = cc.collect_unique_questions_from_tests(items, language=lang, count=target_count)
+                if len(ready) >= target_count:
+                    break
     questions, available, tests_scanned = cc.collect_unique_questions_from_tests(
-        items, shuffle=True, count=count
+        items, shuffle=True, count=count, language=lang
     )
 
     return {
@@ -115,7 +135,7 @@ def external_questions_sample(request: Request, db: Session = Depends(get_db)) -
         "variant_label": (params.get("variant_label") or "").strip(),
         "topic_code": (params.get("topic_code") or "").strip().lower(),
         "syllabus_id": (params.get("syllabus_id") or "").strip(),
-        "available_languages": list(cc.SUPPORTED_TEST_LANGUAGES),
+        "available_languages": [code for code in cc.SUPPORTED_TEST_LANGUAGES if any(code in row["languages"] for row in questions)],
         "count_requested": count,
         "count_available": available,
         "count_returned": len(questions),
@@ -175,6 +195,14 @@ def external_keys_scenarios(request: Request, db: Session = Depends(get_db)) -> 
     scenarios, available, cases_scanned = cc.collect_case_scenarios(items, shuffle=shuffle, count=count)
 
     body = paginate(scenarios, request, default_page_size=50, max_page_size=200)
+    # Qaytarilgan ssenariylarda HAQIQATAN uchraydigan tillar. Bu ro'yxat
+    # `SUPPORTED_TEST_LANGUAGES` ning nusxasi EMAS: keys tarjimasi hali
+    # yaratilmagan bo'lsa, faqat asl til qaytadi va mijoz shunga qarab
+    # o'zbekchaga ongli ravishda qaytadi.
+    present_langs: set[str] = set()
+    for row in body.get("results") or []:
+        present_langs.update((row.get("languages") or {}).keys())
+    body["available_languages"] = [c for c in cc.SUPPORTED_TEST_LANGUAGES if c in present_langs]
     body.update(
         {
             "subject_code": (params.get("subject_code") or "").strip(),
@@ -281,10 +309,230 @@ def external_catalog_subjects(request: Request, db: Session = Depends(get_db)) -
 @router.get("/external/catalog/subjects/{subject_code:path}/")
 def external_catalog_subject_detail(subject_code: str, db: Session = Depends(get_db)) -> dict:
     code = subject_code.strip()
-    obj = db.execute(select(CourseSyllabus).where(CourseSyllabus.subject_code == code)).scalar_one_or_none()
+    obj = db.execute(ec.active_syllabus_stmt().where(CourseSyllabus.subject_code == code)).scalar_one_or_none()
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
     detail = ec.external_catalog_subject_detail(obj)
     if detail["topics_count"] <= 0:
         raise HTTPException(status_code=404, detail="Not found.")
     return detail
+
+
+@router.post("/external/education-ai/generate-mcq/")
+async def external_generate_mcq(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Kafedra vektor kitoblaridan AI MCQ (OnlineTest o'qituvchi imtihoni).
+
+    Body JSON: department_name | department_code, subject (fan), count (default 20), language (uz|ru|en).
+    """
+    import json as _json
+
+    from app.core.config import get_settings
+    from app.services import book_retrieval as rag
+    from app.services import openai_client as oai
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    dept_code = str(body.get("department_code") or "").strip()
+    dept_name = str(body.get("department_name") or "").strip()
+    subject = str(body.get("subject") or body.get("topic") or "").strip()
+    lang = str(body.get("language") or body.get("lang") or "uz").strip().lower()[:5]
+    if lang not in ("uz", "ru", "en"):
+        lang = "uz"
+    try:
+        count = int(body.get("count") or 20)
+    except (TypeError, ValueError):
+        count = 20
+    count = max(5, min(30, count))
+
+    dept = None
+    if dept_code:
+        dept = db.execute(
+            select(AcademicDepartment).where(AcademicDepartment.code == dept_code)
+        ).scalar_one_or_none()
+    if dept is None and dept_name:
+        dept = db.execute(
+            select(AcademicDepartment).where(AcademicDepartment.name.ilike(dept_name))
+        ).scalar_one_or_none()
+        if dept is None:
+            dept = db.execute(
+                select(AcademicDepartment).where(AcademicDepartment.name.ilike(f"%{dept_name}%"))
+            ).scalars().first()
+        if dept is None:
+            # Fuzzy: apostrof / "kafedrasi" / token overlap (OnlineTest nomlari farq qiladi)
+            import re as _re
+            import unicodedata as _ud
+
+            def _norm(s: str) -> str:
+                t = _ud.normalize("NFKC", s or "").casefold()
+                for ch in ("ʻ", "ʼ", "'", "`", "‘", "’"):
+                    t = t.replace(ch, "'")
+                for suf in (" kafedrasi", " kafedra"):
+                    if t.endswith(suf):
+                        t = t[: -len(suf)]
+                t = _re.sub(r"[^\w\s]+", " ", t)
+                return _re.sub(r"\s+", " ", t).strip()
+
+            qn = _norm(dept_name)
+            qtok = {w for w in qn.split() if len(w) > 2}
+            best = None
+            best_score = 0.0
+            for row in db.execute(select(AcademicDepartment)).scalars().all():
+                cn = _norm(str(row.name or ""))
+                if not cn:
+                    continue
+                if qn == cn:
+                    best, best_score = row, 1000.0
+                    break
+                if qn in cn or cn in qn:
+                    sc = 800.0 + min(len(qn), len(cn))
+                else:
+                    ctok = {w for w in cn.split() if len(w) > 2}
+                    if not qtok or not ctok:
+                        continue
+                    inter = qtok & ctok
+                    if not inter:
+                        continue
+                    cov = len(inter) / len(qtok)
+                    j = len(inter) / len(qtok | ctok)
+                    if cov < 0.45 and j < 0.35:
+                        continue
+                    sc = 400.0 * cov + 200.0 * j
+                if sc > best_score:
+                    best, best_score = row, sc
+            if best is not None and best_score >= 200:
+                dept = best
+    if dept is None:
+        raise HTTPException(status_code=404, detail="Department not found.")
+
+    topic = subject or dept_name or dept.name or "kafedra asosiy fanlari"
+    chunks = rag.retrieve_book_context_by_department_id(db, int(dept.id), topic, top_k=16)
+    context_message = rag.format_book_context_message(chunks)
+    # Kitob yo'q bo'lsa ham AI (fan bo'yicha) — imtihon kuni bo'sh qolmasin.
+    allow_no_books = True
+    if not context_message and not allow_no_books:
+        raise HTTPException(
+            status_code=404,
+            detail="Bu kafedra uchun vektorlashtirilgan kitob topilmadi.",
+        )
+
+
+    settings = get_settings()
+    api_key = (settings.openai_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API kaliti sozlanmagan.")
+
+    lang_name = {"uz": "o'zbek", "ru": "rus", "en": "english"}.get(lang, "o'zbek")
+    system = (
+        "Siz tibbiyot universiteti PROFESSOR-O'QITUVCHILARI bilimini baholovchi "
+        "USMLE Step 2 CK / Step 3 va KROK-2 darajasidagi MCQ ekspertisiz. "
+        "Auditoriyя: 1–2 kurs talabasi EMAS — kafedra o'qituvchilari. "
+        "FAQAT berilgan darslik/kitob parchalariga tayaning; uydirma manba yozilmasin. "
+        "HAR SAVOL: uzun klinik vignette (anamnez, yosh/jins, shikoyatlar, fizikal topilmalar, "
+        "vital belgilar, laboratoriya/vizualizatsiya qiymatlari bilan); "
+        "keyin aniq klinik qaror / differensial / mexanizm / davo tanlovi. "
+        "QISQA yoki oddiy fakt-eslatma savollari TAQIQLANADI. "
+        "5 ta variant: bitta to'g'ri, qolganlari ishonchli chalg'ituvchilar (yaqin differensial). "
+        "explanation: 2–4 jumla, nima uchun to'g'ri va nima uchun boshqalar noto'g'ri. "
+        f"Javob FAQAT JSON: {{questions:[{{id,text,options:[5 string],correctIndex:0-4,explanation}}]}}. "
+        f"Til: {lang_name}."
+    )
+    user_msg = (
+        f"{count} ta NOYOB, QIYIN, BATAFSIL MCQ yarating.\n"
+        f"Kafedra: {dept.name}\n"
+        f"FAN (majburiy mavzu doirasi): {topic}\n"
+        "Talablar:\n"
+        "- Har stem kamida 4–8 jumla / boy klinik kontekst\n"
+        "- Faqat shu FAN bo'yicha; boshqa fanlarga chiqilmasin\n"
+        "- Oliy tibbiy ta'lim / o'qituvchi kompetentsiyasi (farmakokinetika, "
+        "patofiziologiya, murakkab differensial, guidelines)\n"
+        "- Maktab/kollej yoki 1-kurs 'ta'rif bering' uslubi YO'Q\n"
+        "- Variantlar bir xil uzunlikda, 'hammasi to'g'ri' uslubi YO'Q"
+    )
+    messages = []
+    if context_message:
+        messages.append({"role": "system", "content": context_message})
+    else:
+        system = (
+            system
+            + " Kitob parchasi YO'Q — umumiy tibbiy ekspert bilimiga tayaning;"
+            + " uydirma manba/iqtibos yozmang; faqat shu FAN doirasida."
+        )
+    messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user_msg})
+
+
+    try:
+        db.close()
+    except Exception:
+        pass
+
+    try:
+        content = oai.generate_openai_chat(
+            api_key,
+            messages=messages,
+            model=settings.openai_chat_model,
+            # Ko'p modellarda completion limi 16k — 20×1100=22k yiqilardi.
+            max_tokens=min(16000, max(4000, count * 750 + 600)),
+            temperature=0.45,
+            timeout_sec=280,
+            response_format={"type": "json_object"},
+            usage_kind="external_mcq",
+        )
+    except oai.OpenAiClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    try:
+        parsed = _json.loads(content)
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI JSON parse xato")
+
+    raw_qs = parsed.get("questions") if isinstance(parsed, dict) else None
+    if not isinstance(raw_qs, list) or not raw_qs:
+        raise HTTPException(status_code=502, detail="AI savollar qaytarmadi")
+
+    out = []
+    for i, q in enumerate(raw_qs[:count]):
+        if not isinstance(q, dict):
+            continue
+        opts = q.get("options") or q.get("choices") or []
+        if not isinstance(opts, list):
+            continue
+        opts = [str(o).strip() for o in opts][:5]
+        while len(opts) < 5:
+            opts.append("")
+        try:
+            ci = int(q.get("correctIndex", q.get("correct_index", q.get("correct", 0))) or 0)
+        except (TypeError, ValueError):
+            ci = 0
+        ci = max(0, min(4, ci))
+        text = str(q.get("text") or q.get("question") or "").strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "id": i + 1,
+                "text": text,
+                "options": opts,
+                "correctIndex": ci,
+                "explanation": str(q.get("explanation") or "").strip(),
+                "source": "imentor_faculty_ai_books",
+                "department_code": dept.code,
+                "department_name": dept.name,
+                "subject": topic,
+            }
+        )
+
+    if len(out) < max(5, count // 2):
+        raise HTTPException(status_code=502, detail="AI yetarli savol qaytarmadi")
+
+    return {
+        "count": len(out),
+        "department": {"id": dept.id, "code": dept.code, "name": dept.name},
+        "chunks_used": len(chunks),
+        "questions": out,
+    }

@@ -21,6 +21,22 @@ export function applyInstructionLanguage(
   setLanguage(lang);
 }
 
+/** The explicitly selected language applies to every new material, not only the home page. */
+export function contentLanguageFor(
+  _topic: { instructionLanguage?: AppLanguage; title?: string } | null | undefined,
+  uiLanguage: AppLanguage,
+): AppLanguage {
+  return uiLanguage;
+}
+
+/** Xalqaro (xorijiy talabalar) guruhi fani: `XT` yo'nalishi yoki nomida "(Xorijiy…)"/"(Xalqaro…)". */
+export function isInternationalSyllabus(
+  row: Pick<CourseSyllabusRow, 'direction_code' | 'subject_name'>,
+): boolean {
+  if ((row.direction_code || '').trim().toUpperCase() === 'XT') return true;
+  return /\((xorijiy|xalqaro|international)[^)]*\)/i.test(row.subject_name || '');
+}
+
 export function instructionLanguageBadge(lang: AppLanguage): string {
   if (lang === 'en') return 'EN';
   if (lang === 'ru') return 'RU';

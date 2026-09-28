@@ -1,7 +1,7 @@
 import { getCurrentLocalUser } from './localStaffAuth';
 import { HttpError, httpJson } from '../api/httpClient';
 import { getBackendAccessToken } from './backendAuth';
-import { topicNormLookupKeys } from './syllabusTopicContext';
+import { topicNormLookupKeys, topicNormsOverlap } from './syllabusTopicContext';
 import type { SyllabusTopic } from '../services/aiService';
 import type { SyllabusTopicContext } from './syllabusTopicContext';
 
@@ -24,8 +24,11 @@ export type PreparedContentSummary = {
   source: 'local' | 'cloud';
   /** Kim yaratgan — versiyalar ro'yxatida ko'rsatiladi. */
   author?: string;
-  /** False bo'lsa o'chirish tugmasi chiqmaydi (boshqa o'qituvchiniki). */
+  /** Faqat server `can_delete: true` desa o'chirish tugmasi chiqadi (bulutdagi yozuvlarda). */
   canDelete?: boolean;
+  /** Bo'sh bo'lmasa — material eskirgan (masalan klinik bo'lmagan fanga bemor
+   *  ssenariysi bilan yozilgan). Tarixda ko'rinadi, lekin avtomatik ochilmaydi. */
+  retiredReason?: string;
 };
 
 const CLOUD_ID_PREFIX = 'cloud_';
@@ -57,7 +60,12 @@ async function requireAuthToken(): Promise<string> {
   return token;
 }
 
-/** data:URL rasmlar JSON ni shishiradi — PPTXda allaqachon bor, bazaga yozilmaydi. */
+/**
+ * data:URL rasmlar JSON ni shishiradi, shuning uchun bazaga yozilmaydi.
+ * Lekin `imageSourceUrl` SAQLANADI — saqlangan taqdimot qayta ochilganda
+ * rasm o\'sha havoladan tortiladi. Ilgari havola ham qolmagani uchun
+ * saqlangan deck butunlay rasmsiz chiqardi.
+ */
 function stripHeavyMediaFromPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object') return payload;
   const deck = payload as { slides?: unknown };
@@ -203,6 +211,7 @@ type MineRow = {
   author_display_name?: string;
   created_at: string;
   can_delete?: boolean;
+  retired_reason?: string;
 };
 
 const MINE_PAGE_SIZE = 300;
@@ -215,7 +224,12 @@ const MINE_MAX_PAGES = 20;
 async function fetchMineRows(
   kind: PreparedContentKind,
   topicNorms?: string[],
-  options?: { shared?: boolean },
+  options?: {
+    shared?: boolean;
+    syllabusId?: number;
+    topicCode?: string;
+    variantLabel?: string;
+  },
 ): Promise<PreparedContentSummary[]> {
   const token = await getBackendAccessToken();
   if (!token) return [];
@@ -228,6 +242,9 @@ async function fetchMineRows(
       page_size: String(MINE_PAGE_SIZE),
     });
     if (options?.shared) params.set('shared', '1');
+    if (options?.syllabusId) params.set('syllabus_id', String(options.syllabusId));
+    if (options?.topicCode) params.set('topic_code', options.topicCode);
+    if (options?.variantLabel) params.set('variant_label', options.variantLabel);
     for (const norm of topicNorms || []) params.append('topic_norm', norm);
     const data = await httpJson<{ results?: MineRow[]; count?: number }>(
       `${apiBaseUrl()}/v1/prepared-content/mine/?${params.toString()}`,
@@ -244,7 +261,8 @@ async function fetchMineRows(
         author: r.author_display_name || '',
         createdAt: new Date(r.created_at).getTime(),
         source: 'cloud' as const,
-        canDelete: r.can_delete !== false,
+        canDelete: r.can_delete === true,
+        retiredReason: r.retired_reason || '',
       });
     }
     // Backend `paginate` javobi: {count, page, page_size, results} — `next` yo'q,
@@ -279,11 +297,24 @@ export async function listPreparedForTopicSynced(
   )
     .map((k) => k.trim().toLowerCase())
     .filter((k) => k.includes('::'));
-  if (!wantedKeys.length) return [];
+  const syllabusId =
+    typeof topic === 'object' && topic && 'syllabusId' in topic ? topic.syllabusId : undefined;
+  const topicCode =
+    typeof topic === 'object' && topic?.id
+      ? topic.id.trim().toLowerCase().replace(/\s+/g, '')
+      : '';
+  const variantLabel =
+    typeof topic === 'object' && topic && 'variantLabel' in topic ? topic.variantLabel || '' : '';
+  if (!wantedKeys.length && !(syllabusId && topicCode)) return [];
   try {
-    const rows = await fetchMineRows(kind, wantedKeys, options);
-    const wanted = new Set(wantedKeys);
-    return rows.filter((r) => wanted.has((r.topicNorm || '').trim().toLowerCase()));
+    const rows = await fetchMineRows(kind, wantedKeys, {
+      ...options,
+      syllabusId,
+      topicCode,
+      variantLabel,
+    });
+    if (!wantedKeys.length) return rows;
+    return rows.filter((r) => topicNormsOverlap(r.topicNorm || '', wantedKeys));
   } catch {
     return [];
   }
@@ -336,26 +367,43 @@ export async function loadLatestPreparedContent<T>(
   )
     .map((k) => k.toLowerCase())
     .filter((k) => k.includes('::'));
-  if (!lookupKeys.length) return null;
+  const syllabusId =
+    typeof topic === 'object' && topic && 'syllabusId' in topic ? topic.syllabusId : undefined;
+  const topicCode =
+    typeof topic === 'object' && topic?.id
+      ? topic.id.trim().toLowerCase().replace(/\s+/g, '')
+      : '';
+  if (!lookupKeys.length && !(syllabusId && topicCode)) return null;
 
   try {
     const token = await getBackendAccessToken();
     if (!token) return null;
-    for (const wantedTopic of lookupKeys) {
-      const data = await httpJson<{
-        id?: number;
-        payload?: unknown;
-        created_at?: string;
-      } & CloudRow>(
-        `${apiBaseUrl()}/v1/prepared-content/?kind=${encodeURIComponent(kind)}&topic_norm=${encodeURIComponent(wantedTopic)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      // FastAPI LatestOut: { payload } | Django full row — ikkalasi ham
-      if (data.payload == null) continue;
-      return data.payload as T;
-    }
-    return null;
+    const params = new URLSearchParams({ kind });
+    if (lookupKeys[0]) params.set('topic_norm', lookupKeys[0]);
+    if (syllabusId) params.set('syllabus_id', String(syllabusId));
+    if (topicCode) params.set('topic_code', topicCode);
+    const data = await httpJson<{
+      id?: number;
+      payload?: unknown;
+      created_at?: string;
+    } & CloudRow>(
+      `${apiBaseUrl()}/v1/prepared-content/?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (data.payload == null) return null;
+    return data.payload as T;
   } catch {
     return null;
   }
+}
+
+/** Translate just the requested language and keep the complete result on the server. */
+export async function translatePreparedContent<T>(id: string, language: 'uz' | 'ru' | 'en'): Promise<T> {
+  const numericId = parseCloudNumericId(id);
+  if (!numericId) throw new Error('Save the material before translating.');
+  const token = await requireAuthToken();
+  const result = await httpJson<{ payload: T }>(`${apiBaseUrl()}/v1/prepared-content/${numericId}/translate/${language}/`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 300_000,
+  });
+  return result.payload;
 }

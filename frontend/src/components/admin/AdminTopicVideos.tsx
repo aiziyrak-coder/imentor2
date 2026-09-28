@@ -3,7 +3,8 @@ import { Loader2, Plus, RefreshCw, Search, Trash2, Youtube } from 'lucide-react'
 import { backendErrorMessage } from '../../utils/apiError';
 import { fetchAdminCourseSyllabuses, type CourseSyllabusRow } from '../../utils/syllabusApi';
 import { resolveSyllabusVariants } from '../../utils/syllabusVariant';
-import { formatTopicLessonLabel } from '../../utils/topicLessonLabel';
+import { buildTopicCoverage, subjectDot, topicHasMaterial } from '../../utils/topicCoverage';
+import { formatTopicDisplayLabel } from '../../utils/topicLessonLabel';
 import SearchableSelect from './SearchableSelect';
 import {
   createAdminTopicVideo,
@@ -124,6 +125,36 @@ export default function AdminTopicVideos() {
   useEffect(() => {
     setTopicCode('');
   }, [variantLabel]);
+
+  /** Qaysi mavzuga video yuklangani — bir marta indekslanadi. */
+  const coverage = useMemo(() => buildTopicCoverage(videos), [videos]);
+
+  /** Fan ro'yxati: bitta chiroqcha (bo'sh / qisman / to'liq) va yonida hisob. */
+  const fanOptions = useMemo(
+    () =>
+      fans.map((f) => {
+        const tps = resolveSyllabusVariants(f)[0]?.topics ?? [];
+        const info = subjectDot(coverage, f.id, tps);
+        return {
+          value: String(f.id),
+          label: info ? `${f.subject_name} · ${info.done}/${info.total}` : f.subject_name,
+          searchText: f.subject_name,
+          dot: info?.dot,
+        };
+      }),
+    [fans, coverage],
+  );
+
+  /** Mavzu ro'yxati: video bor bo'lsa yashil, yo'q bo'lsa qizil. */
+  const topicOptions = useMemo(
+    () =>
+      topics.map((tp) => ({
+        value: tp.id,
+        label: formatTopicDisplayLabel(tp.type, tp.id, tp.title, t),
+        dot: topicHasMaterial(coverage, fanId, tp.id) ? ('green' as const) : ('red' as const),
+      })),
+    [topics, coverage, fanId, t],
+  );
 
   const fanNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -247,24 +278,19 @@ export default function AdminTopicVideos() {
               disabled={adding}
               placeholder={t('admin.selectSubjectPlaceholder')}
               noMatchText={t('admin.noResults')}
-              options={fans.map((f) => ({ value: String(f.id), label: f.subject_name }))}
+              options={fanOptions}
             />
           </label>
           <label className="space-y-1">
             <span className="text-[12px] font-semibold text-slate-600">2 · {t('admin.topicLabel')}</span>
-            <select
+            <SearchableSelect
               value={topicCode}
-              onChange={(e) => setTopicCode(e.target.value)}
+              onChange={setTopicCode}
               disabled={adding || !fanId || topics.length === 0}
-              className="w-full h-11 px-3 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50"
-            >
-              <option value="">{t('admin.selectTopicPlaceholder')}</option>
-              {topics.map((tp) => (
-                <option key={`${tp.type}-${tp.id}`} value={tp.id}>
-                  {formatTopicLessonLabel(tp.type, tp.id, t)} · {tp.title}
-                </option>
-              ))}
-            </select>
+              placeholder={t('admin.selectTopicPlaceholder')}
+              noMatchText={t('admin.noResults')}
+              options={topicOptions}
+            />
           </label>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">

@@ -28,12 +28,22 @@ export function setHttpTokenRefresher(refresher: TokenRefresher | null): void {
   tokenRefresher = refresher;
 }
 
-async function fetchOnce(url: string, options: RequestOptions): Promise<Response> {
+type Fetched = { res: Response; text: string };
+
+/**
+ * So'rov VA javob matni bitta vaqt chegarasi ostida o'qiladi.
+ *
+ * Ilgari chegara faqat `fetch` ga qo'yilar, `res.text()` esa chegarasiz edi:
+ * sarlavhalar kelgandan keyin aloqa uzilsa (institut Wi-Fi), so'rov abadiy
+ * osilib qolardi. Natijada "Katalogdan tanlash" oynasi "Fanlar yuklanmoqda…"
+ * da qotib qolardi — server esa so'rovni bajarilgan deb ko'rsatardi (2026-09-23).
+ */
+async function fetchOnce(url: string, options: RequestOptions): Promise<Fetched> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
     const hasBody = options.body !== undefined;
-    return await fetch(url, {
+    const res = await fetch(url, {
       method: options.method ?? 'GET',
       headers: {
         // DELETE/GET da bo'sh body bilan Content-Type yubormaslik — ba'zi proxy/serverlarda 4xx beradi.
@@ -43,6 +53,15 @@ async function fetchOnce(url: string, options: RequestOptions): Promise<Response
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
+    return { res, text: await res.text() };
+  } catch (err) {
+    // O'z taymerimiz uzgan so'rov: ilgari foydalanuvchiga va xatolar jurnaliga
+    // "signal is aborted without reason" bo'lib borardi (2026-09-25). Endi
+    // sababi aniq yoziladi; status 0 — tarmoq/vaqt xatosi (408 emas, server javob bermadi).
+    if (controller.signal.aborted && (err as { name?: string })?.name === 'AbortError') {
+      throw new HttpError("So'rov vaqti tugadi — internet sekin yoki server band. Qayta urinib ko'ring.", 0, null);
+    }
+    throw err;
   } finally {
     window.clearTimeout(timeout);
   }
@@ -52,12 +71,12 @@ export async function httpJson<T>(url: string, options: RequestOptions = {}): Pr
   const hadAuth = Boolean(options.headers?.Authorization);
   const allowRetry = options.retryOnUnauthorized !== false && hadAuth && Boolean(tokenRefresher);
 
-  let res = await fetchOnce(url, options);
+  let fetched = await fetchOnce(url, options);
 
-  if (res.status === 401 && allowRetry && tokenRefresher) {
+  if (fetched.res.status === 401 && allowRetry && tokenRefresher) {
     const nextToken = await tokenRefresher();
     if (nextToken) {
-      res = await fetchOnce(url, {
+      fetched = await fetchOnce(url, {
         ...options,
         headers: {
           ...(options.headers || {}),
@@ -68,8 +87,8 @@ export async function httpJson<T>(url: string, options: RequestOptions = {}): Pr
     }
   }
 
+  const { res, text } = fetched;
   let data: unknown = null;
-  const text = await res.text();
   if (text) {
     try {
       data = JSON.parse(text);

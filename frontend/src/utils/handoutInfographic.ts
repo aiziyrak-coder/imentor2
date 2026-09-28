@@ -1,3 +1,4 @@
+import type { SubjectDomain } from './subjectDomain';
 import type { AppLanguage } from '../i18n/language';
 import { parseAiJson } from './parseAiJson';
 import { OPENAI_CHAT, OPENAI_FAST, openaiJson, type BookContext } from '../services/openaiClient';
@@ -58,6 +59,40 @@ const FALLBACK_HEADING: Record<HandoutSectionId, HandoutI18n> = {
     en: 'Prevention and rehabilitation',
   },
 };
+
+/**
+ * Bo'lim nomlari FANGA qarab (2026-09-26). Ilgari har qanday poster 8 ta tibbiy
+ * bo'lim bilan chiqardi — "Axborot texnologiyalari" posterida ham "Patogenez"
+ * va "Davolash usullari". Slot kalitlari (`etiology`, `treatment`…) faqat joy:
+ * ko'rinadigan nom va AI'ga beriladigan reja domenga bog'liq.
+ */
+const BIOMEDICAL_HEADING: Record<HandoutSectionId, HandoutI18n> = {
+  definition: { uz: "Ta'rif va asosiy tushunchalar", ru: 'Определение и ключевые понятия', en: 'Definition and key concepts' },
+  etiology: { uz: 'Tuzilishi va tarkibi', ru: 'Строение и состав', en: 'Structure and composition' },
+  pathogenesis: { uz: 'Funksiya va mexanizm', ru: 'Функция и механизм', en: 'Function and mechanism' },
+  pathomorphology: { uz: 'Morfologik ko\'rinish', ru: 'Морфологическая картина', en: 'Morphology' },
+  clinical: { uz: 'Klinik ahamiyati', ru: 'Клиническое значение', en: 'Clinical relevance' },
+  differential: { uz: 'Taqqoslash va farqlash', ru: 'Сравнение и различия', en: 'Comparison and distinction' },
+  treatment: { uz: "Me'yor va ko'rsatkichlar", ru: 'Нормы и показатели', en: 'Norms and values' },
+  prevention: { uz: "O'z-o'zini tekshirish", ru: 'Самопроверка', en: 'Self-check' },
+};
+
+const ACADEMIC_HEADING: Record<HandoutSectionId, HandoutI18n> = {
+  definition: { uz: "Ta'rif va asosiy tushunchalar", ru: 'Определение и ключевые понятия', en: 'Definition and key concepts' },
+  etiology: { uz: 'Asoslari va kelib chiqishi', ru: 'Основы и происхождение', en: 'Foundations and origin' },
+  pathogenesis: { uz: 'Ishlash tamoyili', ru: 'Принцип работы', en: 'How it works' },
+  pathomorphology: { uz: 'Tuzilishi va tarkibiy qismlari', ru: 'Структура и составные части', en: 'Structure and components' },
+  clinical: { uz: "Amaliy qo'llanilishi", ru: 'Практическое применение', en: 'Practical application' },
+  differential: { uz: 'Taqqoslash', ru: 'Сравнение', en: 'Comparison' },
+  treatment: { uz: 'Tipik xatolar va ularning oldini olish', ru: 'Типичные ошибки и их предупреждение', en: 'Common mistakes and how to avoid them' },
+  prevention: { uz: 'Nazorat savollari', ru: 'Контрольные вопросы', en: 'Review questions' },
+};
+
+export function handoutHeadings(domain: SubjectDomain = 'clinical'): Record<HandoutSectionId, HandoutI18n> {
+  if (domain === 'academic') return ACADEMIC_HEADING;
+  if (domain === 'biomedical') return BIOMEDICAL_HEADING;
+  return FALLBACK_HEADING;
+}
 
 const SECTION_INDEX: Record<string, HandoutSectionId> = {
   definition: 'definition',
@@ -133,10 +168,18 @@ export function pickHandoutText(t: HandoutI18n, lang: AppLanguage): string {
   return (t[lang] || t.uz || t.ru || t.en || '').trim();
 }
 
-export function normalizeHandoutPack(raw: unknown, topicTitle = ''): HandoutInfographicPack {
+export function normalizeHandoutPack(
+  raw: unknown,
+  topicTitle = '',
+  domain: SubjectDomain = 'clinical',
+): HandoutInfographicPack {
   const root = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const topicScene = inferTopicScene(topicTitle || asI18n(root.title).uz);
-  const heroScene = asHandoutScene(root.heroScene ?? root.hero_scene, topicScene);
+  const headings = handoutHeadings(domain);
+  // Tibbiyotdan tashqari fanda a'zo rasmi yo'q: "Qonunchilik" ham "qon" deb
+  // qon rasmini olardi. Hamma bo'lim neytral sahnada.
+  const neutral = domain === 'academic';
+  const topicScene = neutral ? 'default' : inferTopicScene(topicTitle || asI18n(root.title).uz);
+  const heroScene = neutral ? 'default' : asHandoutScene(root.heroScene ?? root.hero_scene, topicScene);
   const sectionsRaw = Array.isArray(root.sections) ? root.sections : [];
   const byId = new Map<HandoutSectionId, HandoutSection>();
 
@@ -159,11 +202,11 @@ export function normalizeHandoutPack(raw: unknown, topicTitle = ''): HandoutInfo
     byId.set(id, {
       id,
       n: HANDOUT_SECTION_IDS.indexOf(id) + 1,
-      heading: heading.uz.length > 1 ? heading : FALLBACK_HEADING[id],
+      heading: heading.uz.length > 1 ? heading : headings[id],
       lead: clipI18n(asI18n(s.lead ?? s.body ?? s.summary), 420),
       points: asI18nList(s.points ?? s.bullets, id === 'definition' ? 4 : 6, 200),
       cards,
-      scene: asHandoutScene(s.scene, sceneForSection(id, topicScene)),
+      scene: neutral ? 'default' : asHandoutScene(s.scene, sceneForSection(id, topicScene)),
       caption: clipI18n(asI18n(s.caption), 90),
     });
   });
@@ -174,11 +217,11 @@ export function normalizeHandoutPack(raw: unknown, topicTitle = ''): HandoutInfo
     return {
       id,
       n: index + 1,
-      heading: FALLBACK_HEADING[id],
+      heading: headings[id],
       lead: { uz: '', ru: '', en: '' },
       points: [],
       cards: [],
-      scene: sceneForSection(id, topicScene),
+      scene: neutral ? 'default' : sceneForSection(id, topicScene),
       caption: { uz: '', ru: '', en: '' },
     };
   });
@@ -197,8 +240,13 @@ function stubI18n(uz: string, ru: string, en: string): HandoutI18n {
 }
 
 /** AI qisman javob bersa ham 8 bo'lim to'ladi — poster bo'sh qolmasin. */
-export function ensureHandoutPackFilled(pack: HandoutInfographicPack, topicTitle: string): HandoutInfographicPack {
+export function ensureHandoutPackFilled(
+  pack: HandoutInfographicPack,
+  topicTitle: string,
+  domain: SubjectDomain = 'clinical',
+): HandoutInfographicPack {
   const topic = (topicTitle || pack.title.uz || "Mavzu").replace(/\s+/g, ' ').trim();
+  if (domain !== 'clinical') return fillNeutral(pack, topic, domain);
   const stubs: Record<HandoutSectionId, { lead: HandoutI18n; points: HandoutI18n[] }> = {
     definition: {
       lead: stubI18n(
@@ -315,6 +363,56 @@ export function ensureHandoutPackFilled(pack: HandoutInfographicPack, topicTitle
   };
 }
 
+/**
+ * Klinik bo'lmagan fan uchun zaxira matn: bo'lim nomining o'zidan, bemor,
+ * davolash va "qizil bayroq"siz. Ilgari bu yerda ham klinik stub turardi.
+ */
+function fillNeutral(pack: HandoutInfographicPack, topic: string, domain: SubjectDomain): HandoutInfographicPack {
+  const headings = handoutHeadings(domain);
+  const sections = pack.sections.map((s) => {
+    const hasBody = s.lead.uz.trim().length > 12 || s.points.length >= 1 || s.cards.length > 0;
+    if (hasBody) return s;
+    const h = s.heading.uz.trim().length > 1 ? s.heading : headings[s.id];
+    return {
+      ...s,
+      heading: h,
+      lead: stubI18n(`${topic}: ${h.uz.toLowerCase()}.`, `${topic}: ${h.ru.toLowerCase()}.`, `${topic}: ${h.en.toLowerCase()}.`),
+      points: [
+        stubI18n("Ma'ruza matnidagi asosiy fikrlar.", 'Ключевые мысли лекции.', 'Key points from the lecture.'),
+        stubI18n("Mavzuga oid misol.", 'Пример по теме.', 'An example from the topic.'),
+      ],
+    };
+  });
+  return {
+    ...pack,
+    kicker: pack.kicker.uz.trim() ? pack.kicker : stubI18n("O'quv posteri", 'Учебный постер', 'Teaching poster'),
+    title: pack.title.uz.trim() ? pack.title : stubI18n(topic, topic, topic),
+    heroCaption: pack.heroCaption.uz.trim()
+      ? pack.heroCaption
+      : stubI18n("Mavzu bo'yicha o'quv sxemasi", 'Учебная схема по теме', 'Teaching diagram for the topic'),
+    sections,
+  };
+}
+
+/** AI'ga beriladigan bo'lim rejasi — fanga qarab. */
+function sectionPlan(domain: SubjectDomain): string {
+  const h = handoutHeadings(domain);
+  const plan = HANDOUT_SECTION_IDS.map((id) => `${id} = "${h[id].uz}"`).join('; ');
+  if (domain === 'clinical') return `8 sections (id = mazmuni): ${plan}.`;
+  if (domain === 'biomedical') {
+    return (
+      `8 sections (id faqat joy kaliti, heading — quyidagicha): ${plan}. ` +
+      "Agar mavzu kasallik/patologiya haqida bo'lsa — etiologiya, patogenez va morfologiya bo'limlari " +
+      "o'rinli, heading'ni shunga moslang. Individual bemor, davolash rejimi va dori dozasi YOZILMASIN."
+    );
+  }
+  return (
+    `8 sections (id faqat joy kaliti, heading — quyidagicha): ${plan}. ` +
+    "Bu TIBBIYOTDAN TASHQARI fan: kasallik, bemor, davolash, etiologiya, patogenez YOZILMASIN. " +
+    'Barcha scene = "default".'
+  );
+}
+
 const SCENE_LIST = [
   'child',
   'urinary',
@@ -355,6 +453,7 @@ async function requestHandoutJson(params: {
   topicType: string;
   subjectName: string;
   subjectCode?: string;
+  domain?: SubjectDomain;
   model: string;
   maxTokens: number;
 }): Promise<unknown> {
@@ -368,6 +467,7 @@ async function requestHandoutJson(params: {
     maxTokens: params.maxTokens,
     bookContext,
     responseFormat: { type: 'json_object' },
+    purpose: 'handout_infographic',
     parse: (text) => parseAiJson<unknown>(text),
     system:
       "Siz FJSTI o'quv POSTER muallifisiz. Javob FAQAT qisqa JSON. " +
@@ -376,17 +476,18 @@ async function requestHandoutJson(params: {
       "Har lead: 1 jumla (max 16 so'z). Har bo'limda 3 bullet (max 12 so'z). " +
       "Kartochka FAQAT definition da, ko'pi bilan 2 ta. " +
       "Mavzuga mos yozing (klinik bo'lmasa — bemor vignette YO'Q). " +
+      'Bo\'lim nomlari FANGA mos bo\'lsin — foydalanuvchi xabaridagi rejaga amal qiling. ' +
       "scene faqat ruxsat etilgan kalit.",
     user:
       `Fan: "${params.subjectName}". Kod: ${params.topicId} (${kind}).\n` +
       `Mavzu: "${params.topicTitle}".\n` +
-      '8 sections, id: definition, etiology, pathogenesis, pathomorphology, clinical, differential, treatment, prevention.\n' +
+      `${sectionPlan(params.domain ?? 'clinical')}\n` +
       `scene: ${SCENE_LIST}\n` +
       'JSON: {"kicker":{"uz":"O\'quv posteri","ru":"Учебный постер","en":"Teaching poster"},' +
-      '"title":{"uz":"...","ru":"...","en":"..."},"heroScene":"pregnancy","heroCaption":{"uz":"...","ru":"...","en":"..."},' +
+      '"title":{"uz":"...","ru":"...","en":"..."},"heroScene":"default","heroCaption":{"uz":"...","ru":"...","en":"..."},' +
       '"sections":[{"id":"definition","heading":{"uz":"...","ru":"...","en":"..."},' +
       '"lead":{"uz":"...","ru":"...","en":"..."},"points":[{"uz":"...","ru":"...","en":"..."}],' +
-      '"cards":[],"scene":"pregnancy","caption":{"uz":"...","ru":"...","en":"..."}}]}',
+      '"cards":[],"scene":"default","caption":{"uz":"...","ru":"...","en":"..."}}]}',
   });
 }
 
@@ -396,22 +497,28 @@ export async function generateHandoutInfographicPack(params: {
   topicType: string;
   subjectName: string;
   subjectCode?: string;
+  domain?: SubjectDomain;
 }): Promise<HandoutInfographicPack> {
+  const domain = params.domain ?? 'clinical';
   const fallback = () =>
-    ensureHandoutPackFilled(normalizeHandoutPack({}, params.topicTitle), params.topicTitle);
+    ensureHandoutPackFilled(normalizeHandoutPack({}, params.topicTitle, domain), params.topicTitle, domain);
   const attempts: Array<{ model: string; maxTokens: number }> = [
     { model: OPENAI_CHAT, maxTokens: 4200 },
     { model: OPENAI_FAST, maxTokens: 3200 },
   ];
   for (const attempt of attempts) {
     try {
+      // Taymer so'rovni BEKOR QILMAYDI. 40 s da zaxira so'rov yuborilardi,
+      // birinchisi esa serverda davom etib, uning uchun ham to'lanardi —
+      // bitta poster ikki marta. gpt-4o bu hajmni odatda 40–80 s da beradi,
+      // shuning uchun chegara undan yuqori.
       const raw = await Promise.race([
         requestHandoutJson({ ...params, ...attempt }),
         new Promise<never>((_, reject) => {
-          window.setTimeout(() => reject(new Error('handout-ai-timeout')), 40000);
+          window.setTimeout(() => reject(new Error('handout-ai-timeout')), 90000);
         }),
       ]);
-      return ensureHandoutPackFilled(normalizeHandoutPack(raw, params.topicTitle), params.topicTitle);
+      return ensureHandoutPackFilled(normalizeHandoutPack(raw, params.topicTitle, domain), params.topicTitle, domain);
     } catch {
       /* keyingi urinish yoki lokal poster */
     }

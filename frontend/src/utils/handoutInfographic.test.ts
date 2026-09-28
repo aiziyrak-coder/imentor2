@@ -44,3 +44,27 @@ describe('normalizeHandoutPack', () => {
     expect(sceneForSection('etiology', 'urinary')).toBe('infection');
   });
 });
+
+describe('poster bo‘limlari fanga mos (2026-09-26)', () => {
+  it('tibbiyotdan tashqari fanda "Patogenez" va "Davolash" yo‘q, rasm neytral', () => {
+    const pack = ensureHandoutPackFilled(normalizeHandoutPack({}, 'Qonunchilik asoslari', 'academic'), 'Qonunchilik asoslari', 'academic');
+    const headings = pack.sections.map((s) => s.heading.uz).join(' | ');
+    expect(headings).not.toMatch(/Patogenez|Davolash|Etiologiya|Klinik/);
+    expect(pack.sections.every((s) => s.scene === 'default')).toBe(true);
+    expect(pack.heroScene).toBe('default');
+    const text = JSON.stringify(pack);
+    expect(text).not.toMatch(/Bemor|bemor|qizil bayroq|Qizil bayroq/);
+  });
+
+  it('bemorsiz tibbiy fanda klinik ahamiyati bor, davolash rejimi yo‘q', () => {
+    const pack = ensureHandoutPackFilled(normalizeHandoutPack({}, 'Hujayra membranasi', 'biomedical'), 'Hujayra membranasi', 'biomedical');
+    const headings = pack.sections.map((s) => s.heading.uz).join(' | ');
+    expect(headings).toMatch(/Klinik ahamiyati/);
+    expect(headings).not.toMatch(/Davolash usullari/);
+  });
+
+  it('klinik fanda eski 8 bo‘lim o‘zgarmadi', () => {
+    const pack = ensureHandoutPackFilled(normalizeHandoutPack({}, 'Pnevmoniya'), 'Pnevmoniya');
+    expect(pack.sections.map((s) => s.heading.uz)).toContain('Davolash usullari');
+  });
+});

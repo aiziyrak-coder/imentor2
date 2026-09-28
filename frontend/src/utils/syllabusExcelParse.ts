@@ -34,7 +34,7 @@ function norm(value: string): string {
     .trim();
 }
 
-function classifyActivity(
+export function classifyActivity(
   value: string,
 ): 'lecture' | 'practical' | 'clinical' | 'lab' | 'independent' | 'unknown' {
   const s = norm(value);

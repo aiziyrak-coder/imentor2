@@ -1,34 +1,36 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
   BriefcaseMedical,
-  ChevronDown,
-  ChevronUp,
+  Check,
   ClipboardList,
+  FileSpreadsheet,
   FileText,
+  HeartPulse,
+  Languages,
+  Menu,
+  Play,
   Presentation,
-  Youtube,
+  QrCode,
   Sparkles,
-  Users,
+  Video,
   X,
-  Zap,
 } from 'lucide-react';
-import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
+import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/react';
 import type { AppLanguage } from '../../i18n/language';
 import { languageLabel } from '../../i18n/language';
-import { translate } from '../../i18n/translations';
+import { translate, type UiTextKey } from '../../i18n/translations';
 import LoginPage from '../auth/LoginPage';
 import RegisterPage from '../auth/RegisterPage';
 import DesktopHodimQrLogin from '../auth/DesktopHodimQrLogin';
-import AdminPasswordLogin from '../auth/AdminPasswordLogin';
 import MobileMinimalLogin from '../auth/MobileMinimalLogin';
 import { isDesktopBrowser } from '../../utils/deviceDetection';
-import PublicContentCatalog from './PublicContentCatalog';
+import { fetchPublicCatalogTotals, type CatalogStatsTotals } from '../../utils/contentCatalogApi';
 
 type AuthScreen = 'login' | 'register';
 
-type DesktopAuthView = 'talaba' | 'qr' | 'admin';
+type DesktopAuthView = 'face' | 'qr' | 'password';
 
 type Props = {
   language: AppLanguage;
@@ -38,77 +40,290 @@ type Props = {
   setDesktopAuthView: (v: DesktopAuthView) => void;
 };
 
-function t(lang: AppLanguage, key: Parameters<typeof translate>[1]) {
-  return translate(lang, key);
-}
+/** Barcha bo'limlarning umumiy kengligi va chetki bo'shlig'i. */
+const SHELL = 'mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8';
+
+const LANGS: AppLanguage[] = ['uz', 'ru', 'en'];
 
 /**
- * Landing bo'limlarining umumiy o'rami.
- *
- * Ilgari `max-w-5xl` (1024px) edi — katta monitorda ikki yonda katta bo'sh
- * joy qolardi. Endi kenglik cheklanmaydi, faqat ekran o'lchamiga qarab
- * chetki bo'shliq o'sadi.
+ * Logodagi belgi (kaduser + lampochka). Rasm keng (1024x558, ostida yozuv bor),
+ * kvadratga `object-cover` qilinsa belgi mayda chiqardi — shu sabab faqat
+ * belgining o'zi kesib ko'rsatiladi.
  */
-const SHELL = 'mx-auto w-full px-4 sm:px-8 lg:px-14 2xl:px-24';
+function BrandMark({ size = 36, className = '' }: { size?: number; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block shrink-0 rounded-xl bg-white bg-no-repeat ring-1 ring-slate-200 ${className}`}
+      style={{
+        width: size,
+        height: size,
+        backgroundImage: 'url(/imentor-logo.png)',
+        backgroundSize: '440% auto',
+        backgroundPosition: '50% 24%',
+      }}
+    />
+  );
+}
 
-const ICON_COLORS = {
-  blue: { bg: 'bg-blue-100', text: 'text-blue-600', ring: 'ring-blue-200' },
-  emerald: { bg: 'bg-emerald-100', text: 'text-emerald-600', ring: 'ring-emerald-200' },
-  violet: { bg: 'bg-violet-100', text: 'text-violet-600', ring: 'ring-violet-200' },
-  orange: { bg: 'bg-orange-100', text: 'text-orange-600', ring: 'ring-orange-200' },
-  pink: { bg: 'bg-pink-100', text: 'text-pink-600', ring: 'ring-pink-200' },
-  cyan: { bg: 'bg-cyan-100', text: 'text-cyan-600', ring: 'ring-cyan-200' },
-  amber: { bg: 'bg-amber-100', text: 'text-amber-600', ring: 'ring-amber-200' },
-  indigo: { bg: 'bg-indigo-100', text: 'text-indigo-600', ring: 'ring-indigo-200' },
-  rose: { bg: 'bg-rose-100', text: 'text-rose-600', ring: 'ring-rose-200' },
-} as const;
-
-function FeatureCard({
-  icon: Icon,
-  title,
-  desc,
-  color,
-  delay,
+/** Pastdan chiqib keladigan bo'lim. Harakatni kamaytirish yoqilgan bo'lsa — joyida. */
+function Reveal({
+  children,
+  className,
+  delay = 0,
 }: {
-  icon: React.ElementType;
-  title: string;
-  desc: string;
-  color: keyof typeof ICON_COLORS;
-  delay: number;
+  children: React.ReactNode;
+  className?: string;
+  delay?: number;
 }) {
-  const c = ICON_COLORS[color];
+  const reduce = useReducedMotion();
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={reduce ? false : { opacity: 0, y: 18 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-40px' }}
-      transition={{ duration: 0.5, delay }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="group rounded-2xl bg-white border border-slate-200/80 p-6 shadow-sm hover:shadow-md hover:border-slate-300/80 transition-shadow"
+      viewport={{ once: true, margin: '-60px' }}
+      transition={{ duration: 0.55, delay, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
     >
-      <div className={`w-11 h-11 rounded-xl ${c.bg} ${c.text} ring-1 ${c.ring} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
-        <Icon size={22} strokeWidth={2} />
-      </div>
-      <h3 className="text-[15px] font-semibold text-slate-900 mb-1.5">{title}</h3>
-      <p className="text-[13px] text-slate-500 leading-relaxed">{desc}</p>
+      {children}
     </motion.div>
   );
 }
 
-function FloatingChip({ icon: Icon, label, color, style }: { icon: React.ElementType; label: string; color: keyof typeof ICON_COLORS; style?: React.CSSProperties }) {
-  const c = ICON_COLORS[color];
+function SectionHeading({
+  eyebrow,
+  title,
+  subtitle,
+  align = 'center',
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  align?: 'center' | 'left';
+}) {
+  const centered = align === 'center';
   return (
-    <motion.div
-      animate={{ y: [0, -8, 0] }}
-      transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-      style={style}
-      className={`inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur border border-slate-200/80 shadow-md px-3.5 py-2 text-[12px] font-medium text-slate-700`}
-    >
-      <span className={`w-6 h-6 rounded-lg ${c.bg} ${c.text} flex items-center justify-center`}>
-        <Icon size={13} />
-      </span>
-      {label}
-    </motion.div>
+    <Reveal className={centered ? 'mx-auto max-w-2xl text-center' : 'max-w-2xl'}>
+      <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-teal-600">{eyebrow}</p>
+      <h2 className="mt-3 text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-slate-900 sm:text-[2.25rem]">
+        {title}
+      </h2>
+      {subtitle ? <p className="mt-4 text-[15px] leading-relaxed text-slate-600 sm:text-base">{subtitle}</p> : null}
+    </Reveal>
+  );
+}
+
+/** Raqam ko'rinishga kirganda 0 dan sanab chiqadi. */
+function CountUp({ value, locale }: { value: number; locale: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, margin: '-40px' });
+  const reduce = useReducedMotion();
+  const [shown, setShown] = useState(reduce ? value : 0);
+
+  useEffect(() => {
+    if (!inView) return;
+    if (reduce) {
+      setShown(value);
+      return;
+    }
+    let frame = 0;
+    const started = performance.now();
+    const duration = 1100;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - started) / duration);
+      setShown(Math.round(value * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [inView, reduce, value]);
+
+  return (
+    <span ref={ref} className="tabular-nums">
+      {new Intl.NumberFormat(locale).format(shown)}
+    </span>
+  );
+}
+
+/** Dekorativ QR — haqiqiy kod emas, faqat ko'rinish uchun. */
+function MiniQr({ size = 56 }: { size?: number }) {
+  const n = 11;
+  const cells: Array<[number, number]> = [];
+  for (let y = 0; y < n; y += 1) {
+    for (let x = 0; x < n; x += 1) {
+      const inFinder = (x < 3 && y < 3) || (x > n - 4 && y < 3) || (x < 3 && y > n - 4);
+      if (inFinder) continue;
+      if (((x * 7 + y * 13 + x * y) % 5) < 2) cells.push([x, y]);
+    }
+  }
+  const finder = (fx: number, fy: number) => (
+    <g key={`${fx}-${fy}`}>
+      <rect x={fx} y={fy} width={3} height={3} rx={0.5} fill="#0b3a6e" />
+      <rect x={fx + 0.7} y={fy + 0.7} width={1.6} height={1.6} rx={0.3} fill="#fff" />
+      <rect x={fx + 1.05} y={fy + 1.05} width={0.9} height={0.9} fill="#0b3a6e" />
+    </g>
+  );
+  return (
+    <svg viewBox={`0 0 ${n} ${n}`} width={size} height={size} aria-hidden="true">
+      {cells.map(([x, y]) => (
+        <rect key={`${x}-${y}`} x={x + 0.1} y={y + 0.1} width={0.8} height={0.8} rx={0.15} fill="#0b3a6e" />
+      ))}
+      {finder(0, 0)}
+      {finder(n - 3, 0)}
+      {finder(0, n - 3)}
+    </svg>
+  );
+}
+
+function HeroMockup({ language }: { language: AppLanguage }) {
+  const tr = (key: UiTextKey) => translate(language, key);
+  const tabs: Array<{ icon: React.ElementType; label: string; active?: boolean }> = [
+    { icon: FileText, label: tr('landing.mockLecture'), active: true },
+    { icon: BriefcaseMedical, label: tr('landing.mockCases') },
+    { icon: ClipboardList, label: tr('landing.mockTests') },
+    { icon: Presentation, label: tr('landing.mockSlides') },
+    { icon: Video, label: tr('landing.mockVideo') },
+  ];
+  const lines = [
+    ['100%', '0s'],
+    ['92%', '0.35s'],
+    ['97%', '0.7s'],
+    ['64%', '1.05s'],
+  ];
+  const lines2 = [
+    ['95%', '1.6s'],
+    ['88%', '1.95s'],
+    ['72%', '2.3s'],
+  ];
+
+  return (
+    <div className="relative mx-auto w-full max-w-[560px] lg:max-w-none" aria-hidden="true">
+      <div className="lp-window overflow-hidden rounded-2xl">
+        {/* Oyna sarlavhasi */}
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+          <div className="flex gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+          </div>
+          <div className="mx-auto flex items-center gap-1.5 rounded-md bg-white px-3 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200">
+            <BrandMark size={16} className="!rounded-[4px] !ring-0" />
+            imentor.uz
+          </div>
+          <div className="w-10" />
+        </div>
+
+        <div className="flex">
+          {/* Chap panel: bo'limlar */}
+          <div className="hidden w-[132px] shrink-0 border-r border-slate-100 bg-slate-50/40 p-2.5 sm:block">
+            {tabs.map(({ icon: Icon, label, active }) => (
+              <div
+                key={label}
+                className={`mb-1 flex items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] font-medium ${
+                  active ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500'
+                }`}
+              >
+                <Icon size={14} className={active ? 'text-teal-600' : 'text-slate-400'} />
+                {label}
+              </div>
+            ))}
+          </div>
+
+          {/* Asosiy qism */}
+          <div className="min-w-0 flex-1 p-4 sm:p-5">
+            <p className="text-[11px] font-medium text-slate-400">{tr('landing.mockSubject')}</p>
+            <div className="mt-1 flex items-center justify-between gap-3">
+              <p className="truncate text-[17px] font-semibold tracking-tight text-slate-900">{tr('landing.mockTopic')}</p>
+              <div className="flex shrink-0 gap-1">
+                {(['UZ', 'RU', 'EN'] as const).map((code, i) => (
+                  <span
+                    key={code}
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                      i === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {code}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2 text-[11.5px] font-medium text-teal-700">
+              <Sparkles size={13} />
+              {tr('landing.mockWriting')}
+              <span className="lp-caret ml-[-2px] inline-block h-3.5 w-[2px] bg-teal-600" />
+            </div>
+
+            <p className="mt-3 text-[12.5px] font-semibold text-slate-800">{tr('landing.mockSection1')}</p>
+            <div className="mt-2 space-y-2">
+              {lines.map(([w, d]) => (
+                <div key={d} className="lp-line" style={{ width: w, animationDelay: d }} />
+              ))}
+            </div>
+            <p className="mt-4 text-[12.5px] font-semibold text-slate-800">{tr('landing.mockSection2')}</p>
+            <div className="mt-2 space-y-2">
+              {lines2.map(([w, d]) => (
+                <div key={d} className="lp-line" style={{ width: w, animationDelay: d }} />
+              ))}
+            </div>
+
+            <div className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-800 ring-1 ring-sky-100">
+              <BookOpen size={12} />
+              {tr('landing.mockSource')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Suzuvchi kartalar */}
+      <div className="lp-float absolute -bottom-6 -left-3 hidden rounded-xl bg-white px-3.5 py-2.5 shadow-xl ring-1 ring-slate-900/5 sm:flex sm:items-center sm:gap-2.5 lg:-left-8">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+          <Check size={17} strokeWidth={2.5} />
+        </span>
+        <span className="text-[12.5px] font-semibold text-slate-800">{tr('landing.mockTestReady')}</span>
+      </div>
+      <div
+        className="lp-float absolute -right-3 -top-6 hidden items-center gap-3 rounded-xl bg-white p-2.5 pr-4 shadow-xl ring-1 ring-slate-900/5 sm:flex lg:-right-6"
+        style={{ animationDelay: '-3.5s' }}
+      >
+        <div className="rounded-lg bg-white p-1 ring-1 ring-slate-200">
+          <MiniQr size={44} />
+        </div>
+        <div>
+          <p className="text-[12.5px] font-semibold text-slate-800">{tr('landing.mockLiveQr')}</p>
+          <p className="text-[11px] text-slate-500">{tr('landing.mockLiveQrHint')}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BentoCard({
+  icon: Icon,
+  title,
+  desc,
+  className = '',
+  children,
+  delay = 0,
+}: {
+  icon: React.ElementType;
+  title: string;
+  desc: string;
+  className?: string;
+  children?: React.ReactNode;
+  delay?: number;
+}) {
+  return (
+    <Reveal delay={delay} className={`lp-card group flex flex-col overflow-hidden rounded-2xl ${className}`}>
+      <div className="p-6">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
+          <Icon size={19} />
+        </span>
+        <h3 className="mt-4 text-[17px] font-semibold tracking-tight text-slate-900">{title}</h3>
+        <p className="mt-2 text-[14px] leading-relaxed text-slate-600">{desc}</p>
+      </div>
+      {children ? <div className="mt-auto px-6 pb-6">{children}</div> : null}
+    </Reveal>
   );
 }
 
@@ -119,385 +334,631 @@ export default function PublicLandingPage({
   desktopAuthView,
   setDesktopAuthView,
 }: Props) {
+  const tr = useCallback((key: UiTextKey) => translate(language, key), [language]);
+  const reduce = useReducedMotion();
   const [authOpen, setAuthOpen] = useState(false);
   const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
-  const [catalogExpanded, setCatalogExpanded] = useState(false);
-  const { scrollY } = useScroll();
-  const headerBg = useTransform(scrollY, [0, 60], [0, 1]);
-  const headerBackground = useTransform(headerBg, (v) => `rgba(255,255,255,${v * 0.92})`);
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [totals, setTotals] = useState<CatalogStatsTotals | null>(null);
 
-  const openAuth = useCallback((screen: AuthScreen = 'login') => {
-    setAuthScreen(screen);
-    setAuthOpen(true);
-  }, []);
+  const openAuth = useCallback(
+    (screen: AuthScreen = 'login') => {
+      setAuthScreen(screen);
+      // Kompyuterda kirish har safar QR'dan boshlanadi. Yuz skaneri faqat telefonda:
+      // telefon yuzni tekshiradi va joylashuvni ham o'sha yerdan oladi (2026-09-18).
+      if (screen === 'login') setDesktopAuthView('qr');
+      setMenuOpen(false);
+      setAuthOpen(true);
+    },
+    [setDesktopAuthView],
+  );
 
   const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    setMenuOpen(false);
+    document.getElementById(id)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('library') === '1' || window.location.hash === '#public-catalog') {
-      setCatalogExpanded(true);
-      setTimeout(() => scrollTo('public-catalog'), 400);
-    }
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const features = [
-    { icon: FileText, titleKey: 'publicLanding.featureLecture' as const, descKey: 'publicLanding.featureLectureDesc' as const, color: 'blue' as const },
-    { icon: BriefcaseMedical, titleKey: 'publicLanding.featureCases' as const, descKey: 'publicLanding.featureCasesDesc' as const, color: 'emerald' as const },
-    { icon: ClipboardList, titleKey: 'publicLanding.featureTests' as const, descKey: 'publicLanding.featureTestsDesc' as const, color: 'violet' as const },
-    { icon: Presentation, titleKey: 'publicLanding.featurePresentation' as const, descKey: 'publicLanding.featurePresentationDesc' as const, color: 'orange' as const },
-    { icon: Youtube, titleKey: 'publicLanding.featureVideos' as const, descKey: 'publicLanding.featureVideosDesc' as const, color: 'rose' as const },
+  useEffect(() => {
+    let alive = true;
+    fetchPublicCatalogTotals()
+      .then((t) => {
+        if (alive && t && t.total_count > 0) setTotals(t);
+      })
+      .catch(() => {
+        // Raqamlar kelmasa — bo'lim shunchaki ko'rsatilmaydi.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAuthOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [authOpen]);
+
+  const numberLocale = language === 'en' ? 'en-US' : 'ru-RU';
+
+  const nav: Array<{ id: string; label: string }> = [
+    { id: 'features', label: tr('publicLanding.navFeatures') },
+    { id: 'how-it-works', label: tr('publicLanding.navHowItWorks') },
   ];
 
+  const stats = totals
+    ? [
+        { value: totals.total_count, label: tr('landing.statMaterials') },
+        { value: totals.questions_total, label: tr('landing.statQuestions') },
+        { value: totals.subjects_distinct, label: tr('landing.statSubjects') },
+        { value: totals.authors_distinct, label: tr('landing.statAuthors') },
+      ]
+    : null;
+
   const steps = [
-    { num: '1', titleKey: 'publicLanding.step1Title' as const, descKey: 'publicLanding.step1Desc' as const, color: 'blue' as const },
-    { num: '2', titleKey: 'publicLanding.step2Title' as const, descKey: 'publicLanding.step2Desc' as const, color: 'emerald' as const },
-    { num: '3', titleKey: 'publicLanding.step3Title' as const, descKey: 'publicLanding.step3Desc' as const, color: 'violet' as const },
+    { icon: QrCode, title: tr('landing.step1Title'), desc: tr('landing.step1Desc') },
+    { icon: BookOpen, title: tr('landing.step2Title'), desc: tr('landing.step2Desc') },
+    { icon: Sparkles, title: tr('landing.step3Title'), desc: tr('landing.step3Desc') },
   ];
 
   return (
-    <div className="min-h-[100dvh] w-full overflow-x-hidden bg-[#f8fafc] text-slate-900 selection:bg-blue-200/60">
-      {/* Soft animated background */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="landing-blob landing-blob-1" />
-        <div className="landing-blob landing-blob-2" />
-        <div className="landing-blob landing-blob-3" />
-        <div className="landing-dot-grid absolute inset-0 opacity-[0.35]" />
-      </div>
-
-      {/* Header */}
-      <motion.header
-        style={{ backgroundColor: headerBackground }}
-        className="fixed top-0 inset-x-0 z-50 border-b border-slate-200/0 backdrop-blur-xl [&:not(:first-child)]:border-slate-200/60"
+    <div className="min-h-[100dvh] w-full overflow-x-clip bg-[#f7fafc] text-slate-900 antialiased selection:bg-teal-200/60">
+      {/* ─────────────── Header ─────────────── */}
+      <header
+        className={`fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow,border-color] duration-300 ${
+          scrolled || menuOpen
+            ? 'border-b border-slate-200/70 bg-white/85 shadow-[0_1px_12px_-6px_rgba(15,23,42,0.15)] backdrop-blur-xl'
+            : 'border-b border-transparent bg-transparent'
+        }`}
       >
-        <div className={`flex items-center justify-between gap-3 py-3.5 ${SHELL}`}>
-          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5">
-            <img src="/imentor-logo.png" alt="iMentor" className="h-9 w-9 rounded-xl object-cover shadow-sm ring-1 ring-slate-200/80" />
-            <span className="font-semibold text-[16px] text-slate-900 tracking-tight">iMentor</span>
+        <div className={`${SHELL} flex h-16 items-center justify-between gap-3`}>
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })}
+            className="flex items-center gap-2.5"
+          >
+            <BrandMark />
+            <span className="text-[17px] font-semibold tracking-tight text-slate-900">iMentor</span>
+            <span className="hidden rounded-md bg-slate-900/[0.06] px-1.5 py-0.5 text-[10.5px] font-semibold text-slate-600 sm:inline">
+              FJSTI
+            </span>
           </button>
 
-          <nav className="hidden md:flex items-center gap-7 text-[13px] font-medium text-slate-500">
-            {(['features', 'how-it-works', 'public-catalog'] as const).map((id) => (
+          <nav className="hidden items-center gap-1 md:flex" aria-label={tr('shell.mainMenu')}>
+            {nav.map((item) => (
               <button
-                key={id}
+                key={item.id}
                 type="button"
-                onClick={() => scrollTo(id === 'public-catalog' ? 'public-catalog-section' : id)}
-                className="hover:text-slate-900 transition-colors"
+                onClick={() => scrollTo(item.id)}
+                className="rounded-lg px-3 py-2 text-[14px] font-medium text-slate-600 transition-colors hover:bg-slate-900/[0.04] hover:text-slate-900"
               >
-                {id === 'features' && t(language, 'publicLanding.navFeatures')}
-                {id === 'how-it-works' && t(language, 'publicLanding.navHowItWorks')}
-                {id === 'public-catalog' && t(language, 'publicLanding.navCatalog')}
+                {item.label}
               </button>
             ))}
           </nav>
 
           <div className="flex items-center gap-2">
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as AppLanguage)}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 shadow-sm"
-              aria-label={t(language, 'shell.languageAria')}
+            <div
+              role="group"
+              aria-label={tr('shell.languageAria')}
+              className="flex rounded-lg bg-slate-900/[0.05] p-0.5"
             >
-              <option value="uz">{languageLabel('uz')}</option>
-              <option value="ru">{languageLabel('ru')}</option>
-              <option value="en">{languageLabel('en')}</option>
-            </select>
+              {LANGS.map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setLanguage(code)}
+                  aria-pressed={language === code}
+                  aria-label={languageLabel(code)}
+                  className={`h-8 rounded-md px-2 text-[11.5px] font-semibold uppercase transition ${
+                    language === code ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {code}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => openAuth('login')}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-4 text-[13px] font-semibold text-white shadow-sm hover:bg-slate-800 transition-colors"
+              className="lp-primary hidden h-9 items-center rounded-lg px-4 text-[14px] font-semibold text-white sm:inline-flex"
             >
-              {t(language, 'publicLanding.login')}
+              {tr('publicLanding.login')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-expanded={menuOpen}
+              aria-label={tr('shell.mainMenu')}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-900/[0.05] md:hidden"
+            >
+              {menuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
           </div>
         </div>
-      </motion.header>
 
-      <main className="relative z-10">
-        {/* Hero */}
-        <section className={`${SHELL} pt-28 pb-16 lg:pt-36 lg:pb-24`}>
-          <div className="text-center max-w-4xl mx-auto">
+        {/* Telefon menyusi */}
+        <AnimatePresence>
+          {menuOpen && (
             <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200/80 shadow-sm px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-8"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden border-t border-slate-200/70 md:hidden"
             >
-              <Sparkles size={13} className="text-amber-500" />
-              {t(language, 'publicLanding.badge')}
-            </motion.div>
-
-            <motion.h1
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-[2.25rem] sm:text-5xl lg:text-[3.25rem] font-bold leading-[1.12] tracking-tight text-slate-900"
-            >
-              {t(language, 'publicLanding.heroTitle')}
-              <br />
-              <span className="landing-accent-text">{t(language, 'publicLanding.heroTitleAccent')}</span>
-            </motion.h1>
-
-            <motion.p
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="mt-6 text-[16px] sm:text-[17px] text-slate-500 leading-relaxed max-w-3xl mx-auto"
-            >
-              {t(language, 'publicLanding.heroSubtitle')}
-            </motion.p>
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="mt-9 flex flex-wrap items-center justify-center gap-3"
-            >
-              <button
-                type="button"
-                onClick={() => openAuth('login')}
-                className="landing-cta-primary inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-[14px] font-semibold text-white shadow-lg shadow-blue-500/20"
-              >
-                {t(language, 'publicLanding.getStarted')}
-                <ArrowRight size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollTo('public-catalog-section')}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-7 py-3.5 text-[14px] font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:shadow transition-all"
-              >
-                <BookOpen size={16} className="text-blue-500" />
-                {t(language, 'publicLanding.openCatalog')}
-              </button>
-            </motion.div>
-          </div>
-
-          {/* Floating chips — desktop only */}
-          <div className="hidden lg:block relative h-32 mt-12 max-w-5xl mx-auto">
-            <div className="absolute left-[5%] top-2">
-              <FloatingChip icon={BookOpen} label={translate(language, 'welcome.featureSyllabus')} color="blue" />
-            </div>
-            <div className="absolute right-[8%] top-0">
-              <FloatingChip icon={BriefcaseMedical} label={t(language, 'publicLanding.featureCases')} color="emerald" style={{ animationDelay: '1s' }} />
-            </div>
-            <div className="absolute left-[25%] bottom-0">
-              <FloatingChip icon={ClipboardList} label={t(language, 'publicLanding.featureTests')} color="violet" style={{ animationDelay: '2s' }} />
-            </div>
-            <div className="absolute right-[20%] bottom-2">
-              <FloatingChip icon={Zap} label={t(language, 'publicLanding.featureAiChip')} color="amber" style={{ animationDelay: '0.5s' }} />
-            </div>
-          </div>
-
-          {/* Stats row */}
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.45 }}
-            className="mt-14 grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl mx-auto"
-          >
-            {[
-              { v: '8+', l: t(language, 'publicLanding.statModules'), c: 'text-blue-600' },
-              { v: '3', l: t(language, 'publicLanding.statLanguages'), c: 'text-emerald-600' },
-              { v: 'AI', l: t(language, 'publicLanding.statAi'), c: 'text-violet-600' },
-              { v: 'FJSTI', l: t(language, 'publicLanding.statInstitute'), c: 'text-orange-600' },
-            ].map((s) => (
-              <div key={s.l} className="rounded-xl bg-white/80 backdrop-blur border border-slate-200/70 px-4 py-3 text-center shadow-sm">
-                <p className={`text-xl font-bold ${s.c}`}>{s.v}</p>
-                <p className="text-[11px] text-slate-500 font-medium mt-0.5">{s.l}</p>
-              </div>
-            ))}
-          </motion.div>
-        </section>
-
-        {/* Institute trust */}
-        <section className={`${SHELL} pb-12`}>
-          <motion.div
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center sm:text-left rounded-2xl bg-white border border-slate-200/80 px-6 py-4 shadow-sm"
-          >
-            <img src="/imentor-logo.png" alt="" className="h-10 w-10 rounded-xl ring-1 ring-slate-200/80" />
-            <div>
-              <p className="text-[13px] font-semibold text-slate-800">{t(language, 'publicLanding.trustedBy')}</p>
-              <p className="text-[12px] text-slate-500">{t(language, 'publicLanding.brandSubtitle')}</p>
-            </div>
-          </motion.div>
-        </section>
-
-        {/* Features */}
-        <section id="features" className={`${SHELL} py-16 lg:py-20`}>
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-12"
-          >
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-              {t(language, 'publicLanding.featuresTitle')}
-            </h2>
-            <p className="text-[15px] text-slate-500 mt-3 max-w-xl mx-auto">{t(language, 'publicLanding.featuresSubtitle')}</p>
-          </motion.div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-            {features.map((f, i) => (
-              <FeatureCard
-                key={f.titleKey}
-                icon={f.icon}
-                title={t(language, f.titleKey)}
-                desc={t(language, f.descKey)}
-                color={f.color}
-                delay={i * 0.07}
-              />
-            ))}
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section id="how-it-works" className={`${SHELL} py-16 lg:py-20`}>
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-12"
-          >
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{t(language, 'publicLanding.howTitle')}</h2>
-            <p className="text-[15px] text-slate-500 mt-3">{t(language, 'publicLanding.howSubtitle')}</p>
-          </motion.div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 2xl:gap-8">
-            {steps.map((step, i) => {
-              const c = ICON_COLORS[step.color];
-              return (
-                <motion.div
-                  key={step.num}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.1 }}
-                  className="relative rounded-2xl bg-white border border-slate-200/80 p-6 shadow-sm"
+              <div className={`${SHELL} flex flex-col gap-1 py-3`}>
+                {nav.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => scrollTo(item.id)}
+                    className="rounded-lg px-3 py-3 text-left text-[15px] font-medium text-slate-700 hover:bg-slate-900/[0.04]"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => openAuth('login')}
+                  className="lp-primary mt-2 flex h-12 items-center justify-center rounded-xl text-[15px] font-semibold text-white"
                 >
-                  <div className={`w-10 h-10 rounded-full ${c.bg} ${c.text} font-bold text-[15px] flex items-center justify-center mb-4 ring-2 ${c.ring}`}>
-                    {step.num}
-                  </div>
-                  <h3 className="text-[15px] font-semibold text-slate-900 mb-2">{t(language, step.titleKey)}</h3>
-                  <p className="text-[13px] text-slate-500 leading-relaxed">{t(language, step.descKey)}</p>
-                </motion.div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Compact catalog */}
-        <section id="public-catalog-section" className={`${SHELL} pb-16`}>
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="rounded-2xl bg-white border border-slate-200/80 shadow-sm overflow-hidden"
-          >
-            <div className="px-5 sm:px-7 pt-6 pb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b border-slate-100">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 mb-1.5 flex items-center gap-1">
-                  <BookOpen size={12} /> {t(language, 'publicLanding.featureNoLogin')}
-                </p>
-                <h2 className="text-xl font-bold text-slate-900">{t(language, 'publicLanding.catalogSectionTitle')}</h2>
-                <p className="text-[13px] text-slate-500 mt-1">{t(language, 'publicLanding.catalogSectionSubtitle')}</p>
+                  {tr('landing.ctaLogin')}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCatalogExpanded((v) => !v);
-                  if (!catalogExpanded) setTimeout(() => scrollTo('public-catalog'), 100);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </header>
+
+      <main>
+        {/* ─────────────── Hero ─────────────── */}
+        <section className="lp-hero-bg relative">
+          <div className="lp-grid pointer-events-none absolute inset-0" />
+          <div className={`${SHELL} relative grid items-center gap-14 pb-20 pt-28 sm:pt-32 lg:grid-cols-[1.02fr_1fr] lg:gap-12 lg:pb-28 lg:pt-40`}>
+            <div className="text-center lg:text-left">
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1.5 text-[12.5px] font-medium text-slate-700 ring-1 ring-slate-900/[0.08] backdrop-blur"
               >
-                {catalogExpanded ? (
-                  <><ChevronUp size={15} /> {t(language, 'publicLanding.collapseCatalog')}</>
-                ) : (
-                  <><ChevronDown size={15} /> {t(language, 'publicLanding.expandCatalog')}</>
-                )}
-              </button>
+                <span className="lp-pulse-dot h-2 w-2 rounded-full bg-teal-500" />
+                {tr('landing.eyebrow')}
+              </motion.div>
+
+              <motion.h1
+                initial={reduce ? false : { opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+                className="mt-6 text-[2.35rem] font-semibold leading-[1.06] tracking-[-0.035em] text-slate-900 sm:text-[3.25rem] lg:text-[3.15rem] xl:text-[3.7rem]"
+              >
+                {tr('landing.heroTitle').replace(/ (\S+)$/, '\u00A0$1')} <span className="lp-accent">{tr('landing.heroAccent')}</span>
+              </motion.h1>
+
+              <motion.p
+                initial={reduce ? false : { opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.14 }}
+                className="mx-auto mt-6 max-w-[560px] text-[16px] leading-relaxed text-slate-600 sm:text-[17.5px] lg:mx-0"
+              >
+                {tr('landing.heroSubtitle')}
+              </motion.p>
+
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.22 }}
+                className="mt-9 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center lg:justify-start"
+              >
+                <button
+                  type="button"
+                  onClick={() => openAuth('login')}
+                  className="lp-primary inline-flex h-12 items-center justify-center gap-2 rounded-xl px-6 text-[15px] font-semibold text-white"
+                >
+                  {tr('landing.ctaLogin')}
+                  <ArrowRight size={17} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollTo('how-it-works')}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-[15px] font-semibold text-slate-800 ring-1 ring-slate-900/10 transition hover:bg-slate-50 hover:ring-slate-900/20"
+                >
+                  <BookOpen size={17} className="text-teal-600" />
+                  {tr('publicLanding.navHowItWorks')}
+                </button>
+              </motion.div>
+
+              <motion.ul
+                initial={reduce ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.6, delay: 0.32 }}
+                className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13.5px] text-slate-600 lg:justify-start"
+              >
+                {[tr('landing.trustQr'), tr('landing.trustLangs'), tr('landing.trustOwn')].map((label) => (
+                  <li key={label} className="flex items-center gap-1.5">
+                    <Check size={15} strokeWidth={2.5} className="text-teal-600" />
+                    {label}
+                  </li>
+                ))}
+              </motion.ul>
             </div>
-            <div className="px-5 sm:px-7 py-5">
-              <PublicContentCatalog
-                language={language}
-                embedded
-                compact={!catalogExpanded}
-                expanded={catalogExpanded}
-                onExpandChange={setCatalogExpanded}
-                previewLimit={6}
-              />
-            </div>
-          </motion.div>
+
+            <motion.div
+              initial={reduce ? false : { opacity: 0, y: 24, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.8, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="px-2 sm:px-6 lg:px-0"
+            >
+              <HeroMockup language={language} />
+            </motion.div>
+          </div>
         </section>
 
-        {/* CTA */}
-        <section className={`${SHELL} pb-20`}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="landing-cta-band rounded-3xl px-8 py-14 sm:px-12 text-center"
-          >
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{t(language, 'publicLanding.ctaTitle')}</h2>
-            <p className="text-[15px] text-slate-600 mt-3 max-w-lg mx-auto">{t(language, 'publicLanding.ctaSubtitle')}</p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => openAuth('login')}
-                className="landing-cta-primary inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-[14px] font-semibold text-white shadow-lg"
-              >
-                {t(language, 'publicLanding.getStarted')} <ArrowRight size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => openAuth('register')}
-                className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-7 py-3.5 text-[14px] font-semibold text-slate-700 shadow-sm hover:shadow transition-all"
-              >
-                <Users size={16} className="text-emerald-500" />
-                {t(language, 'publicLanding.staffAccess')}
-              </button>
+        {/* ─────────────── Jonli raqamlar ─────────────── */}
+        {stats && (
+          <section className="border-y border-slate-200/70 bg-white">
+            <div className={`${SHELL} py-10 sm:py-12`}>
+              <p className="text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {tr('landing.statsTitle')}
+              </p>
+              <dl className="mt-7 grid grid-cols-2 gap-y-8 sm:grid-cols-4 sm:divide-x sm:divide-slate-200/80">
+                {stats.map((s) => (
+                  <div key={s.label} className="flex flex-col-reverse px-2 text-center">
+                    <dt className="mt-1.5 text-[13.5px] text-slate-500">{s.label}</dt>
+                    <dd className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900 sm:text-[2.5rem]">
+                      <CountUp value={s.value} locale={numberLocale} />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
             </div>
-          </motion.div>
-        </section>
+          </section>
+        )}
 
-        {/* Footer */}
-        <footer className="border-t border-slate-200/80 bg-white">
-          <div className={`${SHELL} py-8 flex flex-col sm:flex-row items-center justify-between gap-4`}>
-            <div className="flex items-center gap-2.5">
-              <img src="/imentor-logo.png" alt="" className="h-8 w-8 rounded-lg" />
-              <p className="text-[12px] text-slate-500">{t(language, 'welcome.footerInstitute')}</p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-x-4 text-[12px] text-slate-400">
-              <span>{t(language, 'footer.copyright')}</span>
-              <a href="https://fjsti.uz" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">
-                {t(language, 'footer.developer')}
-              </a>
+        {/* ─────────────── Imkoniyatlar (bento) ─────────────── */}
+        <section id="features" className="scroll-mt-20 py-20 sm:py-28">
+          <div className={SHELL}>
+            <SectionHeading
+              eyebrow={tr('landing.featuresEyebrow')}
+              title={tr('landing.featuresTitle')}
+              subtitle={tr('landing.featuresSubtitle')}
+            />
+
+            <div className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-6">
+              {/* Ma'ruza — katta karta */}
+              <BentoCard
+                icon={FileText}
+                title={tr('landing.fLectureTitle')}
+                desc={tr('landing.fLectureDesc')}
+                className="md:col-span-4"
+              >
+                <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[13px] font-semibold text-slate-800">{tr('landing.mockSection1')}</p>
+                    <span className="rounded-md bg-white px-2 py-0.5 text-[10.5px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                      PDF
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="h-[7px] w-full rounded-full bg-slate-200" />
+                    <div className="h-[7px] w-[93%] rounded-full bg-slate-200" />
+                    <div className="h-[7px] w-[70%] rounded-full bg-slate-200" />
+                  </div>
+                  <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-800 ring-1 ring-sky-100">
+                    <BookOpen size={12} />
+                    {tr('landing.mockSource')}
+                  </div>
+                </div>
+              </BentoCard>
+
+              {/* Test + jonli QR */}
+              <BentoCard
+                icon={ClipboardList}
+                title={tr('landing.fTestsTitle')}
+                desc={tr('landing.fTestsDesc')}
+                className="md:col-span-2"
+                delay={0.05}
+              >
+                <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
+                  <div className="rounded-lg bg-white p-1.5 ring-1 ring-slate-200">
+                    <MiniQr size={52} />
+                  </div>
+                  <div className="space-y-1.5">
+                    {['A', 'B', 'C'].map((opt, i) => (
+                      <div key={opt} className="flex items-center gap-1.5">
+                        <span
+                          className={`flex h-4 w-4 items-center justify-center rounded text-[9px] font-bold ${
+                            i === 1 ? 'bg-teal-500 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200'
+                          }`}
+                        >
+                          {opt}
+                        </span>
+                        <span className={`h-[6px] rounded-full ${i === 1 ? 'w-16 bg-teal-200' : 'w-12 bg-slate-200'}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </BentoCard>
+
+              <BentoCard
+                icon={BriefcaseMedical}
+                title={tr('landing.fCasesTitle')}
+                desc={tr('landing.fCasesDesc')}
+                className="md:col-span-2"
+              >
+                <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-500 ring-1 ring-slate-200">
+                      <HeartPulse size={14} />
+                    </span>
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-[6px] w-4/5 rounded-full bg-slate-300" />
+                      <div className="h-[6px] w-3/5 rounded-full bg-slate-200" />
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-1.5">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className={`h-6 rounded-md ring-1 ${
+                          i === 0 ? 'bg-teal-50 ring-teal-200' : 'bg-white ring-slate-200'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </BentoCard>
+
+              {/* Taqdimot */}
+              <BentoCard
+                icon={Presentation}
+                title={tr('landing.fSlidesTitle')}
+                desc={tr('landing.fSlidesDesc')}
+                className="md:col-span-2"
+                delay={0.05}
+              >
+                <div className="flex gap-2">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className={`aspect-[4/3] flex-1 rounded-lg p-2 ring-1 ${
+                        i === 0 ? 'bg-[#0b3a6e] ring-[#0b3a6e]' : 'bg-white ring-slate-200'
+                      }`}
+                    >
+                      <div className={`h-1.5 w-3/4 rounded-full ${i === 0 ? 'bg-white/80' : 'bg-slate-300'}`} />
+                      <div className={`mt-1.5 h-1 w-1/2 rounded-full ${i === 0 ? 'bg-teal-300/80' : 'bg-slate-200'}`} />
+                      {i > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <div className="h-1 w-full rounded-full bg-slate-200" />
+                          <div className="h-1 w-4/5 rounded-full bg-slate-200" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </BentoCard>
+
+              <BentoCard
+                icon={Video}
+                title={tr('landing.fMediaTitle')}
+                desc={tr('landing.fMediaDesc')}
+                className="md:col-span-2"
+                delay={0.1}
+              >
+                <div className="flex gap-2">
+                  <div className="relative flex aspect-video w-[46%] items-center justify-center rounded-lg bg-[#0b3a6e]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/95 text-[#0b3a6e]">
+                      <Play size={13} className="ml-0.5" fill="currentColor" />
+                    </span>
+                  </div>
+                  <div className="flex flex-1 flex-col justify-center gap-1.5">
+                    {[0, 1].map((i) => (
+                      <div key={i} className="flex items-center gap-1.5 rounded-md bg-slate-50 px-2 py-1.5 ring-1 ring-slate-200/70">
+                        <FileText size={12} className="shrink-0 text-slate-400" />
+                        <div className={`h-[5px] rounded-full bg-slate-300 ${i === 0 ? 'w-4/5' : 'w-3/5'}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </BentoCard>
+
+              {/* Uch til */}
+              <BentoCard
+                icon={Languages}
+                title={tr('landing.fLangsTitle')}
+                desc={tr('landing.fLangsDesc')}
+                className="md:col-span-3"
+              >
+                <div className="space-y-2">
+                  {[
+                    ['UZ', 'Arterial gipertenziya'],
+                    ['RU', 'Артериальная гипертензия'],
+                    ['EN', 'Arterial hypertension'],
+                  ].map(([code, text]) => (
+                    <div
+                      key={code}
+                      className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200/70"
+                    >
+                      <span className="w-7 rounded bg-white py-0.5 text-center text-[10.5px] font-bold text-slate-600 ring-1 ring-slate-200">
+                        {code}
+                      </span>
+                      <span className="truncate text-[13px] font-medium text-slate-700">{text}</span>
+                    </div>
+                  ))}
+                </div>
+              </BentoCard>
+
+              {/* O'z fani (Excel) */}
+              <BentoCard
+                icon={FileSpreadsheet}
+                title={tr('landing.fOwnTitle')}
+                desc={tr('landing.fOwnDesc')}
+                className="md:col-span-3"
+                delay={0.05}
+              >
+                <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
+                    <FileSpreadsheet size={19} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold text-slate-800">namuna-fan-mavzulari.xlsx</p>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div className="h-full w-full rounded-full bg-emerald-500" />
+                    </div>
+                  </div>
+                  <Check size={18} strokeWidth={2.5} className="shrink-0 text-emerald-600" />
+                </div>
+              </BentoCard>
             </div>
           </div>
-        </footer>
+        </section>
+
+        {/* ─────────────── Qanday ishlaydi ─────────────── */}
+        <section id="how-it-works" className="scroll-mt-20 border-y border-slate-200/70 bg-white py-20 sm:py-28">
+          <div className={SHELL}>
+            <SectionHeading eyebrow={tr('landing.howEyebrow')} title={tr('landing.howTitle')} />
+            <div className="relative mt-14 grid gap-10 md:grid-cols-3 md:gap-8">
+              <div
+                className="absolute left-[16.66%] right-[16.66%] top-6 hidden h-px bg-gradient-to-r from-slate-200 via-teal-300 to-slate-200 md:block"
+                aria-hidden="true"
+              />
+              {steps.map(({ icon: Icon, title, desc }, i) => (
+                <Reveal key={title} delay={i * 0.08}>
+                  <div className="relative flex flex-col items-center text-center">
+                    <span className="relative z-10 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm ring-1 ring-slate-200">
+                      <Icon size={20} className="text-teal-600" />
+                      <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold text-white">
+                        {i + 1}
+                      </span>
+                    </span>
+                    <h3 className="mt-5 text-[17px] font-semibold tracking-tight text-slate-900">{title}</h3>
+                    <p className="mt-2 max-w-xs text-[14px] leading-relaxed text-slate-600">{desc}</p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────── CTA ─────────────── */}
+        <section className="pb-20 sm:pb-28">
+          <div className={SHELL}>
+            <Reveal className="lp-cta-band relative overflow-hidden rounded-3xl px-6 py-14 text-center sm:px-12 sm:py-20">
+              <h2 className="mx-auto max-w-2xl text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-white sm:text-[2.5rem]">
+                {tr('landing.ctaTitle')}
+              </h2>
+              <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-slate-300 sm:text-base">
+                {tr('landing.ctaSubtitle')}
+              </p>
+              <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+                <button
+                  type="button"
+                  onClick={() => openAuth('login')}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-[15px] font-semibold text-slate-900 transition hover:bg-slate-100"
+                >
+                  {tr('landing.ctaLogin')}
+                  <ArrowRight size={17} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openAuth('register')}
+                  className="inline-flex h-12 items-center justify-center rounded-xl px-6 text-[15px] font-semibold text-white ring-1 ring-white/25 transition hover:bg-white/10"
+                >
+                  {tr('auth.registerLink')}
+                </button>
+              </div>
+            </Reveal>
+          </div>
+        </section>
       </main>
 
-      {/* Auth modal */}
+      {/* ─────────────── Footer ─────────────── */}
+      <footer className="border-t border-slate-200/70 bg-white">
+        <div className={`${SHELL} grid gap-10 py-12 sm:grid-cols-[1.4fr_1fr_1fr]`}>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <BrandMark />
+              <span className="text-[17px] font-semibold tracking-tight">iMentor</span>
+            </div>
+            <p className="mt-4 max-w-sm text-[14px] leading-relaxed text-slate-500">{tr('welcome.footerInstitute')}</p>
+          </div>
+          <div>
+            <p className="text-[13px] font-semibold text-slate-900">{tr('landing.footerProduct')}</p>
+            <ul className="mt-4 space-y-2.5 text-[14px] text-slate-500">
+              {nav.map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => scrollTo(item.id)} className="hover:text-slate-900">
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+              <li>
+                <button type="button" onClick={() => openAuth('login')} className="hover:text-slate-900">
+                  {tr('publicLanding.login')}
+                </button>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <p className="text-[13px] font-semibold text-slate-900">{tr('landing.footerInstitute')}</p>
+            <ul className="mt-4 space-y-2.5 text-[14px] text-slate-500">
+              <li>
+                <a href="https://fjsti.uz" target="_blank" rel="noopener noreferrer" className="hover:text-slate-900">
+                  fjsti.uz
+                </a>
+              </li>
+              <li>{tr('publicLanding.brandSubtitle')}</li>
+            </ul>
+          </div>
+        </div>
+        <div className="border-t border-slate-100">
+          <div className={`${SHELL} flex flex-col gap-2 py-6 text-[12.5px] text-slate-400 sm:flex-row sm:items-center sm:justify-between`}>
+            <span>{tr('footer.copyright')}</span>
+            <span>{tr('footer.developer')}</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* ─────────────── Kirish oynasi ─────────────── */}
       <AnimatePresence>
         {authOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/30 backdrop-blur-sm p-0 sm:p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setAuthOpen(false);
+            }}
+            className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           >
             <motion.div
-              initial={{ y: 32, opacity: 0, scale: 0.98 }}
+              role="dialog"
+              aria-modal="true"
+              aria-label={tr('publicLanding.authPanelTitle')}
+              initial={reduce ? { opacity: 0 } : { y: 32, opacity: 0, scale: 0.98 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 32, opacity: 0, scale: 0.98 }}
+              exit={reduce ? { opacity: 0 } : { y: 32, opacity: 0, scale: 0.98 }}
               transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-              className="w-full sm:max-w-[520px] max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200/80"
+              className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl ring-1 ring-slate-200/80 sm:max-w-[520px] sm:rounded-3xl"
             >
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 backdrop-blur px-5 py-4">
-                <p className="font-semibold text-slate-900">{t(language, 'publicLanding.authPanelTitle')}</p>
-                <button type="button" onClick={() => setAuthOpen(false)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
+                <p className="font-semibold text-slate-900">{tr('publicLanding.authPanelTitle')}</p>
+                <button
+                  type="button"
+                  onClick={() => setAuthOpen(false)}
+                  aria-label="Close"
+                  className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                >
                   <X size={20} />
                 </button>
               </div>
@@ -508,14 +969,8 @@ export default function PublicLandingPage({
                   ) : (
                     <RegisterPage onSwitchToLogin={() => setAuthScreen('login')} />
                   )
-                ) : isDesktopBrowser() && desktopAuthView === 'qr' ? (
-                  <DesktopHodimQrLogin
-                    showRoleTabs
-                    onSelectTalaba={() => setDesktopAuthView('talaba')}
-                    onOtherRoles={() => setDesktopAuthView('admin')}
-                  />
-                ) : isDesktopBrowser() && desktopAuthView === 'admin' ? (
-                  <AdminPasswordLogin onBack={() => setDesktopAuthView('qr')} />
+                ) : isDesktopBrowser() && authScreen === 'login' && desktopAuthView !== 'password' ? (
+                  <DesktopHodimQrLogin onOtherRoles={() => setDesktopAuthView('password')} />
                 ) : authScreen === 'login' ? (
                   <LoginPage
                     onSwitchToRegister={() => setAuthScreen('register')}

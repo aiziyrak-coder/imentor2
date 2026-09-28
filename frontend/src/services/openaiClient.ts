@@ -8,9 +8,10 @@ import { type MedicalReference } from '../utils/medicalReferences';
 import { ensureBackendAccessToken, getBackendAccessToken } from '../utils/backendAuth';
 import { pdfjsLib } from '../utils/pdfjsSetup';
 
-export const OPENAI_CHAT = 'gpt-4o';
-export const OPENAI_FAST = 'gpt-4o-mini';
-export const OPENAI_REASONER = 'gpt-4o';
+// Server baribir arzon modelni ishlatadi; bu yerda ham qimmat nom qolmasin.
+export const OPENAI_CHAT = 'gpt-4.1-nano';
+export const OPENAI_FAST = 'gpt-4.1-nano';
+export const OPENAI_REASONER = 'gpt-4.1-nano';
 
 /** Eski importlar bilan moslik */
 export const DEEPSEEK_CHAT = OPENAI_CHAT;
@@ -90,6 +91,8 @@ async function chatViaBackend(params: {
   temperature?: number;
   bookContext?: BookContext;
   responseFormat?: Record<string, unknown>;
+  /** Qaysi funksiya — server sarfni shu nom bilan yozadi. */
+  purpose?: string;
   /** Server RAG uchun ISHLATGAN darsliklar (AI o'ylab topgani emas). */
   onBookReferences?: (refs: MedicalReference[]) => void;
 }): Promise<string> {
@@ -106,6 +109,7 @@ async function chatViaBackend(params: {
           ? { subject_code: params.bookContext.subjectCode, topic_query: params.bookContext.topicQuery }
           : {}),
         ...(params.responseFormat ? { response_format: params.responseFormat } : {}),
+        ...(params.purpose ? { purpose: params.purpose } : {}),
       },
       timeoutMs: 290_000,
     });
@@ -147,6 +151,7 @@ async function chatViaBackendStream(params: {
   maxTokens: number;
   temperature?: number;
   bookContext?: BookContext;
+  purpose?: string;
   onDelta: (text: string) => void;
   onBookReferences?: (refs: MedicalReference[]) => void;
 }): Promise<string> {
@@ -171,6 +176,7 @@ async function chatViaBackendStream(params: {
         ...(params.bookContext?.subjectCode
           ? { subject_code: params.bookContext.subjectCode, topic_query: params.bookContext.topicQuery }
           : {}),
+        ...(params.purpose ? { purpose: params.purpose } : {}),
       }),
     });
 
@@ -291,6 +297,7 @@ async function chatCompletion(params: {
   temperature?: number;
   bookContext?: BookContext;
   responseFormat?: Record<string, unknown>;
+  purpose?: string;
   onBookReferences?: (refs: MedicalReference[]) => void;
 }): Promise<string> {
   const msgs: ChatMessage[] = [];
@@ -307,6 +314,7 @@ async function chatCompletion(params: {
       temperature: params.temperature,
       bookContext: params.bookContext,
       responseFormat: params.responseFormat,
+      purpose: params.purpose,
       onBookReferences: params.onBookReferences,
     });
   }
@@ -326,6 +334,7 @@ export async function openaiText(opts: {
   maxTokens?: number;
   temperature?: number;
   bookContext?: BookContext;
+  purpose?: string;
 }): Promise<string> {
   return chatCompletion({
     model: opts.model ?? OPENAI_CHAT,
@@ -334,6 +343,7 @@ export async function openaiText(opts: {
     maxTokens: opts.maxTokens ?? 4096,
     temperature: opts.temperature,
     bookContext: opts.bookContext,
+    purpose: opts.purpose,
   });
 }
 
@@ -349,6 +359,7 @@ export async function openaiTextStream(opts: {
   maxTokens?: number;
   temperature?: number;
   bookContext?: BookContext;
+  purpose?: string;
   onDelta: (textSoFar: string) => void;
   onBookReferences?: (refs: MedicalReference[]) => void;
 }): Promise<string> {
@@ -367,6 +378,7 @@ export async function openaiTextStream(opts: {
       bookContext: opts.bookContext,
       onDelta: opts.onDelta,
       onBookReferences: opts.onBookReferences,
+      purpose: opts.purpose,
     });
   }
   const text = await chatViaDirectApi({
@@ -388,6 +400,7 @@ export async function openaiJson<T>(opts: {
   parse: (text: string) => T;
   bookContext?: BookContext;
   responseFormat?: Record<string, unknown>;
+  purpose?: string;
   onBookReferences?: (refs: MedicalReference[]) => void;
 }): Promise<T> {
   const text = await chatCompletion({
@@ -398,6 +411,7 @@ export async function openaiJson<T>(opts: {
     temperature: opts.temperature ?? 0.3,
     bookContext: opts.bookContext,
     responseFormat: opts.responseFormat,
+    purpose: opts.purpose,
     onBookReferences: opts.onBookReferences,
   });
   return opts.parse(text);
@@ -418,6 +432,7 @@ export async function openaiJsonStream<T>(opts: {
   bookContext?: BookContext;
   onProgress?: (rawTextSoFar: string) => void;
   onBookReferences?: (refs: MedicalReference[]) => void;
+  purpose?: string;
 }): Promise<T> {
   const msgs: ChatMessage[] = [{ role: 'system', content: opts.system + JSON_ONLY_SUFFIX }, { role: 'user', content: opts.user }];
   const useProxy = preferBackendProxy() || !localApiKey();
@@ -431,6 +446,7 @@ export async function openaiJsonStream<T>(opts: {
       bookContext: opts.bookContext,
       onDelta: opts.onProgress ?? (() => {}),
       onBookReferences: opts.onBookReferences,
+      purpose: opts.purpose,
     });
   } else {
     text = await chatViaDirectApi({

@@ -230,6 +230,10 @@ def apply_staff_department(
     new_id = dept.id if dept else None
     profile.department_id = new_id
     profile.department = dept.name if dept else (department_name or "").strip()
-    if old_id != new_id:
+    # Tanlovlar faqat HAQIQIY kafedra almashinuvida tozalanadi. Kafedra birinchi
+    # marta aniqlanganda (eski qiymat bo'sh) tegilmaydi: fanlar sahifasi va
+    # tanlovni saqlash nomi bor-u ID'si yo'q profilga kafedrani o'zi yozadi —
+    # ilgari shu paytning o'zida o'qituvchining barcha fanlari o'chib ketardi.
+    if old_id is not None and old_id != new_id:
         sync_staff_to_department_courses(db, profile.owner_key, dept)
     return dept

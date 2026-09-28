@@ -31,12 +31,24 @@ class Settings(BaseSettings):
     django_jwt_refresh_days: int = 14
 
     openai_api_key: str = ""
-    openai_chat_model: str = "gpt-4o"
-    openai_fast_model: str = "gpt-4o-mini"
-    openai_reasoner_model: str = "gpt-4o"
+    # Arzon model sukut bo'yicha: kimdir `_economy_model_name` tejash qoidasini
+    # olib tashlasa ham sarf gpt-4o narxiga (oyiga ~$270) qaytib ketmasin.
+    openai_chat_model: str = "gpt-4.1-nano"
+    openai_fast_model: str = "gpt-4.1-nano"
+    openai_reasoner_model: str = "gpt-4.1-nano"
+
+    # HEMIS (institut axborot tizimi) — dars jadvalining haqiqiy manbasi, FAQAT o'qiladi.
+    hemis_api_url: str = ""
+    hemis_api_token: str = ""
 
     online_test_api_base_url: str = ""
+    online_test_api_fallback_url: str = "https://online-imtixon.uz"
     online_test_consumer_api_key: str = ""
+    # OnlineTest ilovasi Django `ALLOWED_HOSTS` bilan himoyalangan va u yerda
+    # konteyner nomi ro'yxatda yo'q. To'g'ridan-to'g'ri konteynerga murojaat
+    # qilganda Host sarlavhasini ruxsat etilgan qiymatga almashtiramiz —
+    # aks holda ilova 400 qaytaradi.
+    online_test_host_header: str = ""
 
     django_media_root: str = ""
     django_media_url: str = "/media/"
@@ -53,6 +65,14 @@ class Settings(BaseSettings):
     django_login_rate: str = "20/minute"
     django_live_test_anon_rate: str = "120/minute"
     django_staff_ping_rate: str = "2/minute"
+
+    # Rektor hisoboti sahifasining paroli (env: RECTOR_REPORT_PASSWORD).
+    # Bo'sh bo'lsa sahifa umuman ochilmaydi — tasodifan himoyasiz
+    # qolgan hisobot bo'lmasin.
+    rector_report_password: str = ""
+
+    # Yuz orqali kirish xizmati (docker-compose `face_api`, faqat ichki tarmoq).
+    face_api_url: str = "http://face_api:8200"
 
     @property
     def database_url(self) -> str:

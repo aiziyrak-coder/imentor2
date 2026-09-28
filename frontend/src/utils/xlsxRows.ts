@@ -16,14 +16,28 @@ function decoder(): TextDecoder {
   return new TextDecoder('utf-8');
 }
 
+/**
+ * Brauzernikini ishlatamiz, bo'lmasa — o'zimiznikini.
+ *
+ * `DecompressionStream('deflate-raw')` Chrome 103 / Safari 16.4 dan bor. Eski
+ * brauzerda o'qituvchi Excel yuklay olmasdan "faylni o'qib bo'lmadi" xatosini
+ * olardi (2026-09-23). Endi bunday brauzerda ham fayl ochiladi.
+ */
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  if (typeof DecompressionStream === 'undefined') {
-    throw new Error('xlsx-invalid');
+  const canStream =
+    typeof DecompressionStream !== 'undefined' && typeof Blob !== 'undefined' && typeof Blob.prototype.stream === 'function';
+  if (canStream) {
+    try {
+      const stream = new Blob([new Uint8Array(data)]).stream().pipeThrough(
+        new DecompressionStream('deflate-raw'),
+      );
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+      /* 'deflate-raw' ni qo'llamaydigan brauzer — pastdagi zaxira yo'l */
+    }
   }
-  const stream = new Blob([new Uint8Array(data)]).stream().pipeThrough(
-    new DecompressionStream('deflate-raw'),
-  );
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const { inflateRawJs } = await import('./inflateRaw');
+  return inflateRawJs(data);
 }
 
 function findEocd(bytes: Uint8Array): number {
@@ -35,7 +49,7 @@ function findEocd(bytes: Uint8Array): number {
   throw new Error('xlsx-invalid');
 }
 
-async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
+export async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const eocd = findEocd(bytes);
@@ -71,7 +85,9 @@ function parseXml(xml: string): Document {
   return new DOMParser().parseFromString(xml, 'application/xml');
 }
 
-function localAll(root: ParentNode, name: string): Element[] {
+// `ParentNode` da `getElementsByTagName` yo'q - chaqiruvchilar doim
+// `Document` yoki `Element` beradi, shuning uchun tur shu ikkisi.
+function localAll(root: Document | Element, name: string): Element[] {
   return [...root.getElementsByTagName('*')].filter((el) => el.localName === name);
 }
 

@@ -15,6 +15,13 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/*.pyc
 backend/.pytest_cache/
+
+# FastAPI backend — Python artefaktlari (testlar shu yerda ishlaydi).
+backend_fastapi/**/__pycache__/
+backend_fastapi/*.pyc
+# Har qanday papkadagi kesh (deploy/examples ham) — repoga tushmasin.
+__pycache__/
+*.pyc
 backend/.mypy_cache/
 deploy/__pycache__/
 *.egg-info/
@@ -71,3 +78,9 @@ Thumbs.db
 
 # Baza nusxalari (lokal, repoga tushmasin)
 backups/
+
+# Xodimlar ro'yxati va boshqa shaxsiy ma'lumotli fayllar repoga qo'shilmasin.
+data/*.xlsx
+data/*.xls
+data/*.docx
+data/*.csv

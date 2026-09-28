@@ -42,6 +42,31 @@ describe('backendAuth', () => {
     backendAuth.setUnauthorizedHandler(null);
   });
 
+  it('face login of a student opens a student session with group', async () => {
+    const bundle = {
+      access: makeJwt(futureExpSeconds()),
+      refresh: makeJwt(futureExpSeconds(86400)),
+      role: 'student',
+      username: 'ot_3442001',
+      first_name: 'Dilnoza',
+      last_name: 'Karimova',
+      student_id: '3442001',
+      group_name: 'DI-2824',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(bundle), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const user = await backendAuth.loginWithFaceFrames([new Blob(['a']), new Blob(['b'])]);
+      expect(user.role).toBe('student');
+      expect(user.uid).toBe('ot_3442001');
+      expect(user.onlineTestStudentId).toBe('3442001');
+      expect(user.studyGroup).toBe('DI-2824');
+      expect(getCurrentLocalUser()?.uid).toBe('ot_3442001');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('returns cached access token while still valid', async () => {
     const exp = futureExpSeconds();
     localStorage.setItem(

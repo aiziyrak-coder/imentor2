@@ -1,0 +1,89 @@
+/*
+ * Online ta'lim portali — mobil qatlam.
+ *
+ * Talabalarning ko'pchiligi telefondan kiradi, portal esa kompyuter uchun
+ * yozilgan edi. Bu yerdagi qoidalar butun portalga tegishli bo'lgan uchta
+ * muammoni hal qiladi; qolgani komponentlarning o'zida to'g'rilangan.
+ *
+ * Hammasi `.online-root` ichida — iMentor'ning o'z sahifalariga tegmaydi.
+ */
+
+.online-root {
+  /* Telefonni yon holatga burganda Safari shriftni o'zi kattalashtiradi. */
+  -webkit-text-size-adjust: 100%;
+  /*
+   * Bitta keng element butun sahifani yonga surib yubormasin.
+   *
+   * `hidden` EMAS, `clip`: `hidden` konteynerni aylantiriladigan qilib
+   * qo'yadi va ichidagi `position: sticky` sarlavha o'z ishini to'xtatadi —
+   * sahifa aylantirilganda tepada qolmay, yuqoriga qarab chiqib ketadi.
+   * `clip` esa faqat kesadi, aylantirish konteyneri yaratmaydi.
+   */
+  overflow-x: clip;
+}
+
+/* Rasm va video hech qachon ekrandan chiqib ketmasin. */
+.online-root img,
+.online-root video,
+.online-root iframe {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  /*
+   * iOS Safari 16px dan kichik shriftli maydonga bosilganda sahifani
+   * kattalashtirib yuboradi va foydalanuvchi uni qo'lda qaytarishga majbur
+   * bo'ladi. Portaldagi barcha maydonlar 13-14px edi, ya'ni har bir parol,
+   * havola va test javobini kiritishda shu sodir bo'lardi.
+   */
+  .online-root input:not([type='radio']):not([type='checkbox']):not([type='file']),
+  .online-root select,
+  .online-root textarea {
+    font-size: 16px;
+  }
+
+  /*
+   * Barmoq uchun eng kichik nishon. Portaldagi tugmalar 28-30px balandlikda
+   * edi — sichqoncha uchun yetarli, barmoq uchun emas.
+   */
+  .online-root button,
+  .online-root label.tap,
+  .online-root a.tap {
+    min-height: 40px;
+  }
+
+  /* Qator ichidagi kichik belgi tugmalari uchun istisno. */
+  .online-root button.tap-tight {
+    min-height: 0;
+  }
+}
+
+/* Kesilgan burchakli (notch) telefonlar uchun xavfsiz chegaralar. */
+.online-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.online-safe-bottom {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * Ko'p bo'limli menyular telefonda sig'maydi. O'ralib ketish o'rniga yonga
+ * suriladi — bo'limlar bir qatorda qoladi va qaysi biri tanlangani ko'rinadi.
+ */
+.online-tabs {
+  display: flex;
+  gap: 0.375rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.online-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.online-tabs > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

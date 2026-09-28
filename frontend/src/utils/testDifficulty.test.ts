@@ -40,6 +40,26 @@ describe('testDifficulty', () => {
     expect(testStemInstruction('medium')).toMatch(/2–3 qatorlik/);
     expect(testStemInstruction('hard')).toMatch(/3 zich jumla/);
     expect(testStemInstruction('hard')).toMatch(/ABG=tashxis/);
+    expect(testStemInstruction('hard', 'academic')).toMatch(/Klinik bemor/i);
+    expect(buildTestDifficultyPrompt('hard', 'academic')).toMatch(/klinik vignette EMAS/i);
     expect(testExplanationInstruction('easy')).toMatch(/3-5/);
+  });
+});
+
+describe('bemorsiz tibbiy fan (biomedical)', () => {
+  it('mexanizmga ruxsat beradi, bemor vignettani taqiqlaydi', () => {
+    const rules = buildTestDifficultyPrompt('medium', 'biomedical');
+    expect(rules).toMatch(/mexanizm/i);
+    expect(rules).toMatch(/TAQIQLANADI/);
+    expect(rules).not.toMatch(/KROK/);
+  });
+
+  it('savol shakli ham, izoh ham bemorsiz', () => {
+    expect(testStemInstruction('hard', 'biomedical')).toMatch(/bemor kartasi YARATILMASIN/i);
+    expect(testExplanationInstruction('medium', 'biomedical')).toMatch(/bemor ssenariysi qo/i);
+  });
+
+  it('klinik fan uchun qoidalar o‘zgarmadi', () => {
+    expect(testStemInstruction('hard', 'clinical')).toMatch(/vignette|shikoyat/i);
   });
 });

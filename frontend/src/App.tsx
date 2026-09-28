@@ -27,13 +27,14 @@ import {
   Files,
   Library,
   BookMarked,
+  Bug,
   GraduationCap,
   Youtube,
   Monitor,
   Loader2,
   type LucideIcon,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   getCurrentLocalUser,
   logoutLocalStaff,
@@ -57,6 +58,8 @@ import { navLabel, navMobileLabel, roleLabel, translate, type UiTextKey } from '
 import { type AppNotificationEventDetail } from './utils/notifications';
 import AppToastHost from './components/AppToastHost';
 import { isPublicStudentTestUrl } from './utils/liveTestApi';
+import { useActivityTelemetry } from './hooks/useActivityTelemetry';
+import { postActivityEvents } from './utils/analyticsApi';
 
 // Components
 import DesktopHodimQrLogin from './components/auth/DesktopHodimQrLogin';
@@ -88,12 +91,16 @@ import AdminStaffLocationConsole from './components/admin/AdminStaffLocationCons
 import AdminLiveTeachingBoard from './components/admin/AdminLiveTeachingBoard';
 import AdminCampusBuildingsPage from './components/admin/AdminCampusBuildingsPage';
 import AdminSyllabusCatalog from './components/admin/AdminSyllabusCatalog';
+import AdminOnlineEdu from './components/admin/AdminOnlineEdu';
 import AdminCourseAssignments from './components/admin/AdminCourseAssignments';
 import AdminTopicVideos from './components/admin/AdminTopicVideos';
 import AdminTopicHandouts from './components/admin/AdminTopicHandouts';
 import AdminBooksLibrary from './components/admin/AdminBooksLibrary';
+import AdminClientErrors from './components/admin/AdminClientErrors';
+import TeacherSettings from './components/settings/TeacherSettings';
 import HodimGpsPromptBar from './components/staff/HodimGpsPromptBar';
 import PublicLandingPage from './components/public/PublicLandingPage';
+import MobileAuthScreen from './components/auth/MobileAuthScreen';
 import { useStaffLocationTracking } from './hooks/useStaffLocationTracking';
 import type { SyllabusTopic } from './services/aiService';
 import {
@@ -102,6 +109,7 @@ import {
   resolveTopicNorm,
   type SyllabusTopicContext,
 } from './utils/syllabusTopicContext';
+import { readLectureForTopic, writeLectureForTopic } from './utils/lectureLocalCache';
 
 export type { SyllabusTopic };
 
@@ -116,9 +124,11 @@ type View =
   | 'admin-live-test-results'
   | 'admin-syllabuses'
   | 'admin-course-assignments'
+  | 'admin-online-edu'
   | 'admin-videos'
   | 'admin-handouts'
   | 'admin-books'
+  | 'admin-client-errors'
   | 'syllabus'
   | 'profile'
   | 'presentation'
@@ -143,9 +153,11 @@ const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-live-test-results': Users,
   'admin-syllabuses': BookOpen,
   'admin-course-assignments': GraduationCap,
+  'admin-online-edu': Monitor,
   'admin-videos': Youtube,
   'admin-handouts': Files,
   'admin-books': BookMarked,
+  'admin-client-errors': Bug,
   syllabus: BookOpen,
   lectures: FileText,
   presentation: Presentation,
@@ -176,12 +188,14 @@ const ADMIN_NAV_IDS: View[] = [
   'admin-campus-buildings',
   'admin-syllabuses',
   'admin-course-assignments',
+  'admin-online-edu',
   'admin-videos',
   'admin-handouts',
   'admin-books',
   'admin-cases',
   'admin-tests',
   'admin-live-test-results',
+  'admin-client-errors',
   'profile',
 ];
 const STUDENT_NAV_IDS: View[] = ['my-tests', 'profile'];
@@ -192,32 +206,74 @@ function navItemsForRole(role: UserRole, lang: AppLanguage): NavItemDef[] {
   return ids.map((id) => ({ id, label: navLabel(lang, id), icon: NAV_ICONS[id] }));
 }
 
-const LECTURE_BY_TOPIC_KEY = 'imentor-lecture-by-topic-v2';
+/**
+ * Bo'lim ranglari.
+ *
+ * Har bo'lim o'z rangiga ega: yon menyudagi belgi ham, sahifa sarlavhasi
+ * ham bir xil rangda. O'qituvchi qayerdaligini rangdan biladi — sarlavhani
+ * o'qimay turib ham. Ilgari hammasi bir xil ko'k edi.
+ */
+export const VIEW_ACCENTS: Record<string, { tile: string; on: string; row: string; bar: string }> = {
+  syllabus: {
+    tile: 'bg-indigo-50 text-indigo-600',
+    on: 'bg-indigo-600 text-white',
+    row: 'bg-indigo-50/70 text-indigo-900',
+    bar: 'bg-indigo-600',
+  },
+  lectures: {
+    tile: 'bg-blue-50 text-blue-600',
+    on: 'bg-blue-600 text-white',
+    row: 'bg-blue-50/70 text-blue-900',
+    bar: 'bg-blue-600',
+  },
+  presentation: {
+    tile: 'bg-amber-50 text-amber-600',
+    on: 'bg-amber-500 text-white',
+    row: 'bg-amber-50/70 text-amber-900',
+    bar: 'bg-amber-500',
+  },
+  videos: {
+    tile: 'bg-rose-50 text-rose-600',
+    on: 'bg-rose-500 text-white',
+    row: 'bg-rose-50/70 text-rose-900',
+    bar: 'bg-rose-500',
+  },
+  handouts: {
+    tile: 'bg-teal-50 text-teal-600',
+    on: 'bg-teal-600 text-white',
+    row: 'bg-teal-50/70 text-teal-900',
+    bar: 'bg-teal-600',
+  },
+  cases: {
+    tile: 'bg-violet-50 text-violet-600',
+    on: 'bg-violet-600 text-white',
+    row: 'bg-violet-50/70 text-violet-900',
+    bar: 'bg-violet-600',
+  },
+  tests: {
+    tile: 'bg-emerald-50 text-emerald-600',
+    on: 'bg-emerald-600 text-white',
+    row: 'bg-emerald-50/70 text-emerald-900',
+    bar: 'bg-emerald-600',
+  },
+  profile: {
+    tile: 'bg-slate-100 text-slate-600',
+    on: 'bg-slate-700 text-white',
+    row: 'bg-slate-100 text-slate-900',
+    bar: 'bg-slate-700',
+  },
+};
 
-function readLectureForTopic(topicNorm: string): string {
-  if (!topicNorm) return '';
-  try {
-    const raw = localStorage.getItem(LECTURE_BY_TOPIC_KEY);
-    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    return map[topicNorm] ?? '';
-  } catch {
-    return '';
-  }
-}
+const DEFAULT_ACCENT = VIEW_ACCENTS.profile;
 
-function writeLectureForTopic(topicNorm: string, content: string): void {
-  if (!topicNorm) return;
-  try {
-    const raw = localStorage.getItem(LECTURE_BY_TOPIC_KEY);
-    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    map[topicNorm] = content;
-    localStorage.setItem(LECTURE_BY_TOPIC_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore quota */
-  }
+export function accentFor(view: string) {
+  return VIEW_ACCENTS[view] || DEFAULT_ACCENT;
 }
 
 export const GlobalTopicContext = createContext<SyllabusTopicContext | null>(null);
+
+/** Mavzu bilan ishlaydigan bo'limlar — mavzu tanlangach shulardan biriga qaytiladi. */
+const TOPIC_MODULE_VIEWS = new Set<View>(['lectures', 'presentation', 'videos', 'handouts', 'cases', 'tests']);
 
 export const AppNavigationContext = createContext<{
   openSyllabus: () => void;
@@ -251,6 +307,9 @@ const ACTIVE_VIEW_STORAGE_KEY = 'imentor-active-view-v1';
 function loadPersistedActiveView(): View | null {
   try {
     const raw = localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
+    // Admin hisobotlari (Super AI, Faollik) olib tashlangan — ular eslab qolingan
+    // bo'lsa bosh sahifa ochiladi. Hisobotlar faqat imentor.uz/rektor da.
+    if (raw === 'admin-super-ai-report' || raw === 'admin-activity') return 'admin-dashboard';
     return (raw as View) || null;
   } catch {
     return null;
@@ -289,9 +348,9 @@ export default function App() {
   const [mountedViews, setMountedViews] = useState<View[]>([]);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState<LocalStaffUser | null>(() => getCurrentLocalUser());
-  /** Kompyuterda login modal holati: 'talaba' — standart (Talaba ID+parol),
-   * 'qr' — hodim uchun QR, 'admin' — faqat administrator uchun telefon+parol. */
-  const [desktopAuthView, setDesktopAuthView] = useState<'talaba' | 'qr' | 'admin'>('talaba');
+  /** Kompyuterda login modal holati: 'qr' — standart (yuz skaneri faqat telefonda),
+   * 'qr' — telefon orqali QR, 'password' — login (telefon / Xodim ID) va parol. */
+  const [desktopAuthView, setDesktopAuthView] = useState<'face' | 'qr' | 'password'>('qr');
   /** null = tekshirilmoqda; false = birinchi kirish fan tanlash; true = tayyor */
   const [teachingSubjectsReady, setTeachingSubjectsReady] = useState<boolean | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<SyllabusTopicContext | null>(() =>
@@ -451,7 +510,13 @@ export default function App() {
     };
   }, [user?.uid]);
 
+  const userRole = user ? normalizeUserRole(user) : null;
+  useActivityTelemetry(!!user && !!userRole, activeView);
+
   const handleLogout = async () => {
+    if (user && userRole) {
+      await postActivityEvents([{ event_type: 'logout' }], activeView).catch(() => undefined);
+    }
     clearBackendAuthTokens();
     clearDesktopPairedSession(user?.uid);
     logoutLocalStaff();
@@ -459,7 +524,25 @@ export default function App() {
     // Tanlangan interfeys tili saqlanib qoladi (qurilma sozlamasi).
   };
 
-  const userRole = user ? normalizeUserRole(user) : null;
+  /**
+   * Ish boshlanganda menyu o'zi yig'iladi.
+   *
+   * "Mening fanlarim" — tanlash sahifasi, u yerda keng menyu qulay.
+   * Qolganlari ish maydoni: ma'ruza matni, taqdimot, test. Bo'lim
+   * almashganda menyu yig'ilib, 188 piksel ishga qo'shiladi.
+   *
+   * Faqat ALMASHISHGA javob beradi — foydalanuvchi keyin qo'lda ochsa,
+   * menyu shu bo'limda ochiq qoladi.
+   */
+  const lastViewRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (lastViewRef.current === activeView) return;
+    const previous = lastViewRef.current;
+    lastViewRef.current = activeView;
+    if (previous === null) return;
+    setSidebarOpen(activeView === 'syllabus');
+  }, [activeView]);
+
   const navItems = useMemo(
     () => (userRole ? navItemsForRole(userRole, language) : []),
     [userRole, language],
@@ -472,12 +555,26 @@ export default function App() {
     }
     let cancelled = false;
     setTeachingSubjectsReady(null);
+    // Fan tanlash MAJBURIY EMAS: ro'yxat bo'sh bo'lsa ham o'qituvchi
+    // tizimga kiradi va "Mening fanlarim"da katalogdan tanlaydi yoki bu
+    // yilgi mavzularini Excel'dan o'zi yuklaydi. Ilgari fan tanlanmaguncha
+    // yopilmaydigan oyna chiqardi.
     void fetchMyCourseSelections()
       .then((rows) => {
-        if (!cancelled) setTeachingSubjectsReady(rows.length > 0);
+        // Brauzerda saqlangan mavzu endi o'qituvchining ro'yxatida bo'lmagan
+        // fanga tegishli bo'lsa (fan o'chirilgan yoki boshqa qurilmada
+        // ro'yxatdan olingan) — tanlov tozalanadi. Aks holda Ma'ruza/Test
+        // sahifalari ko'rinmas fanga yozishda davom etardi.
+        if (cancelled) return;
+        setSelectedTopic((prev) => {
+          if (!prev || rows.some((r) => r.syllabus.id === prev.syllabusId)) return prev;
+          persistSelectedTopic(null);
+          return null;
+        });
       })
-      .catch(() => {
-        if (!cancelled) setTeachingSubjectsReady(false);
+      .catch(() => [])
+      .finally(() => {
+        if (!cancelled) setTeachingSubjectsReady(true);
       });
     return () => {
       cancelled = true;
@@ -533,10 +630,17 @@ export default function App() {
     persistSelectedTopic(null);
   }, []);
 
+  // O'qituvchi oxirgi ishlagan bo'lim (ma'ruza, taqdimot, test, keys...). "Mening fanlarim"da mavzu
+  // bosilganda shu bo'limga qaytadi: testdan mavzu almashtirgan o'qituvchi yana testga tushadi.
+  const lastModuleRef = useRef<View>('lectures');
+  useEffect(() => {
+    if (TOPIC_MODULE_VIEWS.has(activeView)) lastModuleRef.current = activeView;
+  }, [activeView]);
+
   const handleOpenLectures = (topic: SyllabusTopicContext) => {
     setSelectedTopic(topic);
     persistSelectedTopic(topic);
-    setActiveView('lectures');
+    setActiveView(lastModuleRef.current);
   };
 
   const renderContent = (view: View) => {
@@ -559,6 +663,8 @@ export default function App() {
         return <AdminLiveTestResultsPage />;
       case 'admin-syllabuses':
         return <AdminSyllabusCatalog />;
+      case 'admin-online-edu':
+        return <AdminOnlineEdu />;
       case 'admin-course-assignments':
         return <AdminCourseAssignments />;
       case 'admin-videos':
@@ -567,6 +673,8 @@ export default function App() {
         return <AdminTopicHandouts />;
       case 'admin-books':
         return <AdminBooksLibrary />;
+      case 'admin-client-errors':
+        return <AdminClientErrors />;
       case 'syllabus':
         return (
           <SyllabusView
@@ -580,7 +688,8 @@ export default function App() {
       case 'lectures':
         return <LectureNotes />;
       case 'profile':
-        return <UserProfile />;
+        // O'qituvchi uchun — to'liq sozlamalar (profil, fanlar, kafedra kutubxonasi, monitor jadvali, kirish).
+        return userRole === 'hodim' ? <TeacherSettings /> : <UserProfile />;
       case 'presentation':
         return <PresentationBuilder />;
       case 'videos':
@@ -613,12 +722,6 @@ export default function App() {
           <div className="flex flex-nowrap items-center justify-center gap-x-3 text-[9px] md:text-[10px] leading-tight text-black/65 whitespace-nowrap min-w-max mx-auto">
             <span className="font-medium">{translate(language, 'footer.copyright')}</span>
             <a
-              href="/?library=1#public-catalog"
-              className="font-semibold text-indigo-700 hover:text-indigo-600 underline decoration-indigo-300 shrink-0"
-            >
-              {translate(language, 'publicLanding.openCatalog')}
-            </a>
-            <a
               href="https://fjsti.uz"
               target="_blank"
               rel="noopener noreferrer"
@@ -637,23 +740,11 @@ export default function App() {
             <span className="font-medium text-violet-700">{translate(language, 'footer.patent')}</span>
             <span className="font-medium text-slate-700">{translate(language, 'footer.license')}</span>
             <span className="font-medium text-cyan-700">{translate(language, 'footer.certified')}</span>
-            <a
-              href="/?library=1#public-catalog"
-              className="font-semibold text-teal-700 hover:text-teal-600 underline decoration-teal-300"
-            >
-              {translate(language, 'publicLanding.openCatalog')}
-            </a>
           </div>
         </div>
       </div>
     </div>
   );
-
-  const wantsPublicLibrary = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('library') === '1' || window.location.hash === '#public-catalog';
-  }, []);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -675,7 +766,10 @@ export default function App() {
       <GlobalTopicContext.Provider value={selectedTopic}>
       <AppNavigationContext.Provider value={{ openSyllabus }}>
       <GlobalLectureContext.Provider value={lectureContextValue}>
-      {!user || wantsPublicLibrary ? (
+      {!user && isMobileDevice ? (
+        // Telefonda landing kerak emas — darhol kirish sahifasi.
+        <MobileAuthScreen />
+      ) : !user ? (
         <PublicLandingPage
           language={language}
           setLanguage={setLanguage}
@@ -685,99 +779,188 @@ export default function App() {
         />
       ) : shouldHodimUseMobileCompanion(user, isMobileDevice) ? (
         <HodimMobileCompanion />
-      ) : userRole === 'hodim' && isDesktopBrowser() && !isDesktopPairedSession(user.uid) ? (
-        <div className="min-h-[100dvh] w-full flex items-center justify-center bg-gradient-to-br from-[#eef6ff] via-[#f5f8ff] to-[#f3f0ff] p-4 overflow-y-auto">
-          <DesktopHodimQrLogin
-            onOtherRoles={() => {
-              clearBackendAuthTokens();
-              clearDesktopPairedSession(user.uid);
-              logoutLocalStaff();
-            }}
-          />
-        </div>
       ) : (
       <>
-      <div className="flex flex-col h-[100dvh] min-h-0 w-full relative overflow-hidden bg-gradient-to-br from-[#eef6ff] via-[#f5f8ff] to-[#f3f0ff] text-[#1c1c1e] selection:bg-sky-500/30">
+      <div className="flex flex-col h-[100dvh] min-h-0 w-full relative overflow-hidden bg-[#f4f6fa] text-[#1c1c1e] selection:bg-blue-500/20">
       
-      {/* Background iOS Orbs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-400/25 rounded-full blur-[120px] pointer-events-none orb-float" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-purple-400/20 rounded-full blur-[140px] pointer-events-none orb-float" />
-      <div className="absolute top-[20%] right-[10%] w-[30%] h-[40%] bg-cyan-300/20 rounded-full blur-[100px] pointer-events-none orb-float" />
+      {/* Tepada zaif iliqlik — mazmunni bosmaydi, chuqurlik beradi. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[280px] bg-gradient-to-b from-[#e8eef9] to-transparent" />
 
       {/* Main Layout Container */}
       <div className="relative z-10 flex w-full flex-1 min-h-0 p-1.5 sm:p-2 lg:p-3 gap-1.5 sm:gap-2">
         
         {/* Floating Sidebar — desktop / tablet only */}
-        <motion.aside 
+        <motion.aside
           initial={false}
-          animate={{ width: isSidebarOpen ? 280 : 88 }}
-          className="hidden md:flex md:flex-col ios-glass rounded-[2rem] z-50 shrink-0 overflow-hidden relative shadow-2xl pb-4 border border-white/60 print:hidden"
+          animate={{ width: isSidebarOpen ? 264 : 76 }}
+          transition={{ type: 'spring', stiffness: 700, damping: 42, mass: 0.6 }}
+          className="relative z-50 hidden shrink-0 overflow-hidden rounded-[26px] border border-black/[0.06] bg-white pb-3 shadow-[0_1px_2px_rgba(8,48,71,0.04),0_16px_44px_-20px_rgba(8,48,71,0.20)] md:flex md:flex-col print:hidden"
         >
-          <div className="p-6 flex items-center justify-between pb-4">
-            <div className={`flex items-center gap-3 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
+          <div
+            className={`flex items-center gap-2 px-3 pb-3.5 pt-4 ${
+              isSidebarOpen ? 'justify-between' : 'flex-col justify-center gap-2.5'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
               <img
                 src="/imentor-logo.png"
                 alt="iMentor"
-                className="w-12 h-12 rounded-2xl object-cover shadow-lg border border-white/70 bg-white shrink-0"
+                className="h-10 w-10 shrink-0 rounded-xl border border-black/[0.06] object-cover"
               />
-              <div className="flex flex-col min-w-max">
-                <span className="font-semibold text-[15px] tracking-tight leading-tight text-black/90">
-                  iMentor
-                </span>
-                <span className="text-[11px] text-black/50 font-medium tracking-wide">iMentor Platform</span>
-              </div>
+              {/* Nom yig'ilganda yo'qoladi — kesilib emas, yumshoq so'nib. */}
+              <AnimatePresence initial={false}>
+                {isSidebarOpen && (
+                  <motion.div
+                    key="brand"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -6 }}
+                    transition={{ duration: 0.12 }}
+                    className="flex min-w-0 flex-col leading-tight"
+                  >
+                    <span className="truncate text-[15.5px] font-bold tracking-tight text-[#083047]">
+                      iMentor
+                    </span>
+                    <span className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-black/30">
+                      Platform
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            <button 
+            <motion.button
               onClick={() => setSidebarOpen(!isSidebarOpen)}
-              className="w-10 h-10 ios-glass-btn border border-black/5 flex justify-center items-center rounded-xl text-black/60 mx-auto bg-white/40 hover:bg-white/60 backdrop-blur-md transition-all shadow-sm shrink-0"
+              aria-label={translate(language, 'shell.mainMenu')}
+              aria-expanded={isSidebarOpen}
+              animate={
+                isSidebarOpen
+                  ? { scale: 1, backgroundColor: 'rgba(0,0,0,0)' }
+                  : { scale: [1, 1.07, 1], backgroundColor: 'rgba(37,99,235,0.08)' }
+              }
+              transition={
+                isSidebarOpen
+                  ? { duration: 0.15 }
+                  : { duration: 2.4, repeat: Infinity, ease: 'easeInOut' }
+              }
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.94 }}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                isSidebarOpen
+                  ? 'text-black/40 hover:bg-slate-100 hover:text-black/70'
+                  : 'text-blue-600 hover:bg-blue-100'
+              }`}
             >
-              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
+              {isSidebarOpen ? <X size={19} /> : <Menu size={19} />}
+            </motion.button>
           </div>
 
-          <div className={`px-6 mb-2 mt-2 transition-opacity duration-200 ${!isSidebarOpen ? 'opacity-0 h-0 hidden' : 'opacity-100'}`}>
-            <p className="text-[11px] font-semibold text-black/40 uppercase tracking-widest">
-              {translate(language, 'shell.mainMenu')}
-            </p>
-          </div>
+          <AnimatePresence initial={false}>
+            {isSidebarOpen && (
+              <motion.div
+                key="menu-label"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.12 }}
+                className="overflow-hidden px-5 pb-1.5"
+              >
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/25">
+                  {translate(language, 'shell.mainMenu')}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          <nav className="flex-1 px-4 py-2 space-y-2 overflow-y-auto scrollbar-hide">
-            {navItems.map((item) => (
-              <button
+          <nav className="scrollbar-hide flex-1 space-y-1 overflow-y-auto px-2.5 py-1">
+            {navItems.map((item) => {
+              const on = activeView === item.id;
+              const accent = accentFor(item.id);
+              return (
+                <button
                   key={item.id}
                   onClick={() => setActiveView(item.id as View)}
-                  className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all duration-300 text-[15px] group
-                    ${activeView === item.id 
-                      ? 'bg-blue-600 shadow-md shadow-blue-600/20 text-white font-semibold' 
-                      : 'text-black/60 hover:bg-white/60 hover:shadow-sm font-medium'}`}
+                  aria-current={on ? 'page' : undefined}
+                  title={!isSidebarOpen ? item.label : undefined}
+                  className={`group relative flex w-full items-center gap-3 rounded-2xl py-2.5 text-[14px] transition-colors ${
+                    isSidebarOpen ? 'px-2.5' : 'justify-center px-0'
+                  } ${
+                    on ? `${accent.row} font-semibold` : 'font-medium text-black/60 hover:bg-slate-50'
+                  }`}
                 >
-                  <item.icon size={22} className={`shrink-0 ${activeView === item.id ? 'text-white' : 'text-black/40 group-hover:text-blue-500 transition-colors'}`} strokeWidth={activeView === item.id ? 2.5 : 2} />
-                  {isSidebarOpen && <span className="truncate">{item.label}</span>}
+                  {/* Tanlov ko'rsatkichi bo'limlar orasida SILJIYDI. */}
+                  {on && (
+                    <motion.span
+                      layoutId="nav-active"
+                      transition={{ type: 'spring', stiffness: 520, damping: 38 }}
+                      className={`absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full ${accent.bar}`}
+                    />
+                  )}
+                  <span
+                    className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 ${
+                      on ? accent.on : accent.tile
+                    }`}
+                  >
+                    <item.icon size={18} strokeWidth={on ? 2.3 : 2} />
+                  </span>
+                  <AnimatePresence initial={false}>
+                    {isSidebarOpen && (
+                      <motion.span
+                        key="label"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.1 }}
+                        className="relative truncate"
+                      >
+                        {item.label}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </button>
-            ))}
+              );
+            })}
           </nav>
 
-          <div className="px-4 mt-auto space-y-3">
-             <button
-                onClick={handleLogout}
-                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all duration-300 text-[15px] text-rose-500 hover:bg-rose-500/10 hover:shadow-sm font-medium group`}
-              >
-                <LogOut size={22} className="shrink-0 text-rose-400 group-hover:text-rose-500 transition-colors" strokeWidth={2} />
-                {isSidebarOpen && <span className="truncate">{translate(language, 'shell.logout')}</span>}
-              </button>
+          <div className="mt-auto px-2.5 pt-2">
+            <div className="mx-2 mb-2 h-px bg-black/[0.06]" />
+            <button
+              onClick={handleLogout}
+              title={!isSidebarOpen ? translate(language, 'shell.logout') : undefined}
+              className={`group flex w-full items-center gap-3 rounded-2xl py-2.5 text-[14px] font-medium text-rose-600 transition hover:bg-rose-50 ${
+                isSidebarOpen ? 'px-2.5' : 'justify-center px-0'
+              }`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-500 transition-all duration-200 group-hover:scale-105">
+                <LogOut size={18} strokeWidth={2} />
+              </span>
+              <AnimatePresence initial={false}>
+                {isSidebarOpen && (
+                  <motion.span
+                    key="logout-label"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.1 }}
+                    className="truncate"
+                  >
+                    {translate(language, 'shell.logout')}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
           </div>
         </motion.aside>
 
         {/* Right Content Area */}
         <div className="flex-1 flex flex-col gap-2 sm:gap-4 overflow-hidden relative min-w-0 min-h-0">
           {/* Header */}
-          <header className="ios-glass h-16 sm:h-20 rounded-2xl sm:rounded-[2rem] flex items-center justify-between px-3 sm:px-8 shrink-0 z-40 shadow-sm border border-white/60 print:hidden gap-2">
+          <header className="z-40 flex h-14 shrink-0 items-center justify-between gap-2 rounded-2xl border border-black/[0.06] bg-white px-3 shadow-[0_1px_2px_rgba(8,48,71,0.04)] print:hidden sm:h-16 sm:px-5">
             <div className="flex items-center min-w-0 flex-1">
               <div className="flex-col space-y-0.5 min-w-0">
-                <h1 className="text-[14px] sm:text-[16px] font-semibold tracking-tight text-black/90 truncate">
+                <h1 className="truncate text-[14px] font-bold tracking-tight text-[#083047] sm:text-[15.5px]">
                   {translate(language, 'shell.platformTitle')}
                 </h1>
-                <p className="hidden sm:block text-[12px] text-black/50 font-medium tracking-wide truncate">
+                <p className="hidden truncate text-[11.5px] font-medium text-black/40 sm:block">
                   {userRole === 'admin'
                     ? translate(language, 'shell.platformSubtitle.admin')
                     : translate(language, 'shell.platformSubtitle.default')}
@@ -788,7 +971,7 @@ export default function App() {
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as AppLanguage)}
-                className="h-10 sm:h-11 max-w-[7rem] sm:max-w-none rounded-xl border border-white/60 bg-white/70 px-2 sm:px-3 text-[11px] sm:text-[12px] font-semibold text-black/70 outline-none"
+                className="h-9 max-w-[6.5rem] rounded-xl border border-black/[0.08] bg-white px-2 text-[12px] font-semibold text-black/65 outline-none transition focus:border-blue-400 sm:h-10 sm:max-w-none sm:px-3"
                 aria-label={translate(language, 'shell.languageAria')}
               >
                 <option value="uz">{languageLabel('uz')}</option>
@@ -798,7 +981,7 @@ export default function App() {
               <button
                 ref={notificationsButtonRef}
                 onClick={() => setNotificationsOpen((v) => !v)}
-                className="relative w-10 h-10 sm:w-11 sm:h-11 bg-white/50 border border-white/60 shadow-sm rounded-2xl flex items-center justify-center text-black/50 cursor-pointer hover:bg-white/80 transition-colors"
+                className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/45 transition hover:bg-slate-50 hover:text-black/70 sm:h-10 sm:w-10"
               >
                 <Bell size={20} />
                 {unreadCount > 0 && (
@@ -893,8 +1076,13 @@ export default function App() {
             </div>
           )}
 
-          {/* Main View Port — extra bottom padding on phones for tab bar */}
-          <div className="flex-1 overflow-y-auto scrollbar-hide rounded-2xl sm:rounded-[2rem] min-h-0 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+          {/* Ishchi maydon — telefonda pastki menyu uchun qo'shimcha joy.
+
+              Burchaklar ilgari yumaloq edi, chunki ishchi maydon oq
+              kartochka bo'lib fon ustida turardi. Endi kartochka yo'q —
+              yumaloqlik faqat aylantirilganda yopishqoq sarlavhaning
+              chetini qirqib qo'yardi. */}
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hide pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
             {userRole === 'hodim' && teachingSubjectsReady === null ? (
               <div className="h-full min-h-[50vh] flex flex-col items-center justify-center gap-3 text-slate-500">
                 <Loader2 size={40} className="animate-spin text-blue-500" />
@@ -969,16 +1157,26 @@ export default function App() {
                 key={item.id}
                 type="button"
                 onClick={() => setActiveView(item.id as View)}
-                className={`flex min-w-[3.75rem] max-w-[5rem] shrink-0 flex-col items-center justify-center rounded-2xl px-1 py-2 transition-colors ${
-                  active ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-black/55 active:bg-black/5'
+                className={`relative flex min-w-[3.75rem] max-w-[5rem] shrink-0 flex-col items-center justify-center rounded-2xl px-1 py-1.5 transition-colors ${
+                  active ? 'font-semibold' : 'text-black/55 active:bg-black/5'
                 }`}
               >
-                <item.icon
-                  size={22}
-                  strokeWidth={active ? 2.5 : 2}
-                  className={`shrink-0 ${active ? 'text-white' : 'text-black/45'}`}
-                />
-                <span className="mt-0.5 max-w-full truncate px-0.5 text-center text-[9px] font-semibold leading-tight">
+                {/* Tanlov ko'rsatkichi bo'limlar orasida siljiydi. */}
+                {active && (
+                  <motion.span
+                    layoutId="nav-active-mobile"
+                    transition={{ type: 'spring', stiffness: 520, damping: 38 }}
+                    className={`absolute inset-0 rounded-2xl ${accentFor(item.id).row}`}
+                  />
+                )}
+                <span
+                  className={`relative mb-0.5 flex h-8 w-8 items-center justify-center rounded-xl ${
+                    active ? accentFor(item.id).on : accentFor(item.id).tile
+                  }`}
+                >
+                  <item.icon size={17} strokeWidth={active ? 2.4 : 2} />
+                </span>
+                <span className="relative mt-0.5 max-w-full truncate px-0.5 text-center text-[9px] font-semibold leading-tight">
                   {navMobileLabel(language, item.id, item.label)}
                 </span>
               </button>

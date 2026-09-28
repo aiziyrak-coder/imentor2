@@ -33,5 +33,10 @@ class PreparedContent(Base):
     )
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    # Eskirgan material (masalan klinik bo'lmagan fanga bemor ssenariysi bilan
+    # yozilgan — `content_domain_audit`). O'CHIRILMAYDI: katalogdan va "oxirgi
+    # saqlangan" yuklanishidan chiqadi, o'qituvchi tarixida belgi bilan qoladi.
+    retired_reason: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    retired_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     syllabus = relationship("CourseSyllabus", lazy="joined")

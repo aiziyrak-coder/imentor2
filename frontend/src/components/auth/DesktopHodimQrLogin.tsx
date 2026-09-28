@@ -14,15 +14,15 @@ import {
 import { markDesktopPairedSession } from '../../utils/deviceSession';
 import { useUiText } from '../../i18n/useUiText';
 
+/** Oyna ochiq qolib ketsa cheksiz sessiya yaratilmasin: ~1 soatdan keyin to'xtaydi. */
+const MAX_AUTO_REFRESH = 6;
+
 type Props = {
+  /** QR o'rniga login va parol bilan kirish ekraniga o'tish. */
   onOtherRoles: () => void;
-  /** Talaba/Xodim tab bar ko'rsatilsinmi (login modal ichida — ha; post-login
-   * majburiy pairing ekranida — yo'q). */
-  showRoleTabs?: boolean;
-  onSelectTalaba?: () => void;
 };
 
-export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSelectTalaba }: Props) {
+export default function DesktopHodimQrLogin({ onOtherRoles }: Props) {
   const { t } = useUiText();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +31,8 @@ export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSele
   const [waitingPhone, setWaitingPhone] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const aliveRef = useRef(true);
+  const autoRefreshRef = useRef(0);
+  const startPairingRef = useRef<() => Promise<void>>(async () => {});
   const desktopSecretRef = useRef('');
 
   const stopPoll = useCallback(() => {
@@ -72,6 +74,13 @@ export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSele
           if (!aliveRef.current) return;
           if (st.status === 'expired') {
             stopPoll();
+            // Muddati tugagan QR o'zi yangilanadi — o'qituvchi tugma qidirmasin,
+            // telefon esa ekrandagi yangi kodni darhol skanerlay oladi.
+            if (autoRefreshRef.current < MAX_AUTO_REFRESH) {
+              autoRefreshRef.current += 1;
+              void startPairingRef.current();
+              return;
+            }
             setWaitingPhone(false);
             setError(t('auth.qrExpired'));
             return;
@@ -125,6 +134,8 @@ export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSele
     }
   }, [stopPoll, t]);
 
+  startPairingRef.current = startPairing;
+
   useEffect(() => {
     aliveRef.current = true;
     void startPairing();
@@ -145,24 +156,6 @@ export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSele
           {t('auth.qrSubtitle')}
         </p>
       </div>
-
-      {showRoleTabs && (
-        <div className="grid grid-cols-2 gap-2 rounded-xl bg-black/[0.04] p-1">
-          <button
-            type="button"
-            onClick={onSelectTalaba}
-            className="rounded-lg py-2 text-[13px] font-semibold text-black/45 transition"
-          >
-            {t('auth.loginModeStudent')}
-          </button>
-          <button
-            type="button"
-            className="rounded-lg py-2 text-[13px] font-semibold bg-white text-black/90 shadow-sm transition"
-          >
-            {t('auth.loginModeStaff')}
-          </button>
-        </div>
-      )}
 
       <div className="rounded-2xl border border-sky-100 bg-sky-50/90 px-3.5 py-2.5">
         <div className="flex items-center gap-2 mb-1.5">
@@ -205,7 +198,10 @@ export default function DesktopHodimQrLogin({ onOtherRoles, showRoleTabs, onSele
 
         <button
           type="button"
-          onClick={() => void startPairing()}
+          onClick={() => {
+            autoRefreshRef.current = 0;
+            void startPairing();
+          }}
           className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-sky-200 bg-white text-sky-800 font-semibold text-[14px] hover:bg-sky-50 transition-colors"
         >
           <RefreshCw size={16} />

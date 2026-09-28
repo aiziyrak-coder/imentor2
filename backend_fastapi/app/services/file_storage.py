@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 
 from app.core.config import get_settings
 
@@ -53,9 +54,16 @@ def _topic_dir(topic_norm: str) -> str:
     return slug.strip("_") or "topic"
 
 
-def handout_relative_path(topic_norm: str, owner_key: str, filename: str) -> str:
+def handout_relative_path(
+    topic_norm: str,
+    owner_key: str,
+    filename: str,
+    language: str = "",
+) -> str:
     safe = _safe_filename(filename)
-    return f"handouts/{_topic_dir(topic_norm)}/{owner_key}_{safe}"
+    lang = re.sub(r"[^a-z]", "", (language or "uz").lower())[:8] or "uz"
+    uniq = uuid.uuid4().hex[:10]
+    return f"handouts/{_topic_dir(topic_norm)}/{owner_key}_{lang}_{uniq}_{safe}"
 
 
 def presentation_relative_path(topic_norm: str, owner_key: str, filename: str) -> str:
@@ -82,15 +90,44 @@ def absolute_path(relative_path: str) -> str:
     return os.path.join(media_root(), relative_path)
 
 
-def validate_extension(filename: str, *, presentation: bool = False) -> bool:
-    ext = os.path.splitext(filename or "")[1].lower()
-    allowed = _ALLOWED_PRESENTATION_EXTENSIONS if presentation else _ALLOWED_EXTENSIONS
-    return ext in allowed
+def detect_extension(filename: str, content: bytes = b"", content_type: str = "") -> str:
+    """Haqiqiy rasm/PDF bo'lsa, nomdagi nuqtalar (masalan .translated.jpg) xalaqit bermasin."""
+    name = (filename or "").lower()
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    for ext in (".jpeg", ".jpg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg", ".heic", ".heif", ".pdf"):
+        if name.endswith(ext):
+            return ".jpg" if ext == ".jpeg" else ext
+    if content[:3] == b"\xff\xd8\xff" or ctype in {"image/jpeg", "image/jpg"}:
+        return ".jpg"
+    if content[:8] == b"\x89PNG\r\n\x1a\n" or ctype == "image/png":
+        return ".png"
+    if content[:6] in (b"GIF87a", b"GIF89a") or ctype == "image/gif":
+        return ".gif"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return ".webp"
+    if content[:5] == b"%PDF-" or ctype == "application/pdf":
+        return ".pdf"
+    if ctype.startswith("image/"):
+        return ".jpg"
+    return ""
 
 
-def detect_handout_kind(name: str, content_type: str) -> str:
-    lower = (name or "").lower()
-    if lower.endswith(".pdf") or content_type == "application/pdf":
+def validate_extension(
+    filename: str,
+    *,
+    presentation: bool = False,
+    content: bytes = b"",
+    content_type: str = "",
+) -> bool:
+    if presentation:
+        ext = os.path.splitext(filename or "")[1].lower()
+        return ext in _ALLOWED_PRESENTATION_EXTENSIONS
+    return detect_extension(filename, content, content_type) in _ALLOWED_EXTENSIONS
+
+
+def detect_handout_kind(name: str, content_type: str, content: bytes = b"") -> str:
+    ext = detect_extension(name, content, content_type)
+    if ext == ".pdf" or (content_type or "").split(";")[0].strip().lower() == "application/pdf":
         return "pdf"
     return "image"
 

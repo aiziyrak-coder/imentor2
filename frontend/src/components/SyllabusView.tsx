@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { motion } from 'motion/react';
 import { pushAppNotification } from '../utils/notifications';
 import {
-  BookOpen,
   Loader2,
-  FlaskConical,
-  Stethoscope,
   ArrowRight,
-  Check,
-  GraduationCap,
-  ListChecks,
   ChevronLeft,
   ChevronRight,
-  Microscope,
-  NotebookPen,
+  FileSpreadsheet,
+  ListPlus,
+  Pencil,
+  Trash2,
+  X,
 } from 'lucide-react';
+import StaffTeachingSubjectsPicker from './staff/StaffTeachingSubjectsPicker';
+import OwnSubjectUpload from './staff/OwnSubjectUpload';
 import type { SyllabusTopic } from '../services/aiService';
 import { AppLanguageContext } from '../App';
 import { useUiText } from '../i18n/useUiText';
@@ -25,8 +25,10 @@ import {
 } from '../utils/syllabusI18n';
 import type { UserRole } from '../utils/localStaffAuth';
 import {
+  deleteOwnSyllabus,
   fetchMyCourseSelections,
   isSyncUnavailable,
+  setMyTeachingSubjects,
   type CourseSyllabusRow,
   type StaffCourseSelectionRow,
 } from '../utils/syllabusApi';
@@ -42,8 +44,15 @@ import {
   resolveSyllabusInstructionLanguage,
 } from '../utils/syllabusInstructionLanguage';
 import { cacheSyllabusRows } from '../utils/syllabusRowCache';
+import type { PreparedContentKind } from '../utils/preparedContentStore';
+import {
+  COVERAGE_KINDS,
+  coveredKinds,
+  coveredTopicCount,
+  fetchTopicMaterialCoverage,
+  type TopicMaterialCoverage,
+} from '../utils/topicMaterialCoverage';
 import { PAGE_ROOT } from '../layout/pageContainer';
-import { staffCardLg, STAFF_HEADING } from './staff/staffUi';
 
 interface SyllabusViewProps {
   userRole: UserRole | null;
@@ -68,6 +77,12 @@ export default function SyllabusView({
   const [mySelections, setMySelections] = useState<StaffCourseSelectionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeSyllabusId, setActiveSyllabusId] = useState<number | null>(null);
+  /** Qaysi mavzuga nima tayyorlangan. Yuklanmaguncha `null` — belgilar
+   *  chizilmaydi, ro'yxat esa darhol ko'rinadi. */
+  const [coverage, setCoverage] = useState<TopicMaterialCoverage | null>(null);
+  /** Fan qo'shish oynasi: katalogdan tanlash yoki Excel'dan o'zi yuklash. */
+  const [dialog, setDialog] = useState<'catalog' | 'upload' | 'edit' | null>(null);
+  const [subjectBusy, setSubjectBusy] = useState(false);
 
   // Bitta fan bir nechta qatorga biriktirilgan bo'lishi mumkin — chiplar uchun noyob.
   const mySubjects = (() => {
@@ -154,6 +169,19 @@ export default function SyllabusView({
     void load();
   }, [load]);
 
+  /* Materiallar ko'rsatkichi ro'yxatdan KEYIN keladi: to'rt so'rov
+      qaytguncha mavzular allaqachon ekranda bo'ladi. Xato bo'lsa belgilar
+      shunchaki chiqmaydi — sahifa ishlashda davom etadi. */
+  useEffect(() => {
+    let alive = true;
+    void fetchTopicMaterialCoverage().then((map) => {
+      if (alive) setCoverage(map);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mySelections.length]);
+
   useEffect(() => {
     const onTeachingSubjectsChanged = () => {
       void load();
@@ -165,6 +193,17 @@ export default function SyllabusView({
   }, [load]);
 
   useEffect(() => {
+    // Tanlangan mavzu ro'yxatda yo'q fanga tegishli (o'chirilgan / olib
+    // tashlangan) — uni tozalaymiz, aks holda boshqa fanning mavzulari chiqardi.
+    if (
+      !loading &&
+      !error &&
+      selectedTopic?.syllabusId != null &&
+      !mySelections.some((s) => s.syllabus.id === selectedTopic.syllabusId)
+    ) {
+      onClearTopic();
+      return;
+    }
     if (selectedTopic?.syllabusId != null) {
       setActiveSyllabusId(selectedTopic.syllabusId);
       return;
@@ -177,7 +216,7 @@ export default function SyllabusView({
       if (prev != null && mySelections.some((s) => s.syllabus.id === prev)) return prev;
       return mySelections[0].syllabus.id;
     });
-  }, [mySelections, selectedTopic?.syllabusId]);
+  }, [mySelections, selectedTopic?.syllabusId, loading, error, onClearTopic]);
 
   const pickTopic = (
     topic: SyllabusTopic,
@@ -185,17 +224,31 @@ export default function SyllabusView({
     variantLabel: string,
   ) => {
     const instructionLanguage = resolveSyllabusInstructionLanguage(syllabus);
-    onSelectTopic(
-      buildTopicContext(
-        topic,
-        syllabus.id,
-        syllabus.subject_name,
-        syllabus.subject_code,
-        variantLabel,
-        instructionLanguage,
-        syllabus.department_name || '',
-      ),
+    const context = buildTopicContext(
+      topic,
+      syllabus.id,
+      syllabus.subject_name,
+      syllabus.subject_code,
+      variantLabel,
+      instructionLanguage,
+      syllabus.department_name || '',
     );
+    onSelectTopic(context);
+    return context;
+  };
+
+  /**
+   * O'qituvchi mavzuni O'ZI bosganda — darhol "Ma'ruza matni" sahifasiga o'tadi
+   * (keyingi qadam doim shu edi va "Keyingi" tugmasini qidirib o'tirardi).
+   * Sahifa ochilganda birinchi mavzuning avtomatik tanlanishi o'tkazmaydi.
+   */
+  const pickTopicAndOpen = (
+    topic: SyllabusTopic,
+    syllabus: CourseSyllabusRow,
+    variantLabel: string,
+  ) => {
+    const context = pickTopic(topic, syllabus, variantLabel);
+    if (userRole === 'hodim' || userRole === 'admin') onOpenLectures(context);
   };
 
   // Faol fanning biriktirish qatorlari
@@ -221,13 +274,6 @@ export default function SyllabusView({
   const activeClinicals = activeTopics.filter((topic) => topic.type === 'clinical');
   const activeIndependents = activeTopics.filter((topic) => topic.type === 'independent');
   const activeLabs = activeTopics.filter((topic) => topic.type === 'lab');
-  const topicColumnCount = [
-    activeLectures,
-    activePracticals,
-    activeClinicals,
-    activeIndependents,
-    activeLabs,
-  ].filter((g) => g.length > 0).length;
 
   const step1Done = mySelections.length > 0 && activeSyllabus != null;
   const step2Done = selectedTopic != null;
@@ -253,65 +299,186 @@ export default function SyllabusView({
     );
   }
 
-  return (
-    <div className={`${PAGE_ROOT} py-2 sm:py-3 pb-6`}>
-      <div className={`${staffCardLg} overflow-hidden`}>
-        <div className="px-3 sm:px-4 py-3 border-b border-white/60 bg-white/30">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="min-w-0">
-              <h2 className={`text-base sm:text-lg font-bold tracking-tight flex items-center gap-2 ${STAFF_HEADING}`}>
-                <GraduationCap className="text-[#083047] shrink-0" size={20} />
-                {t('syllabus.title')}
-              </h2>
-              <p className="text-black/50 mt-0.5 text-[11px] sm:text-xs leading-snug">{t('syllabus.subtitle')}</p>
-            </div>
-            <div className="flex flex-wrap gap-1.5 shrink-0">
-              {steps.map((label, i) => {
-                const done = i === 0 ? step1Done : step2Done;
-                const active =
-                  (i === 0 && !step1Done) || (i === 1 && step1Done && !step2Done);
-                return (
-                  <span
-                    key={label}
-                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] sm:text-[11px] font-semibold ${
-                      done
-                        ? 'bg-[#083047]/10 text-[#083047] border border-[#083047]/20'
-                        : active
-                          ? 'bg-white/80 text-[#083047] border border-black/10'
-                          : 'bg-white/50 text-black/55 border border-black/8'
-                    }`}
-                  >
-                    {done ? <Check size={12} /> : <ListChecks size={12} />}
-                    {label}
-                    {i < steps.length - 1 && <ChevronRight size={10} className="opacity-40 hidden sm:inline" />}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        </div>
 
-        {error && (
-          <div className="mx-3 sm:mx-4 mt-2 bg-rose-50 text-rose-700 px-3 py-2 rounded-lg text-xs font-medium border border-rose-100">
-            {error}
-          </div>
-        )}
+  const activeSelection = mySubjects.find((s) => s.syllabus.id === activeSyllabusId) ?? null;
 
-        <div className="border-b border-slate-100">
-        {/* 1-bosqich: Fan tanlash */}
-        <SyllabusStepSection
-          step={1}
-          title={t('syllabus.step1')}
-          done={step1Done}
-          active={!step1Done}
+  const removeActiveSubject = async () => {
+    if (!activeSelection) return;
+    const name = localizedSubjectName(activeSelection.syllabus, language);
+    const own = Boolean(activeSelection.is_own);
+    const ok = window.confirm(
+      own ? t('ownSubjects.deleteOwnConfirm', { name }) : t('ownSubjects.removeConfirm', { name }),
+    );
+    if (!ok) return;
+    setSubjectBusy(true);
+    try {
+      if (own) {
+        await deleteOwnSyllabus(activeSelection.syllabus.id);
+      } else {
+        const keep = mySubjects
+          .map((s) => s.syllabus.id)
+          .filter((id) => id !== activeSelection.syllabus.id);
+        await setMyTeachingSubjects(keep);
+      }
+      if (selectedTopic?.syllabusId === activeSelection.syllabus.id) onClearTopic();
+      setActiveSyllabusId(null);
+      await load();
+    } catch {
+      setError(t('ownSubjects.actionFailed'));
+    } finally {
+      setSubjectBusy(false);
+    }
+  };
+
+  const subjectActions = (
+    <div className="mt-4 grid gap-2">
+      <button
+        type="button"
+        onClick={() => setDialog('catalog')}
+        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+      >
+        <ListPlus size={15} />
+        {t('ownSubjects.pickFromCatalog')}
+      </button>
+      <button
+        type="button"
+        onClick={() => setDialog('upload')}
+        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+      >
+        <FileSpreadsheet size={15} />
+        {t('ownSubjects.uploadExcel')}
+      </button>
+      {activeSelection?.is_own && (
+        <button
+          type="button"
+          onClick={() => setDialog('edit')}
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:bg-white"
         >
+          <Pencil size={14} />
+          {t('ownSubjects.edit')}
+        </button>
+      )}
+      {activeSelection && (
+        <button
+          type="button"
+          onClick={() => void removeActiveSubject()}
+          disabled={subjectBusy}
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px] font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+        >
+          {subjectBusy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+          {activeSelection.is_own ? t('ownSubjects.deleteOwn') : t('ownSubjects.removeFromList')}
+        </button>
+      )}
+    </div>
+  );
+
+  const subjectDialog = dialog && (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/45 p-3 backdrop-blur-[2px] sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setDialog(null);
+      }}
+    >
+      <div className="max-h-[min(90dvh,760px)] w-full max-w-2xl overflow-y-auto rounded-3xl border border-black/5 bg-white p-5 shadow-2xl sm:p-7">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h2 className="text-lg font-bold text-slate-900">
+            {dialog === 'catalog'
+              ? t('ownSubjects.pickFromCatalog')
+              : dialog === 'edit'
+                ? t('ownSubjects.edit')
+                : t('ownSubjects.uploadExcel')}
+          </h2>
+          <button
+            type="button"
+            onClick={() => setDialog(null)}
+            aria-label={t('ownSubjects.close')}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {dialog === 'catalog' ? (
+          <StaffTeachingSubjectsPicker
+            variant="profile"
+            showHeader={false}
+            onSaved={() => {
+              setDialog(null);
+              void load();
+            }}
+          />
+        ) : dialog === 'edit' && activeSelection ? (
+          <OwnSubjectUpload
+            editing={activeSelection.syllabus}
+            onUpdated={(stats) => {
+              setDialog(null);
+              pushAppNotification({
+                title: t('common.doneTitle'),
+                body: t('ownSubjects.updated', {
+                  added: String(stats.added ?? 0),
+                  removed: String(stats.removed ?? 0),
+                  kept: String(stats.kept_with_material ?? 0),
+                }),
+                level: 'success',
+              });
+              void load();
+            }}
+          />
+        ) : (
+          <OwnSubjectUpload
+            onCreated={(syllabusId) => {
+              setDialog(null);
+              pushAppNotification({
+                title: t('common.doneTitle'),
+                body: t('ownSubjects.created'),
+                level: 'success',
+              });
+              void load().then(() => setActiveSyllabusId(syllabusId));
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+
+  const topicGroups = [
+    { key: 'lectures', title: t('syllabus.lectures'), topics: activeLectures },
+    { key: 'practicals', title: t('syllabus.practicals'), topics: activePracticals },
+    { key: 'clinicals', title: t('syllabus.clinicals'), topics: activeClinicals },
+    { key: 'independents', title: t('syllabus.independents'), topics: activeIndependents },
+    { key: 'labs', title: t('syllabus.labs'), topics: activeLabs },
+  ].filter((g) => g.topics.length > 0);
+
+  return (
+    <div className={`${PAGE_ROOT} py-6 pb-10`}>
+      {/*
+       * Tinch joylashuv.
+       *
+       * Ilgari har element o'z qutisida edi: kartochka ichida kartochka,
+       * chegara ustida chegara, rangli nishon va qalin soya. Yigirmata
+       * mavzu shunday chizilganda sahifa og'irlashib ketardi va ko'z
+       * qayerga qarashni bilmasdi.
+       *
+       * Endi quti yo'q. Bo'limlarni ingichka chiziq va bo'sh joy ajratadi,
+       * holat esa rang bilan emas, og'irlik bilan ko'rsatiladi: tanlangan
+       * narsa to'q, qolgani och. Shu tufayli mazmun oldinga chiqadi.
+       */}
+      <div className="grid items-start gap-x-12 gap-y-8 lg:grid-cols-[230px_1fr]">
+        {/* ─────────── Fanlar ─────────── */}
+        <aside className="lg:sticky lg:top-4">
+          <p className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            {t('syllabus.step1')}
+          </p>
+
           {mySelections.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5">
+            <nav className="-ml-3 space-y-0.5">
               {mySubjects.map((sel) => {
                 const syllabus = sel.syllabus;
                 const isActive = activeSyllabusId === syllabus.id;
                 const variants = resolveSyllabusVariants(syllabus);
                 const topics = totalTopicCount(variants);
+                const doneTopics = coveredTopicCount(coverage, syllabus.id);
                 return (
                   <button
                     key={sel.id}
@@ -320,284 +487,206 @@ export default function SyllabusView({
                       setActiveSyllabusId(syllabus.id);
                       if (selectedTopic?.syllabusId !== syllabus.id) onClearTopic();
                     }}
-                    className={`inline-flex items-center gap-1.5 pl-2.5 pr-2.5 py-1.5 rounded-lg border text-[12px] transition ${
-                      isActive
-                        ? 'border-blue-400 bg-blue-50'
-                        : 'border-slate-200 bg-white hover:border-blue-300'
+                    className={`relative block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-150 ${
+                      isActive ? 'bg-white' : 'hover:bg-white/70'
                     }`}
                   >
-                    <span className="font-semibold text-slate-900 truncate max-w-[160px] sm:max-w-[220px]">
+                    {isActive && (
+                      <motion.span
+                        layoutId="subject-active"
+                        transition={{ type: 'spring', stiffness: 620, damping: 42 }}
+                        className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-slate-900"
+                      />
+                    )}
+                    <span
+                      className={`block text-[13px] leading-snug ${
+                        isActive ? 'font-semibold text-slate-900' : 'font-medium text-slate-500'
+                      }`}
+                    >
                       {localizedSubjectName(syllabus, language)}
+                      {sel.is_own && (
+                        <span className="ml-1.5 whitespace-nowrap rounded bg-emerald-50 px-1 py-px align-middle text-[9.5px] font-semibold text-emerald-700">
+                          {t('ownSubjects.ownBadge')}
+                        </span>
+                      )}
                     </span>
-                    <span className="text-[9px] text-slate-500 shrink-0">
-                      {instructionLanguageBadge(resolveSyllabusInstructionLanguage(syllabus))}
-                    </span>
-                    <span className="text-[9px] text-slate-400 shrink-0">
-                      {topics} {t('syllabus.topics')}
+                    {/* Nechta mavzuda material bor — fanni tanlamasdan turib
+                        ko'rinadi. Ma'lumot kelmaguncha chiziq bo'sh turadi. */}
+                    <span className="mt-1.5 flex items-center gap-2">
+                      <span className="h-[3px] w-16 overflow-hidden rounded-full bg-slate-900/[0.07]">
+                        <span
+                          className="block h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+                          style={{
+                            width: topics
+                              ? `${Math.min(100, Math.round((doneTopics / topics) * 100))}%`
+                              : '0%',
+                          }}
+                        />
+                      </span>
+                      <span className="text-[10.5px] tabular-nums text-slate-400">
+                        {doneTopics}/{topics}
+                      </span>
+                      <span className="text-[10.5px] text-slate-300">
+                        {instructionLanguageBadge(resolveSyllabusInstructionLanguage(syllabus))}
+                      </span>
                     </span>
                   </button>
                 );
               })}
-            </div>
+            </nav>
           ) : (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-3 space-y-1">
-              <p className="text-[12px] font-semibold text-amber-900">{t('syllabus.noAssignedCourses')}</p>
-              <p className="text-[11px] text-amber-800 leading-relaxed">{t('syllabus.noAssignedCoursesHint')}</p>
+            <div className="space-y-1">
+              <p className="text-[13px] font-semibold text-slate-800">{t('ownSubjects.emptyTitle')}</p>
+              <p className="text-[12.5px] leading-relaxed text-slate-500">{t('ownSubjects.emptyHint')}</p>
             </div>
           )}
-        </SyllabusStepSection>
-        </div>
+          {subjectActions}
+        </aside>
 
-        {/* 2-bosqich: Mavzu tanlash */}
-        <SyllabusStepSection
-          step={2}
-          title={t('syllabus.stepTopic')}
-          done={step2Done}
-          active={step1Done && !step2Done}
-          muted={!step1Done}
-        >
+        {/* ─────────── Mavzular ─────────── */}
+        <section className="min-w-0">
+          {error && (
+            <p className="mb-6 text-[13px] font-medium text-rose-600">{error}</p>
+          )}
+
           {!step1Done ? (
-            <p className="text-sm text-slate-400 italic">{t('syllabus.stepTopicLocked')}</p>
-          ) : activeSyllabus ? (
-            <div className="space-y-3">
+            mySelections.length === 0 ? (
+              <div className="mx-auto grid max-w-2xl gap-3 py-10 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setDialog('catalog')}
+                  className="rounded-2xl bg-white p-5 text-left ring-1 ring-slate-900/[0.06] transition hover:ring-slate-900/20"
+                >
+                  <ListPlus size={22} className="text-slate-700" />
+                  <p className="mt-3 text-[14px] font-semibold text-slate-900">{t('ownSubjects.pickFromCatalog')}</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-slate-500">{t('ownSubjects.catalogHint')}</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDialog('upload')}
+                  className="rounded-2xl bg-white p-5 text-left ring-1 ring-slate-900/[0.06] transition hover:ring-slate-900/20"
+                >
+                  <FileSpreadsheet size={22} className="text-emerald-600" />
+                  <p className="mt-3 text-[14px] font-semibold text-slate-900">{t('ownSubjects.uploadExcel')}</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-slate-500">{t('ownSubjects.uploadHint')}</p>
+                </button>
+              </div>
+            ) : (
+              <p className="py-20 text-center text-[13.5px] text-slate-400">
+                {t('syllabus.stepTopicLocked')}
+              </p>
+            )
+          ) : (
+            <>
+              {/* Tanlangan mavzu — baland lenta emas, tinch qator.
+                  Amal matn tugmasi: e'tibor mavzuda qoladi, tugmada emas. */}
               {selectedTopic && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-3 space-y-2">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="sticky top-0 z-20 -mx-2 mb-8 bg-[#f4f6fa]/95 px-2 py-3 backdrop-blur-sm">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-slate-900/10 pb-3">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700">
-                        {t('syllabus.selectedTopic')}
+                      <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                        {formatTopicLessonLabel(selectedTopic.type, selectedTopic.id, t)}
                       </p>
-                      <p className="text-[12px] font-semibold text-gray-900 mt-0.5 leading-snug">
-                        <span className="text-blue-700">
-                          {formatTopicLessonLabel(selectedTopic.type, selectedTopic.id, t)}
-                        </span>
-                        {' — '}
+                      {/* Ekran keng bo'lsa ham sarlavha 60ch dan oshmaydi:
+                          bir metrlik satrni o'qib bo'lmaydi. */}
+                      <h2 className="mt-1 line-clamp-2 max-w-[60ch] text-[16px] font-semibold leading-snug tracking-tight text-slate-900">
                         {localizedTopicTitle(activeSyllabus, selectedTopic.title, language)}
-                      </p>
+                      </h2>
                     </div>
                     <button
                       type="button"
                       onClick={() => onOpenLectures(selectedTopic)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[12px] font-semibold shrink-0"
+                      className="group inline-flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-3.5 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-slate-700"
                     >
                       {t('syllabus.next')}
-                      <ArrowRight size={14} />
+                      <ArrowRight
+                        size={14}
+                        className="transition-transform duration-200 group-hover:translate-x-0.5"
+                      />
                     </button>
                   </div>
                 </div>
               )}
 
-              <div
-                className={
-                  topicColumnCount >= 3
-                    ? 'grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3'
-                    : topicColumnCount === 2
-                      ? 'grid grid-cols-1 xl:grid-cols-2 gap-3'
-                      : 'space-y-3'
-                }
-              >
-                {activeLectures.length > 0 && (
-                  <TopicColumn
-                    title={t('syllabus.lectures')}
-                    icon={<BookOpen size={18} />}
-                    iconBg="bg-blue-50 text-blue-600"
-                    topics={activeLectures}
-                    selectedTopic={selectedTopic}
-                    syllabus={activeSyllabus}
-                    variantLabel={activeLabel}
-                    onPickTopic={pickTopic}
-                    accent="blue"
-                  />
-                )}
-                {activePracticals.length > 0 && (
-                  <TopicColumn
-                    title={t('syllabus.practicals')}
-                    icon={<FlaskConical size={18} />}
-                    iconBg="bg-indigo-50 text-indigo-600"
-                    topics={activePracticals}
-                    selectedTopic={selectedTopic}
-                    syllabus={activeSyllabus}
-                    variantLabel={activeLabel}
-                    onPickTopic={pickTopic}
-                    accent="indigo"
-                  />
-                )}
-                {activeClinicals.length > 0 && (
-                  <TopicColumn
-                    title={t('syllabus.clinicals')}
-                    icon={<Stethoscope size={18} />}
-                    iconBg="bg-teal-50 text-teal-600"
-                    topics={activeClinicals}
-                    selectedTopic={selectedTopic}
-                    syllabus={activeSyllabus}
-                    variantLabel={activeLabel}
-                    onPickTopic={pickTopic}
-                    accent="teal"
-                  />
-                )}
-                {activeIndependents.length > 0 && (
-                  <TopicColumn
-                    title={t('syllabus.independents')}
-                    icon={<NotebookPen size={18} />}
-                    iconBg="bg-amber-50 text-amber-700"
-                    topics={activeIndependents}
-                    selectedTopic={selectedTopic}
-                    syllabus={activeSyllabus}
-                    variantLabel={activeLabel}
-                    onPickTopic={pickTopic}
-                    accent="amber"
-                  />
-                )}
-                {activeLabs.length > 0 && (
-                  <TopicColumn
-                    title={t('syllabus.labs')}
-                    icon={<Microscope size={18} />}
-                    iconBg="bg-slate-100 text-slate-700"
-                    topics={activeLabs}
-                    selectedTopic={selectedTopic}
-                    syllabus={activeSyllabus}
-                    variantLabel={activeLabel}
-                    onPickTopic={pickTopic}
-                    accent="slate"
-                  />
-                )}
-              </div>
-            </div>
-          ) : null}
-        </SyllabusStepSection>
+              {activeSyllabus && topicGroups.length > 0 ? (
+                <div className="space-y-10">
+                  {topicGroups.map((group) => (
+                    <TopicColumn
+                      key={group.key}
+                      title={group.title}
+                      topics={group.topics}
+                      selectedTopic={selectedTopic}
+                      syllabus={activeSyllabus}
+                      variantLabel={activeLabel}
+                      coverage={coverage}
+                      onPickTopic={pickTopicAndOpen}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="py-20 text-center text-[13.5px] text-slate-400">
+                  {t('syllabus.noTopicsInTrack')}
+                </p>
+              )}
+            </>
+          )}
+        </section>
       </div>
+      {subjectDialog}
     </div>
   );
 }
 
-function SyllabusStepSection({
-  step,
-  title,
-  done,
-  active,
-  muted,
-  className,
-  children,
-}: {
-  step: number;
-  title: string;
-  done: boolean;
-  active: boolean;
-  muted?: boolean;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={`px-3 sm:px-4 py-3 ${muted ? 'opacity-70' : ''} ${className ?? ''}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span
-          className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
-            done
-              ? 'bg-emerald-500 text-white'
-              : active
-                ? 'bg-blue-600 text-white ring-2 ring-blue-200'
-                : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          {done ? <Check size={14} /> : step}
-        </span>
-        <h3 className="text-[13px] font-bold text-slate-900">{title}</h3>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-type TopicAccent = 'blue' | 'indigo' | 'teal' | 'amber' | 'slate';
-
-const ACCENT_STYLES: Record<
-  TopicAccent,
-  { selected: string; hover: string; badgeOn: string; badgeOff: string; check: string }
-> = {
-  blue: {
-    selected: 'border-2 ring-blue-200 border-blue-500 bg-blue-50/80',
-    hover: 'hover:border-blue-300 hover:bg-blue-50/50',
-    badgeOn: 'bg-blue-600 text-white',
-    badgeOff: 'bg-blue-50 text-blue-700',
-    check: 'text-blue-600',
-  },
-  indigo: {
-    selected: 'border-2 ring-indigo-200 border-indigo-500 bg-indigo-50/80',
-    hover: 'hover:border-indigo-300 hover:bg-indigo-50/50',
-    badgeOn: 'bg-indigo-600 text-white',
-    badgeOff: 'bg-indigo-50 text-indigo-700',
-    check: 'text-indigo-600',
-  },
-  teal: {
-    selected: 'border-2 ring-teal-200 border-teal-500 bg-teal-50/80',
-    hover: 'hover:border-teal-300 hover:bg-teal-50/50',
-    badgeOn: 'bg-teal-600 text-white',
-    badgeOff: 'bg-teal-50 text-teal-700',
-    check: 'text-teal-600',
-  },
-  amber: {
-    selected: 'border-2 ring-amber-200 border-amber-500 bg-amber-50/80',
-    hover: 'hover:border-amber-300 hover:bg-amber-50/50',
-    badgeOn: 'bg-amber-600 text-white',
-    badgeOff: 'bg-amber-50 text-amber-800',
-    check: 'text-amber-700',
-  },
-  slate: {
-    selected: 'border-2 ring-slate-200 border-slate-500 bg-slate-50',
-    hover: 'hover:border-slate-300 hover:bg-slate-50',
-    badgeOn: 'bg-slate-700 text-white',
-    badgeOff: 'bg-slate-100 text-slate-700',
-    check: 'text-slate-700',
-  },
-};
-
+/* Ikki ustunli ro'yxatda o'n mavzu bir ekranga sig'adi; qolgani
+   sahifalanadi, chunki yigirmatasi birdan chiqsa ro'yxat cho'zilib
+   ketadi va tanlash qiyinlashadi. */
 const TOPICS_PER_PAGE = 10;
 
+/**
+ * Bir turdagi mavzular ro'yxati.
+ *
+ * Bu ro'yxatning butun qiyinligi — sarlavhalar. Tibbiy mavzu nomi ko'pincha
+ * to'rt qatorlik jumla bo'ladi ("Nafas yo'li infeksiyalari epidemiologiyasi,
+ * profilaktikasi va epidemiyaga qarshi chora-tadbirlarni tashkillashtirishning
+ * o'ziga xos xususiyatlari va mazmuni: difteriya, qizamiq..."). O'ntasi
+ * ketma-ket to'liq chiqarilsa, ro'yxat emas — matn devori hosil bo'ladi va
+ * o'qituvchi qayerda bir mavzu tugab, ikkinchisi boshlanganini ko'rmaydi.
+ *
+ * Shuning uchun uchta qoida:
+ *   1. sarlavha IKKI QATORGA qisqartiriladi — to'lig'i tanlangandan keyin
+ *      tepadagi sarlavhada va sichqoncha ustida turganda chiqadi;
+ *   2. har mavzu O'Z PLITKASIDA — orasidagi bo'sh joy chegarani aniq
+ *      ko'rsatadi. Faqat chiziq bilan ajratilganda ikki ustundagi
+ *      matnlar bir-biriga qo'shilib ketardi;
+ *   3. chapda raqam nishoni — ko'z ilashadigan nuqta, ro'yxat sanaladigan
+ *      bo'lib qoladi.
+ *
+ * Tanlangani: chap chekkada to'q chiziq, yengil fon, qalin matn.
+ */
 function TopicColumn({
   title,
-  icon,
-  iconBg,
   topics,
   selectedTopic,
   syllabus,
   variantLabel,
+  coverage,
   onPickTopic,
-  accent,
 }: {
   title: string;
-  icon: React.ReactNode;
-  iconBg: string;
   topics: SyllabusTopic[];
   selectedTopic: SyllabusTopicContext | null;
   syllabus: CourseSyllabusRow;
   variantLabel: string;
+  coverage: TopicMaterialCoverage | null;
   onPickTopic: (topic: SyllabusTopic, syllabus: CourseSyllabusRow, variantLabel: string) => void;
-  accent: TopicAccent;
 }) {
   const { t } = useUiText();
-  const [page, setPage] = useState(0);
-  const listKey = `${syllabus.id}::${variantLabel}::${accent}`;
+  const [page, setPage] = React.useState(0);
   const totalPages = Math.max(1, Math.ceil(topics.length / TOPICS_PER_PAGE));
+  const listKey = `${syllabus.id}-${variantLabel}-${topics.length}`;
 
-  useEffect(() => {
+  React.useEffect(() => {
     setPage(0);
-  }, [listKey]);
-
-  useEffect(() => {
-    if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
-  }, [page, totalPages]);
-
-  useEffect(() => {
-    if (!selectedTopic) return;
-    const instructionLanguage = resolveSyllabusInstructionLanguage(syllabus);
-    const idx = topics.findIndex((topic) =>
-      topicsMatch(
-        selectedTopic,
-        buildTopicContext(topic, syllabus.id, syllabus.subject_name, syllabus.subject_code, variantLabel, instructionLanguage, syllabus.department_name || ''),
-      ),
-    );
-    if (idx >= 0) setPage(Math.floor(idx / TOPICS_PER_PAGE));
-    // Faqat tanlangan mavzu yoki ro'yxat o'zgarganda — sahifa almashtirishda qayta ishlamasin
     // eslint-disable-next-line react-hooks/exhaustive-deps -- topics listKey bilan birga yangilanadi
   }, [selectedTopic, listKey]);
 
@@ -606,101 +695,159 @@ function TopicColumn({
   const showPagination = topics.length > TOPICS_PER_PAGE;
 
   const { language } = React.useContext(AppLanguageContext);
-  const tone = ACCENT_STYLES[accent];
+
+  const kindLabels: Record<string, string> = {
+    lecture: t('nav.lectures'),
+    presentation: t('nav.presentation'),
+    case: t('nav.cases'),
+    test: t('nav.tests'),
+  };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`p-1 rounded-md shrink-0 ${iconBg}`}>{icon}</div>
-          <h4 className="text-[13px] font-bold text-gray-800 truncate">{title}</h4>
-        </div>
-        {topics.length > 0 && (
-          <span className="text-[10px] font-semibold text-gray-400 shrink-0">
-            {topics.length} {t('syllabus.topics')}
-          </span>
-        )}
+    <section>
+      <div className="mb-3 flex items-baseline gap-3">
+        <h3 className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          {title}
+        </h3>
+        <span className="h-px flex-1 bg-slate-900/[0.07]" />
+        <span className="text-[11px] tabular-nums text-slate-400">{topics.length}</span>
       </div>
+
       {topics.length > 0 ? (
-        <div className="space-y-2">
-        <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {visibleTopics.map((topic) => {
-            const ctx = buildTopicContext(
-              topic,
-              syllabus.id,
-              syllabus.subject_name,
-              syllabus.subject_code,
-              variantLabel,
-              resolveSyllabusInstructionLanguage(syllabus),
-              syllabus.department_name || '',
-            );
-            const isSelected = topicsMatch(selectedTopic, ctx);
-            return (
-              <button
-                key={`${syllabus.id}-${variantLabel}-${topic.id}-${topic.title}`}
-                type="button"
-                onClick={() => onPickTopic(topic, syllabus, variantLabel)}
-                className={`flex items-start gap-2 p-2 sm:p-2.5 text-left rounded-xl border shadow-sm transition-all ${
-                  isSelected ? tone.selected : `bg-white border-gray-100 ${tone.hover}`
-                }`}
-              >
-                <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[11px] shrink-0 ${
-                    isSelected ? tone.badgeOn : tone.badgeOff
+        <>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {visibleTopics.map((topic, index) => {
+              const ctx = buildTopicContext(
+                topic,
+                syllabus.id,
+                syllabus.subject_name,
+                syllabus.subject_code,
+                variantLabel,
+                resolveSyllabusInstructionLanguage(syllabus),
+                syllabus.department_name || '',
+              );
+              const isSelected = topicsMatch(selectedTopic, ctx);
+              const fullTitle = localizedTopicTitle(syllabus, topic.title, language);
+              return (
+                <motion.button
+                  key={`${syllabus.id}-${variantLabel}-${topic.id}-${topic.title}`}
+                  type="button"
+                  onClick={() => onPickTopic(topic, syllabus, variantLabel)}
+                  title={fullTitle}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.22, delay: Math.min(index * 0.018, 0.2) }}
+                  className={`group relative flex h-full items-start gap-3.5 overflow-hidden rounded-xl bg-white px-4 py-3.5 text-left ring-1 transition-all duration-200 ${
+                    isSelected
+                      ? 'ring-slate-900/25'
+                      : 'ring-slate-900/[0.06] hover:ring-slate-900/15'
                   }`}
                 >
-                  {topicNumberFromId(topic.id) || topic.id}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-semibold text-gray-500 leading-tight">
-                    {formatTopicLessonLabel(topic.type, topic.id, t)}
-                  </p>
-                  <p className="font-medium text-gray-800 text-[12px] leading-snug break-words line-clamp-2">
-                    {localizedTopicTitle(syllabus, topic.title, language)}
-                  </p>
-                </div>
-                {isSelected ? (
-                  <Check size={20} className={tone.check} />
-                ) : (
-                  <ArrowRight size={18} className="text-gray-300 shrink-0 mt-1" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {showPagination && (
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <button
-              type="button"
-              disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-gray-200 bg-white text-[12px] font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft size={16} />
-              {t('common.prev')}
-            </button>
-            <span className="text-[12px] font-medium text-gray-500 tabular-nums">
-              {t('syllabus.topicRange', {
-                from: pageStart + 1,
-                to: Math.min(pageStart + TOPICS_PER_PAGE, topics.length),
-                total: topics.length,
-              })}
-            </span>
-            <button
-              type="button"
-              disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-gray-200 bg-white text-[12px] font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {t('common.next')}
-              <ChevronRight size={16} />
-            </button>
+                  {/* Tanlangan plitkaning chap chekkasidagi belgisi. */}
+                  <span
+                    className={`absolute inset-y-0 left-0 w-[3px] transition-colors duration-200 ${
+                      isSelected ? 'bg-slate-900' : 'bg-transparent group-hover:bg-slate-200'
+                    }`}
+                  />
+                  <span
+                    className={`mt-px w-5 shrink-0 text-right text-[12px] font-semibold tabular-nums transition-colors ${
+                      isSelected ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-700'
+                    }`}
+                  >
+                    {topicNumberFromId(topic.id) || topic.id}
+                  </span>
+                  {/* Ikki qator — uzun tibbiy sarlavhalar ro'yxatni matnga
+                      aylantirib yubormasligi uchun. To'lig'i tanlangach
+                      tepadagi sarlavhada chiqadi. */}
+                  <span
+                    className={`line-clamp-2 min-w-0 flex-1 text-[13px] leading-[1.5] transition-colors ${
+                      isSelected
+                        ? 'font-semibold text-slate-900'
+                        : 'text-slate-700 group-hover:text-slate-900'
+                    }`}
+                  >
+                    {fullTitle}
+                  </span>
+                  <MaterialDots
+                    ready={coveredKinds(coverage, syllabus.id, topic.id)}
+                    labels={kindLabels}
+                  />
+                </motion.button>
+              );
+            })}
           </div>
-        )}
-        </div>
+
+          {showPagination && (
+            <div className="mt-5 flex items-center gap-4 text-[12px]">
+              <button
+                type="button"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                className="inline-flex items-center gap-1 font-medium text-slate-500 transition-colors hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"
+              >
+                <ChevronLeft size={14} />
+                {t('common.prev')}
+              </button>
+              <span className="tabular-nums text-slate-400">
+                {t('syllabus.topicRange', {
+                  from: pageStart + 1,
+                  to: Math.min(pageStart + TOPICS_PER_PAGE, topics.length),
+                  total: topics.length,
+                })}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                className="inline-flex items-center gap-1 font-medium text-slate-500 transition-colors hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"
+              >
+                {t('common.next')}
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </>
       ) : (
-        <p className="text-gray-400 text-sm italic">{t('syllabus.noTopicsInTrack')}</p>
+        <p className="py-4 text-[13px] text-slate-400">{t('syllabus.noTopicsInTrack')}</p>
       )}
-    </div>
+    </section>
+  );
+}
+
+/**
+ * Mavzuga nima tayyorlangani — to'rtta nuqta.
+ *
+ * Ro'yxatda o'ttizta mavzu bor va o'qituvchining birinchi savoli hamisha
+ * bitta: "buni tayyorlaganmidim?". Ilgari javobni faqat mavzuga kirib
+ * bilish mumkin edi. Endi qatorning o'zi aytadi — to'q nuqta bor degani,
+ * so'nigi yo'q degani. Yozuv emas, nuqta: o'ttizta qatorda o'ttizta yozuv
+ * ro'yxatni yana matnga aylantirib yuborardi.
+ *
+ * `ready` null bo'lsa (ma'lumot hali kelmagan yoki so'rov yiqilgan) —
+ * hech narsa chizilmaydi, bo'sh joy qoladi.
+ */
+function MaterialDots({
+  ready,
+  labels,
+}: {
+  ready: Set<PreparedContentKind> | null;
+  labels: Record<string, string>;
+}) {
+  if (!ready) return <span className="w-[35px] shrink-0" />;
+  const done = COVERAGE_KINDS.filter((k) => ready.has(k));
+  const title = done.length
+    ? done.map((k) => labels[k] || k).join(', ')
+    : undefined;
+  return (
+    <span title={title} className="mt-[5px] flex w-[35px] shrink-0 items-center gap-[3px]">
+      {COVERAGE_KINDS.map((kind) => (
+        <span
+          key={kind}
+          className={`h-[5px] w-[5px] rounded-full transition-colors ${
+            ready.has(kind) ? 'bg-emerald-500' : 'bg-slate-900/[0.09]'
+          }`}
+        />
+      ))}
+    </span>
   );
 }

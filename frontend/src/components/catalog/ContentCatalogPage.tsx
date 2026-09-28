@@ -67,7 +67,7 @@ function CatalogDetailPanel({
                 <span className="font-bold text-emerald-700">{i + 1}.</span>
                 {q.focus && (
                   <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase ${caseFocusBadgeClass(q.focus)}`}>
-                    {caseFocusLabel(q.focus, language)}
+                    {caseFocusLabel(q.focus, language, session.domain)}
                   </span>
                 )}
               </div>
@@ -78,7 +78,7 @@ function CatalogDetailPanel({
                 domain={session.domain}
               />
               <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600 mb-2">{session.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600 mb-2">{session.domain === 'clinical' ? t('case.clinicalOpinion') : t('case.academicOpinion')}</p>
                 <CaseAnswerView text={q.answer} />
               </div>
               {q.references && q.references.length > 0 && (

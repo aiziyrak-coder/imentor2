@@ -1,3 +1,4 @@
+import { resolveSubjectDomain } from './subjectDomain';
 import type { AppLanguage } from '../i18n/language';
 import type { SyllabusTopic, SyllabusTopicType } from '../services/aiService';
 import {
@@ -173,12 +174,24 @@ export async function generateAndUploadTopicHandouts(params: {
   onProgress?: (stage: HandoutGenerateProgress, lang?: AppLanguage) => void;
 }): Promise<TopicHandoutItem[]> {
   params.onProgress?.('ai');
+  // Poster bo'limlari fanga mos bo'lsin: IT yoki til posterida "Patogenez" chiqmasin.
+  const departmentName =
+    typeof params.topic === 'object' && params.topic && 'departmentName' in params.topic
+      ? params.topic.departmentName || ''
+      : '';
+  const domain = resolveSubjectDomain({
+    departmentName,
+    subjectName: params.subjectName,
+    subjectCode: params.subjectCode,
+    topic: params.topicTitle,
+  });
   const pack = await generateHandoutInfographicPack({
     topicTitle: params.topicTitle,
     topicId: params.topicId,
     topicType: String(params.topicType || 'lecture'),
     subjectName: params.subjectName,
     subjectCode: params.subjectCode,
+    domain,
   });
 
   const saved: TopicHandoutItem[] = [];

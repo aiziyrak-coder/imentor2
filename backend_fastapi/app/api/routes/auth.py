@@ -1,20 +1,30 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import datetime as dt
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, require_roles
+from app.api.deps import NO_ROLE, AuthContext, require_roles
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import create_access_token, create_refresh_token, decode_token, verify_password
-from app.core.throttling import throttle_login
+from app.core.staff_login import normalize_listener_login
+from app.core.throttling import throttle_login_account
+from app.models.online_edu import MalakaListener
+from app.models.staff_location import StaffProfile
 from app.models.user import User
 from app.schemas.auth import LocalLoginRequest, LoginResponse, TokenRefreshRequest, TokenRefreshResponse
 from app.schemas.auth_extra import OnlineTestStudentLoginRequest
+from app.schemas.malaka import MalakaLoginRequest
 from app.services import auth_service
+from app.services import password_policy_service as pwd_policy
+from app.services import staff_department as staff_dept
 from app.services import online_test_client as otc
+from app.services import staff_pinfl
 from app.services import staff_profile as sp
+from app.services.analytics_service import record_activity_event
 
 router = APIRouter()
 settings = get_settings()
@@ -29,10 +39,24 @@ def _login_response(
     *,
     student_id: str | None = None,
     group_name: str | None = None,
+    must_change: bool = False,
 ) -> LoginResponse:
     extra = {"role": role}
     if student_id:
         extra["student_id"] = student_id
+    # Guruh nomi ham tokenga: online ta'limda mavzu qulfi va davomat AYNAN
+    # guruh bo'yicha ishlaydi, shuning uchun uni brauzerdan so'rab bo'lmaydi —
+    # aks holda talaba boshqa guruh nomini yozib, o'zgalarning darsiga
+    # qo'shilib olardi. Bu QO'SHIMCHA da'vo: mavjud kod uni o'qimaydi va
+    # eski tokenlar ham ishlaydi.
+    if group_name:
+        extra["group_name"] = group_name
+    # Parol almashtirilmaguncha token faqat parol almashtirishga yaraydi
+    # (qarang: `deps.get_current_auth`). Da'vo faqat belgi — haqiqiy holat
+    # bazadan o'qiladi, shuning uchun parol almashtirilgach shu token ham
+    # darhol to'liq ishlay boshlaydi.
+    if must_change:
+        extra["mcp"] = 1
     access = create_access_token(user.id, extra)
     refresh = create_refresh_token(user.id, extra)
     return LoginResponse(
@@ -45,17 +69,65 @@ def _login_response(
         photo_url=sp.staff_photo_url_for_user(user.username, db),
         student_id=student_id,
         group_name=group_name,
+        must_change_password=must_change,
     )
+
+
+def _mask_login(username: str) -> str:
+    """`998939838000` -> `+998 93 ••• •• 00`; boshqa login -> `3442•••031`."""
+    if len(username) == 12 and username.isdigit() and username.startswith("998"):
+        return f"+998 {username[3:5]} ••• •• {username[-2:]}"
+    if len(username) > 6:
+        return f"{username[:4]}•••{username[-3:]}"
+    return "•••"
+
+
+def _disabled_account_message(db: Session, user: User) -> str:
+    """O'chirilgan hisob uchun xabar. Ko'p xodimning eski Xodim ID hisobi o'chirilgan,
+    ishlaydigani esa o'zi ro'yxatdan o'tgan telefon hisobi — avgustdagi qog'oz
+    ro'yxatdan Xodim ID yozib "parol xato" deb qolishardi. Parol to'g'ri kiritilgandan
+    keyingina (shu funksiya shundan so'ng chaqiriladi) ishlaydigan loginning yashirilgan
+    ko'rinishi aytiladi."""
+    first = (user.first_name or "").strip().lower()
+    last = (user.last_name or "").strip().lower()
+    if first and last:
+        twins = db.execute(
+            select(User.username).where(
+                User.is_active.is_(True),
+                User.id != user.id,
+                func.lower(func.trim(User.first_name)) == first,
+                func.lower(func.trim(User.last_name)) == last,
+            ).limit(2)
+        ).scalars().all()
+        if len(twins) == 1:
+            return (
+                "Bu eski hisob o'chirilgan. Siz boshqa login bilan ro'yxatdan o'tgansiz: "
+                f"{_mask_login(twins[0])}. Shu login va o'zingiz qo'ygan parol bilan kiring."
+            )
+    return "Bu hisob o'chirilgan. Telefon raqamingiz bilan kiring yoki administratorga murojaat qiling."
 
 
 @router.post("/auth/local-login/", response_model=LoginResponse)
 def local_login(
     payload: LocalLoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    _: None = Depends(throttle_login),
 ) -> LoginResponse:
     username = payload.phone_digits
+    throttle_login_account(request, username)
     user = auth_service.get_user_by_username(db, username)
+
+    # JSHSHIR (14 raqam) — hisob logini emas: cam.fermi.uz'dan bog'langan hisob topiladi,
+    # parol o'sha hisobning o'z paroli. JSHSHIR nomi bilan yangi hisob ochilmaydi.
+    if user is None and staff_pinfl.is_pinfl(username):
+        owner = staff_pinfl.owner_for(db, username)
+        user = auth_service.get_user_by_username(db, owner) if owner else None
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bu JSHSHIR hali iMentor hisobingizga bog'lanmagan. Xodim ID yoki telefon raqamingiz "
+                "bilan kiring yoki administratorga murojaat qiling.",
+            )
 
     if user is None:
         if not payload.register:
@@ -71,19 +143,37 @@ def local_login(
         )
         auth_service.set_user_role_group(db, user, reg_role)
         role = reg_role
+        now = dt.datetime.now(dt.timezone.utc)
+        profile = db.execute(select(StaffProfile).where(StaffProfile.owner_key == user.username)).scalar_one_or_none()
+        if profile is None:
+            profile = StaffProfile(owner_key=user.username, updated_at=now)
+            db.add(profile)
+        profile.faculty = payload.faculty.strip()
+        profile.direction = payload.direction.strip()
+        staff_dept.apply_staff_department(db, profile, department_name=payload.department.strip())
+        profile.updated_at = now
+        record_activity_event(db, owner_key=user.username, role=role, event_type="register")
         db.commit()
         db.refresh(user)
         return _login_response(db, user, role)
 
     if not verify_password(payload.password, user.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Telefon yoki parol noto'g'ri.")
-    if payload.register:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bu telefon raqam allaqachon ro'yxatdan o'tgan.")
+    # O'chirilgan hisobga token berilmaydi. Ilgari kirish "muvaffaqiyatli" bo'lib,
+    # keyingi so'rovdayoq 401 bilan chiqarib yuborardi — xodim sababini bilmasdi
+    # (masalan, ikkita hisobdan keraksizi o'chirilgan Xodim ID hisobi).
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_disabled_account_message(db, user))
+    # Hisobi bor, parolni to'g'ri yozgan, lekin "Ro'yxatdan o'tish"ni bosgan —
+    # rad etmaymiz, shunchaki kiritamiz (parol tekshirildi, yangi hisob ochilmaydi).
 
     role = auth_service.resolve_login_role(db, user, payload.role)
+    if not role:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NO_ROLE)
     auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role=role, event_type="login")
     db.commit()
-    return _login_response(db, user, role)
+    return _login_response(db, user, role, must_change=pwd_policy.must_change(db, user.username))
 
 
 @router.post("/auth/token/refresh/", response_model=TokenRefreshResponse)
@@ -100,14 +190,27 @@ def token_refresh(payload: TokenRefreshRequest, db: Session = Depends(get_db)) -
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Foydalanuvchi topilmadi.")
 
+    # Rol faqat bazadan: guruhi olib tashlangan foydalanuvchi eski tokendagi
+    # rol bilan yangilanib yuravermasin (2026-09-26).
     role = auth_service.resolve_user_role_from_db(db, user)
-    jwt_role = str(claims.get("role") or "").strip().lower()
-    if jwt_role not in ("admin", "klinika_admin", "hodim", "student"):
-        jwt_role = ""
-    extra: dict = {"role": role or jwt_role or "hodim"}
+    if not role:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=NO_ROLE)
+    extra: dict = {"role": role}
     student_id = auth_service.resolve_student_id(user, claims.get("student_id"))
     if student_id:
         extra["student_id"] = student_id
+
+    # Guruh nomi ham ko'chirilishi SHART. Online ta'limda talabaning guruhi
+    # faqat shu da'vodan olinadi — yangilangan tokenda u yo'qolsa, talaba
+    # tizimda ko'rinib turadi, lekin har bir so'rov "guruhingiz aniqlanmadi"
+    # deb rad etiladi va chiqib-kirishdan boshqa yo'l qolmaydi.
+    group_name = str(claims.get("group_name") or "").strip()
+    if group_name:
+        extra["group_name"] = group_name
+
+    # Bazadan qayta o'qiladi: parol almashtirilgan bo'lsa belgi tushib qoladi.
+    if pwd_policy.must_change(db, user.username):
+        extra["mcp"] = 1
 
     return TokenRefreshResponse(
         access=create_access_token(user.id, extra),
@@ -118,10 +221,11 @@ def token_refresh(payload: TokenRefreshRequest, db: Session = Depends(get_db)) -
 @router.post("/auth/online-test-login/", response_model=LoginResponse)
 def online_test_student_login(
     payload: OnlineTestStudentLoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    _: None = Depends(throttle_login),
 ) -> LoginResponse:
     student_id = (payload.id or payload.student_id or payload.username or "").strip()
+    throttle_login_account(request, student_id)
     password = (payload.password or "").strip()
     if not student_id or not password:
         raise HTTPException(status_code=400, detail="Talaba ID va parol majburiy.")
@@ -145,11 +249,68 @@ def online_test_student_login(
         user.last_name = last_name
     auth_service.set_user_role_group(db, user, "student")
     auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role="student", event_type="login")
     db.commit()
     db.refresh(user)
 
     group_name = str(user_info.get("group_name") or "").strip() or None
     return _login_response(db, user, "student", student_id=sid, group_name=group_name)
+
+
+@router.post("/auth/malaka-login/", response_model=LoginResponse)
+def malaka_login(
+    payload: MalakaLoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """Malaka oshirish tinglovchisi: login — pasport seriyasi va raqami.
+
+    Tinglovchi OnlineTest'da yo'q, u farmoyish bo'yicha qabul qilinadi.
+    Guruhi tokenga SHU yerda, `malaka_listener` jadvalidan yoziladi —
+    online talabadagi kabi tashqaridan olinmaydi.
+
+    Boshlang'ich parol ham pasport. U almashtirilmaguncha parol maydoni
+    ham login kabi erkin o'qiladi ("aa 1111111" = "AA1111111"): pasportni
+    har kim o'zicha yozadi va birinchi kirishning o'zi to'siq bo'lmasin.
+
+    2026-09-19: bu marshrut serverdagi manba kodda yo'q edi (faqat eski
+    image'da bor edi) va backend qayta yig'ilganda yo'qolib, tinglovchilar
+    "Not Found" olgan — `tests/test_malaka_login_route.py` qaytmasligini tekshiradi.
+    """
+    denied = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Login yoki parol noto'g'ri."
+    )
+    username = normalize_listener_login(payload.login)
+    if not username:
+        raise denied
+    throttle_login_account(request, username)
+    listener = db.execute(
+        select(MalakaListener).where(MalakaListener.username == username)
+    ).scalar_one_or_none()
+    user = auth_service.get_user_by_username(db, username) if listener else None
+    if listener is None or not listener.is_active or user is None or not user.is_active:
+        raise denied
+
+    pending = pwd_policy.must_change(db, username)
+    ok = verify_password(payload.password, user.password or "")
+    if not ok and pending:
+        ok = verify_password(normalize_listener_login(payload.password), user.password or "")
+    if not ok:
+        raise denied
+
+    group = listener.group
+    if group is None or not group.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Guruhingiz hali faollashtirilmagan. Fakultetga murojaat qiling.",
+        )
+
+    auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role="student", event_type="login")
+    db.commit()
+    return _login_response(
+        db, user, "student", student_id=username, group_name=group.name, must_change=pending
+    )
 
 
 @router.get("/academic-catalog/")

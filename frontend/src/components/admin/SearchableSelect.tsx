@@ -1,7 +1,43 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, X } from 'lucide-react';
 
-export type Option = { value: string; label: string; searchText?: string };
+/**
+ * `dot` — bitta holat chiroqchasi (yashil = bor, qizil = yo'q).
+ * `dots` — bir nechta chiroqcha (masalan UZ / RU / EN uchun alohida);
+ * `dotLabels` ular ustiga olib borilganda ko'rinadigan izoh.
+ */
+export type Option = {
+  value: string;
+  label: string;
+  searchText?: string;
+  dot?: DotTone;
+  dots?: DotTone[];
+  dotLabels?: string[];
+};
+
+export type DotTone = 'green' | 'amber' | 'red';
+
+const DOT_CLASS: Record<DotTone, string> = {
+  green: 'bg-emerald-500',
+  amber: 'bg-amber-500',
+  red: 'bg-rose-500',
+};
+
+function DotRow({ o }: { o: Option }) {
+  const list = o.dots ?? (o.dot ? [o.dot] : []);
+  if (list.length === 0) return null;
+  return (
+    <span className="shrink-0 flex items-center gap-1" aria-hidden>
+      {list.map((d, i) => (
+        <span
+          key={i}
+          title={o.dotLabels?.[i]}
+          className={`w-2.5 h-2.5 rounded-full ${DOT_CLASS[d]}`}
+        />
+      ))}
+    </span>
+  );
+}
 
 /** Yozib qidirish + tanlash (typeahead) — native select o'rniga. */
 export default function SearchableSelect({
@@ -92,8 +128,19 @@ export default function SearchableSelect({
               setOpen(true);
             }
           }}
-          className="w-full h-11 pl-3 pr-16 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50"
+          className={`w-full h-11 pr-16 rounded-xl border border-slate-200 bg-white text-[13px] disabled:bg-slate-50 ${
+            !open && (selected?.dots?.length || selected?.dot)
+              ? (selected?.dots?.length ?? 1) > 1
+                ? 'pl-[4.25rem]'
+                : 'pl-8'
+              : 'pl-3'
+          }`}
         />
+        {selected && !open && (selected.dots?.length || selected.dot) ? (
+          <span className="absolute left-3 top-1/2 -translate-y-1/2">
+            <DotRow o={selected} />
+          </span>
+        ) : null}
         <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
           {value && !disabled ? (
             <button
@@ -150,11 +197,12 @@ export default function SearchableSelect({
                     setOpen(false);
                     setQuery('');
                   }}
-                  className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 ${
+                  className={`w-full text-left px-3 py-2.5 hover:bg-indigo-50 flex items-center gap-2 ${
                     o.value === value ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-slate-700'
                   }`}
                 >
-                  {o.label}
+                  <DotRow o={o} />
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 </button>
               </li>
             ))

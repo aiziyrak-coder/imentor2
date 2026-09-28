@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import logging
+from typing import Literal
+
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import or_, select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
+from app.core.throttling import throttle_education_ai
+from app.services.case_i18n import invalidate_stale_translations
 from app.models.content import CourseSyllabus, StaffCourseSelection
-from app.models.prepared_content import PreparedContent
+from app.models.prepared_content import KIND_CASE, KIND_TEST, PreparedContent
 from app.schemas.prepared_content import (
     PreparedContentIn,
     PreparedContentLatestOut,
@@ -18,8 +23,11 @@ from app.schemas.prepared_content import (
     PreparedContentSummaryOut,
 )
 from app.services import content_catalog as cc
+from app.services import syllabus_access as access
 from app.services import topic_norm as tn
 from app.services.pagination import paginate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,13 +53,32 @@ def _syllabus_id_from_norm(topic_norm: str) -> int | None:
     return sid or None
 
 
+def _existing_syllabus_id(db: Session, sid: int | None) -> int | None:
+    """Sillabus katalogi qayta import qilinganda eski id'lar yo'qoladi, lekin
+    o'qituvchining brauzeridagi `topic_norm` hamon eski id bilan keladi.
+    O'sha id'ni tekshirmasdan yozsak FK buziladi va tayyor bo'lgan test/keys
+    butunlay yo'qoladi. Topilmasa NULL qoldiramiz — ustun nullable va
+    yozuvlarning katta qismi allaqachon shunday saqlangan."""
+    if not sid:
+        return None
+    return db.execute(
+        select(CourseSyllabus.id).where(CourseSyllabus.id == sid)
+    ).scalar_one_or_none()
+
+
 def _taught_syllabus_ids(db: Session, auth: AuthContext) -> set[int]:
     rows = db.execute(
         select(StaffCourseSelection.syllabus_id).where(
             StaffCourseSelection.owner_key == auth.user.username
         )
     ).scalars().all()
-    return {int(sid) for sid in rows if sid}
+    # O'zi yuklagan fanlar ham — ro'yxatdan chiqarib qo'yilgan bo'lsa ham.
+    own = db.execute(
+        select(CourseSyllabus.id).where(
+            CourseSyllabus.created_by == auth.user.username, CourseSyllabus.is_active.is_(True)
+        )
+    ).scalars().all()
+    return {int(sid) for sid in [*rows, *own] if sid}
 
 
 def _teaches_syllabus(db: Session, auth: AuthContext, syllabus_id: int | None) -> bool:
@@ -59,25 +86,95 @@ def _teaches_syllabus(db: Session, auth: AuthContext, syllabus_id: int | None) -
         return True
     if not syllabus_id:
         return False
+    # Fan egasi (Excel'dan o'zi yuklagan) ro'yxatdan chiqarib qo'ygan bo'lsa ham
+    # o'z fanidagi umumiy ma'ruza/taqdimotni ko'raveradi.
+    if access.is_subject_owner(db, syllabus_id, auth.user.username):
+        return True
     return syllabus_id in _taught_syllabus_ids(db, auth)
 
 
 def _can_view_item(item: PreparedContent, db: Session, auth: AuthContext) -> bool:
     if item.owner_key == auth.user.username:
         return True
+    sid = item.syllabus_id or _syllabus_id_from_norm(item.topic_norm)
+    # Fan egasi o'z fanidagi har qanday kontentni ko'radi va boshqaradi.
+    if access.is_subject_owner(db, sid, auth.user.username):
+        return True
+    # Yopiq (shaxsiy) fanga begona — hatto klinika_admin ham — kirmaydi.
+    if not access.can_access_syllabus(db, sid, auth.user.username, auth.role):
+        return False
     if item.kind not in SHARED_KINDS:
         return False
     if _is_privileged(auth):
         return True
-    sid = item.syllabus_id or _syllabus_id_from_norm(item.topic_norm)
     return _teaches_syllabus(db, auth, sid)
 
 
-def _can_delete_item(item: PreparedContent, auth: AuthContext) -> bool:
-    return item.owner_key == auth.user.username or auth.role == "admin"
+def _topic_lookup_filter(
+    wanted_norms: list[str],
+    syllabus_id: int | None = None,
+    topic_code: str = "",
+    variant_label: str = "",
+):
+    """Ma'ruza kaliti: aniq topic_norm YOKI shu fan + mavzu kodi (variant farqi e'tiborsiz)."""
+    clauses = []
+    norms: set[str] = set()
+
+    def add_structured(sid: int, variant: str, code: str) -> None:
+        if not sid or not code:
+            return
+        for alias in tn.structured_aliases(sid, variant, code):
+            if alias:
+                norms.add(alias)
+        clauses.append(
+            and_(
+                PreparedContent.syllabus_id == sid,
+                func.lower(PreparedContent.topic_code) == code[:32],
+            )
+        )
+
+    for raw in wanted_norms:
+        w = (raw or "").strip().lower()
+        if not w:
+            continue
+        norms.add(w)
+        parsed = cc.parse_topic_norm(w)
+        sid = 0
+        try:
+            sid = int(parsed.get("syllabus_id") or 0)
+        except (TypeError, ValueError):
+            sid = 0
+        if not sid:
+            sid = _syllabus_id_from_norm(w) or 0
+        code = (parsed.get("topic_code") or "").strip().lower().replace(" ", "")
+        if not code:
+            parts = w.split("::")
+            code = parts[-1].strip() if len(parts) >= 3 else ""
+        variant = (parsed.get("variant_label") or variant_label or "").strip()
+        add_structured(sid, variant, code)
+
+    code_q = (topic_code or "").strip().lower().replace(" ", "")
+    if syllabus_id and code_q:
+        add_structured(int(syllabus_id), variant_label, code_q)
+
+    if norms:
+        clauses.append(PreparedContent.topic_norm.in_(list(norms)))
+    if not clauses:
+        return None
+    return or_(*clauses)
 
 
-def _summary(item: PreparedContent, auth: AuthContext) -> dict:
+def _can_delete_item(item: PreparedContent, auth: AuthContext, db: Session | None = None) -> bool:
+    """Muallif, admin yoki FAN EGASI (o'zi yuklagan fandagi har qanday kontent)."""
+    if item.owner_key == auth.user.username or auth.role == "admin":
+        return True
+    if db is None:
+        return False
+    sid = item.syllabus_id or _syllabus_id_from_norm(item.topic_norm)
+    return access.is_subject_owner(db, sid, auth.user.username)
+
+
+def _summary(item: PreparedContent, auth: AuthContext, db: Session | None = None) -> dict:
     return PreparedContentSummaryOut(
         id=item.id,
         kind=item.kind,
@@ -86,7 +183,8 @@ def _summary(item: PreparedContent, auth: AuthContext) -> dict:
         subject_name=item.subject_name,
         author_display_name=item.author_display_name or "",
         created_at=item.created_at,
-        can_delete=_can_delete_item(item, auth),
+        can_delete=_can_delete_item(item, auth, db),
+        retired_reason=getattr(item, "retired_reason", "") or "",
     ).model_dump()
 
 
@@ -96,48 +194,43 @@ def list_my_prepared_content(
     kind: str,
     topic_norm: list[str] = Query(default=[]),
     shared: bool = Query(default=False),
+    syllabus_id: int | None = Query(default=None),
+    topic_code: str = Query(default=""),
+    variant_label: str = Query(default=""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> dict:
-    """Saqlangan yozuvlar ro'yxati.
+    """Saqlangan yozuvlar ro'yxati — faqat joriy o'qituvchiniki.
 
-    Standart: faqat joriy foydalanuvchiniki (keys/test).
-    `shared=1` + `topic_norm`: ma'ruza/taqdimot — shu fan/mavzuni o'tadigan
-    barcha o'qituvchilarniki (muallif filtri yo'q).
+    2026-09-24: ilgari `shared=1` bilan ma'ruza matni va taqdimot shu fanni
+    o'tadigan BARCHA o'qituvchiga ko'rinardi. Endi har kim faqat o'zinikini
+    ko'radi; admin (va klinika admini) nazorat uchun hammasini ko'radi.
+    Ochiq kutubxona (katalog) bundan mustasno — u yerga o'qituvchi o'zi chiqaradi.
     """
     if not kind.strip():
         raise HTTPException(status_code=400, detail="kind majburiy.")
     kind_value = kind.strip()
     wanted = [t.strip().lower() for t in topic_norm if t and t.strip()]
-    structured = [w for w in wanted if tn.is_structured_topic_norm(w)]
-    wanted = structured or wanted
+    lookup = _topic_lookup_filter(wanted, syllabus_id, topic_code, variant_label)
 
     if shared:
         if kind_value not in SHARED_KINDS:
             raise HTTPException(status_code=400, detail="shared faqat lecture/presentation uchun.")
-        if not wanted:
-            raise HTTPException(status_code=400, detail="shared=1 uchun topic_norm kerak.")
-        stmt = select(PreparedContent).where(
-            PreparedContent.kind == kind_value,
-            PreparedContent.topic_norm.in_(wanted),
-        )
+        if lookup is None:
+            raise HTTPException(status_code=400, detail="shared=1 uchun topic_norm yoki syllabus_id+topic_code kerak.")
+        stmt = select(PreparedContent).where(PreparedContent.kind == kind_value, lookup)
         if not _is_privileged(auth):
-            taught = _taught_syllabus_ids(db, auth)
-            allowed = [w for w in wanted if _syllabus_id_from_norm(w) in taught]
-            owner_or_shared = [PreparedContent.owner_key == auth.user.username]
-            if allowed:
-                owner_or_shared.append(PreparedContent.topic_norm.in_(allowed))
-            stmt = stmt.where(or_(*owner_or_shared))
+            stmt = stmt.where(PreparedContent.owner_key == auth.user.username)
     else:
         stmt = select(PreparedContent).where(
             PreparedContent.owner_key == auth.user.username,
             PreparedContent.kind == kind_value,
         )
-        if wanted:
-            stmt = stmt.where(PreparedContent.topic_norm.in_(wanted))
+        if lookup is not None:
+            stmt = stmt.where(lookup)
 
     rows = db.execute(stmt.order_by(PreparedContent.created_at.desc())).scalars().all()
-    out = [_summary(r, auth) for r in rows]
+    out = [_summary(r, auth, db) for r in rows]
     return paginate(out, request, default_page_size=100, max_page_size=300)
 
 
@@ -176,24 +269,30 @@ def _out(item: PreparedContent) -> PreparedContentOut:
 @router.get("/prepared-content/", response_model=PreparedContentLatestOut)
 def get_latest_prepared_content(
     kind: str,
-    topic_norm: str,
+    topic_norm: str = "",
+    syllabus_id: int | None = Query(default=None),
+    topic_code: str = Query(default=""),
+    variant_label: str = Query(default=""),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentLatestOut:
-    if not kind.strip() or not topic_norm.strip():
-        raise HTTPException(status_code=400, detail="kind, topic_norm are required.")
+    if not kind.strip():
+        raise HTTPException(status_code=400, detail="kind majburiy.")
     kind_value = kind.strip()
-    norm = topic_norm.strip().lower()
+    wanted = [topic_norm.strip().lower()] if topic_norm.strip() else []
+    lookup = _topic_lookup_filter(wanted, syllabus_id, topic_code, variant_label)
+    if lookup is None:
+        raise HTTPException(status_code=400, detail="kind, topic_norm yoki syllabus_id+topic_code kerak.")
     stmt = select(PreparedContent).where(
         PreparedContent.kind == kind_value,
-        PreparedContent.topic_norm == norm,
+        lookup,
+        # Eskirgan material mavzu ochilganda avtomatik yuklanmaydi — o'qituvchi
+        # yangisini yaratadi va u endi to'g'ri domenda yoziladi (2026-09-25).
+        PreparedContent.retired_reason == "",
     )
-    if kind_value not in SHARED_KINDS:
+    # Har kim faqat o'zinikini ochadi; admin nazorat uchun hammasini ko'radi (2026-09-24).
+    if not _is_privileged(auth):
         stmt = stmt.where(PreparedContent.owner_key == auth.user.username)
-    elif not _is_privileged(auth):
-        sid = _syllabus_id_from_norm(norm)
-        if not _teaches_syllabus(db, auth, sid):
-            stmt = stmt.where(PreparedContent.owner_key == auth.user.username)
     item = db.execute(
         stmt.order_by(PreparedContent.created_at.desc()).limit(1)
     ).scalar_one_or_none()
@@ -205,6 +304,7 @@ def get_latest_prepared_content(
 @router.post("/prepared-content/", response_model=PreparedContentOut, status_code=status.HTTP_201_CREATED)
 def create_prepared_content(
     payload: PreparedContentIn,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentOut:
@@ -240,6 +340,12 @@ def create_prepared_content(
             if rebuilt:
                 topic_norm = rebuilt
 
+    # Begona o'qituvchining yopiq (shaxsiy) faniga kontent biriktirilmaydi —
+    # u egasining "umumiy ma'ruza" ro'yxatiga tushib qolardi.
+    target_sid = syllabus.id if syllabus else _syllabus_id_from_norm(topic_norm)
+    if not access.can_access_syllabus(db, target_sid, auth.user.username, auth.role):
+        raise HTTPException(status_code=404, detail="Fan topilmadi.")
+
     obj = PreparedContent(
         owner_key=auth.user.username[:128],
         kind=payload.kind[:32],
@@ -262,7 +368,9 @@ def create_prepared_content(
         variant_label=variant_label[:128],
         topic_code=topic_code[:32],
         syllabus_id=(
-            syllabus.id if syllabus else _syllabus_id_from_norm(topic_norm)
+            syllabus.id
+            if syllabus
+            else _existing_syllabus_id(db, _syllabus_id_from_norm(topic_norm))
         ),
         payload=payload.payload,
         created_at=dt.datetime.now(dt.timezone.utc),
@@ -270,13 +378,36 @@ def create_prepared_content(
     db.add(obj)
     db.commit()
     db.refresh(obj)
+
+    # Translations are generated only when a reader requests a language.
     return _out(obj)
+
+
+@router.post("/prepared-content/{pk}/translate/{lang}/", response_model=PreparedContentOut)
+def translate_prepared_content(
+    pk: int,
+    lang: Literal["uz", "ru", "en"],
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_education_ai),
+) -> PreparedContentOut:
+    item = db.get(PreparedContent, pk)
+    if item is None or not _can_view_item(item, db, auth):
+        raise HTTPException(status_code=404, detail="Topilmadi.")
+    if item.kind not in (KIND_CASE, KIND_TEST):
+        raise HTTPException(status_code=400, detail="Only tests and cases can be translated here.")
+    from app.services.prepared_translation import translate_saved_content
+    translated = translate_saved_content(db, item, lang)
+    if not _can_view_item(translated, db, auth):
+        raise HTTPException(status_code=404, detail="Topilmadi.")
+    return _out(translated)
 
 
 @router.patch("/prepared-content/{pk}/", response_model=PreparedContentOut)
 def update_prepared_content_payload(
     pk: int,
     body: PreparedContentPayloadIn,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentOut:
@@ -290,7 +421,10 @@ def update_prepared_content_payload(
     ).scalar_one_or_none()
     if item is None or not _can_view_item(item, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
-    item.payload = body.payload
+    # Asosiy matn tahrirlangan-u, tarjimalar o'shaligicha qolgan bo'lsa — ular eskirgan:
+    # olib tashlanadi; kerakli til tanlanganda qayta tarjima qilinadi (aks holda ruscha nusxa eski matnni ko'rsatardi).
+    refreshed = invalidate_stale_translations(item.kind, item.payload, body.payload)
+    item.payload = refreshed if refreshed is not None else body.payload
     db.commit()
     db.refresh(item)
     return _out(item)
@@ -307,7 +441,7 @@ def delete_prepared_content(
     ).scalar_one_or_none()
     if item is None or not _can_view_item(item, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
-    if not _can_delete_item(item, auth):
+    if not _can_delete_item(item, auth, db):
         raise HTTPException(status_code=403, detail="O'chirish uchun ruxsat yo'q.")
     db.delete(item)
     db.commit()

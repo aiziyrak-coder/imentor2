@@ -50,11 +50,21 @@ const LEVEL_RULES: Record<TestDifficulty, string> = {
 };
 
 export function buildTestDifficultyPrompt(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
+  if (domain === 'biomedical') {
+    return [
+      'SAVOL SIFATI — tibbiy, lekin BEMORSIZ fan (anatomiya, fiziologiya, biokimyo, mikrobiologiya, farmakologiya, gigiyena):',
+      'Har savol aniq shart ustida: tuzilma, mexanizm, preparat, o\'lchov yoki me\'yordan chetlanish (raqam+birlik).',
+      'Mexanizm, patofiziologiya va laboratoriya talqini O\'RINLI — lekin individual bemor vignette',
+      '(«N yoshli bemor murojaat qildi» + shikoyat + tashxis/dori) TAQIQLANADI.',
+      'Ta\'rif («X nima?») TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
+      '«Hammasi to\'g\'ri» TAQIQLANADI.',
+    ].join(' ');
+  }
   if (domain === 'academic') {
     return [
       'SAVOL SIFATI — oliy ta\'lim, SHU FAN bo\'yicha, klinik vignette EMAS:',
-      'Har savol konkret vazifa: shart + cheklov/raqam + qaror.',
-      'Bemor, kasallik, HbA1c, dori, vital belgi TAQIQLANADI (fan klinik bo\'lmasa).',
+      'Har savol konkret vazifa: shart + cheklov/raqam/me\'yor + qaror.',
+      'Individual bemor vignette (yosh + shikoyat + tashxis/dori) TAQIQLANADI.',
       'Ta\'rif ("X nima?") TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
       '"Hammasi to\'g\'ri" TAQIQLANADI.',
     ].join(' ');
@@ -63,6 +73,16 @@ export function buildTestDifficultyPrompt(level: TestDifficulty, domain: Subject
 }
 
 export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
+  if (domain === 'biomedical') {
+    if (level === 'easy') {
+      return 'HAR savol 2 qatorlik ilmiy vazifa (30–50 so\'z): tuzilma, mexanizm yoki me\'yor. Bemor hikoyasi yo\'q.';
+    }
+    return (
+      'HAR savol 2–3 zich jumla: preparat/namuna/o\'lchov sharti; raqam+birlik bilan topilma; qaror savoli ' +
+      '(qaysi mexanizm, qaysi tuzilma, ko\'rsatkich qayerga siljiydi). 5 ta yaqin variant. ' +
+      'Individual bemor kartasi YARATILMASIN.'
+    );
+  }
   if (domain === 'academic') {
     if (level === 'easy') {
       return 'HAR savol 2 qatorlik fan vazifasi (30–50 so\'z), 5 ta variant. Bemor hikoyasi yo\'q.';
@@ -86,6 +106,12 @@ export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain
 }
 
 export function testExplanationInstruction(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
+  if (domain === 'biomedical') {
+    return (
+      'explanation — 5-7 gap: qaysi mexanizm yoki tuzilma hal qiluvchi; ko\'rsatkich nega shunday o\'zgaradi; ' +
+      'distraktor nega xato. Bemor ssenariysi qo\'shilmasin.'
+    );
+  }
   if (domain === 'academic') {
     return (
       'explanation — 5-7 gap: to\'g\'ri javob nima uchun mavzu/ma\'ruzaga mos; ' +

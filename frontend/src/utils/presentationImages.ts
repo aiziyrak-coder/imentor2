@@ -225,7 +225,7 @@ function queriesForSlide(slide: ContentSlide): string[] {
 }
 
 /** Bir slayd uchun nomzodlar (yuklab olinmaydi — faqat ro'yxat). */
-async function collectCandidates(slide: ContentSlide): Promise<ImageCandidate[]> {
+async function collectCandidatesUncached(slide: ContentSlide): Promise<ImageCandidate[]> {
   const out: ImageCandidate[] = [];
   const seen = new Set<string>();
   const push = (list: ImageCandidate[]) => {
@@ -251,13 +251,26 @@ async function collectCandidates(slide: ContentSlide): Promise<ImageCandidate[]>
   return out;
 }
 
+const candidateCache = new Map<string, Promise<ImageCandidate[]>>();
+async function collectCandidates(slide: ContentSlide): Promise<ImageCandidate[]> {
+  const key = JSON.stringify(queriesForSlide(slide));
+  if (!candidateCache.has(key)) {
+    if (candidateCache.size >= 128) candidateCache.delete(candidateCache.keys().next().value!);
+    candidateCache.set(key, collectCandidatesUncached(slide).then((items) => {
+      if (!items.length) candidateCache.delete(key);
+      return items;
+    }).catch(() => { candidateCache.delete(key); return []; }));
+  }
+  return candidateCache.get(key)!;
+}
+
 /** Rasmni yuklab, kichraytirib data URL qiladi (PPTX hajmi uchun). */
 const MAX_IMAGE_PX = 1100;
 const MAX_IMAGE_BYTES = 8_000_000;
 
-async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+export async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { mode: 'cors', cache: 'no-store', signal: AbortSignal.timeout(14000) });
+    const res = await fetch(url, { mode: 'cors', cache: 'force-cache', signal: AbortSignal.timeout(14000) });
     if (!res.ok) return null;
     const contentType = res.headers.get('content-type') || '';
     if (!isUsableMime(contentType)) return null;
@@ -354,7 +367,7 @@ export async function resolvePresentationImages(
   );
 
   // 2-bosqich: GLOBAL band qilish — bir rasm faqat bitta slaydga.
-  const taken = new Set<string>();
+  const taken = new Set<string>(content.slides.filter(s => s.imageSourceUrl).map(s => imageKey(s.imageSourceUrl!)));
   const plan = targets.map((target, i) => {
     const queue = (candidateLists[i] || []).filter((c) => !taken.has(c.key));
     const chosen = queue[0];
@@ -366,20 +379,21 @@ export async function resolvePresentationImages(
   const resolved = await inBatches(plan, DOWNLOAD_CONCURRENCY, async (item) => {
     for (const candidate of item.queue.slice(0, 3)) {
       if (candidate.key !== item.chosen?.key && taken.has(candidate.key)) continue;
+      taken.add(candidate.key); // reserve before awaiting: parallel fallbacks cannot choose the same file
       const dataUrl = await fetchImageAsDataUrl(candidate.url);
       if (dataUrl) {
         taken.add(candidate.key);
-        return { index: item.index, dataUrl, credit: candidate.credit };
+        return { index: item.index, dataUrl, credit: candidate.credit, src: candidate.url };
       }
     }
-    return { index: item.index, dataUrl: null, credit: '' };
+    return { index: item.index, dataUrl: null, credit: '', src: '' };
   });
 
   const byIndex = new Map(resolved.filter((r) => r.dataUrl).map((r) => [r.index, r]));
   const slides = content.slides.map((slide, index) => {
     const hit = byIndex.get(index);
     if (!hit?.dataUrl) return slide;
-    return { ...slide, imageUrl: hit.dataUrl, imageCredit: hit.credit };
+    return { ...slide, imageUrl: hit.dataUrl, imageCredit: hit.credit, imageSourceUrl: hit.src };
   });
 
   const withImages = slides.filter((s) => s.imageUrl).length;

@@ -15,6 +15,8 @@ export type CourseSyllabusRow = {
   file_name: string;
   topics: SyllabusTopic[];
   variants: SyllabusVariant[];
+  /** Katalog `slim` rejimida mavzular tushirib qoldiriladi — soni shu yerda. */
+  topic_count?: number;
   sort_order: number;
   is_active: boolean;
   created_at: string;
@@ -22,11 +24,15 @@ export type CourseSyllabusRow = {
   department?: number | null;
   department_name?: string;
   department_code?: string;
+  /** Kafedra institut hujjatidagi klinik ro'yxatdami — AI domenini shu hal qiladi. */
+  department_is_clinical?: boolean;
   /** OnlineTest yo'nalish kodi (DI, TPI, PI, …). */
   direction_code?: string;
   /** Ko'rsatish uchun tarjimalar (asl nom o'zgarmaydi — u kalit): */
   name_i18n?: Partial<Record<AppLanguage, string>>;
   topics_i18n?: Partial<Record<AppLanguage, Record<string, string>>>;
+  /** O'qituvchi Excel'dan o'zi yuklagan shaxsiy fan (faqat unga ko'rinadi). */
+  teacher_owned?: boolean;
 };
 
 export type StaffCourseSelectionRow = {
@@ -35,6 +41,8 @@ export type StaffCourseSelectionRow = {
   /** Admin qat'iy biriktirgan bo'lsa — aynan shu variant/yo'nalish; bo'sh = erkin. */
   variant_label: string;
   selected_at: string;
+  /** O'qituvchi bu fanni Excel'dan o'zi yuklagan — faqat unga ko'rinadi, o'zi o'chira oladi. */
+  is_own?: boolean;
 };
 
 /** Admin ko'rinishi: fanga biriktirilgan o'qituvchi (owner_key bilan) */
@@ -223,7 +231,10 @@ export async function fetchCourseSyllabusCatalog(): Promise<CourseSyllabusRow[]>
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
   const data = await httpJson<CourseSyllabusRow[] | PagedResponse<CourseSyllabusRow>>(
-    `${apiBaseUrl()}/v1/course-syllabuses/catalog/?page_size=1000`,
+    // `slim=1` — mavzu NOMLARI kerak emas, faqat soni (`topic_count`).
+    // To'liq javob 4.4 MB edi va uni har o'qituvchi birinchi kirishida
+    // yuklab olardi.
+    `${apiBaseUrl()}/v1/course-syllabuses/catalog/?page_size=1000&slim=1`,
     {
       headers: authHeaders(token),
       timeoutMs: 60000,
@@ -271,7 +282,7 @@ export async function fetchDepartmentCourseSyllabuses(): Promise<CourseSyllabusR
   return unwrapPagedResults(data);
 }
 
-/** O'qitadigan fanlar to'plamini almashtirish (kamida 1 ta). */
+/** O'qitadigan fanlar to'plamini almashtirish. Bo'sh ro'yxat ham mumkin — tanlash majburiy emas. */
 export async function setMyTeachingSubjects(syllabusIds: number[]): Promise<StaffCourseSelectionRow[]> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
@@ -282,6 +293,71 @@ export async function setMyTeachingSubjects(syllabusIds: number[]): Promise<Staf
     timeoutMs: 30000,
   });
   return Array.isArray(rows) ? rows : [];
+}
+
+/** O'qituvchi namuna Excel'idan o'z fanini yaratadi (faqat o'ziga ko'rinadi). */
+export async function createOwnSyllabus(payload: {
+  subjectName: string;
+  fileName: string;
+  instructionLanguage: AppLanguage;
+  topics: Array<{ title: string; type: string }>;
+}): Promise<StaffCourseSelectionRow> {
+  const token = await getBackendAccessToken();
+  if (!token) throw new Error('no-backend-token');
+  return httpJson<StaffCourseSelectionRow>(`${apiBaseUrl()}/v1/course-syllabuses/own/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: {
+      subject_name: payload.subjectName,
+      file_name: payload.fileName,
+      instruction_language: payload.instructionLanguage,
+      topics: payload.topics,
+    },
+    timeoutMs: 30000,
+  });
+}
+
+export type OwnSyllabusUpdateStats = {
+  added?: number;
+  removed?: number;
+  kept_with_material?: number;
+  total?: number;
+};
+
+/** O'z fanini tahrirlash: nom, til yoki yangi Excel (mavzular kodini saqlab birlashtiriladi). */
+export async function updateOwnSyllabus(
+  syllabusId: number,
+  payload: {
+    subjectName?: string;
+    instructionLanguage?: AppLanguage;
+    fileName?: string;
+    topics?: Array<{ title: string; type: string }>;
+  },
+): Promise<{ syllabus: CourseSyllabusRow; stats: OwnSyllabusUpdateStats }> {
+  const token = await getBackendAccessToken();
+  if (!token) throw new Error('no-backend-token');
+  const body: Record<string, unknown> = {};
+  if (payload.subjectName !== undefined) body.subject_name = payload.subjectName;
+  if (payload.instructionLanguage !== undefined) body.instruction_language = payload.instructionLanguage;
+  if (payload.fileName) body.file_name = payload.fileName;
+  if (payload.topics) body.topics = payload.topics;
+  return httpJson(`${apiBaseUrl()}/v1/course-syllabuses/own/${Number(syllabusId)}/`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body,
+    timeoutMs: 30000,
+  });
+}
+
+/** O'zi yuklagan fanni o'chirish (server yashiradi, materiallar saqlanadi). */
+export async function deleteOwnSyllabus(syllabusId: number): Promise<void> {
+  const token = await getBackendAccessToken();
+  if (!token) throw new Error('no-backend-token');
+  await httpJson<unknown>(`${apiBaseUrl()}/v1/course-syllabuses/own/${Number(syllabusId)}/`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+    timeoutMs: 20000,
+  });
 }
 
 export async function selectCourseSyllabus(syllabusId: number): Promise<StaffCourseSelectionRow> {

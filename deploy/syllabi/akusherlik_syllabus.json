@@ -1,0 +1,93 @@
+{
+ "subject_name": "Akusherlik va ginekologiyadagi dolzarb muammolari",
+ "department_id": 1,
+ "instruction_language": "uz",
+ "file_name": "AKUSHERLIK VA GINEKOLOGIYADAGI DOLZARB MUAMMOLARI.docx",
+ "description": "Kalendar reja: 13 ta ma'ruza, jami 144 soat (144 kredit).",
+ "variants": [
+  {
+   "label": "Asosiy",
+   "file_name": "AKUSHERLIK VA GINEKOLOGIYADAGI DOLZARB MUAMMOLARI.docx",
+   "topics": [
+    {
+     "id": "L1",
+     "type": "lecture",
+     "title": "Uzbekiston Respublika sog‘liqni saklash tizimidagi Onalik va bolalikni muxofaza qilishga oid meyoriy hujjatlar. Tibbiyot xodimlarining kasbiy etika bilan bog‘liq ko‘nikmalarni rivojlantirish va shifokor bemorning sirini tashkil etadigan malumotlarni oshkor kilmaslik. Me'yoriy hujjatlar: PF-60, PQ-296, SSV №230, SSV №151, PF-5199, PQ-402.",
+     "hours": 6
+    },
+    {
+     "id": "L2",
+     "type": "lecture",
+     "title": "Fiziologik xomiladorlik tugruk va tugrukdan keyingi davrni utishi. Gravidogramma. Partogrammani yuritish. Qon va siydik taxlillarini interpritatsiya qilish. Chilla davri septik asoratlarida shifokor taktikasi. Bachadon subinvalyusiyasini tashxislash va davolash taktikalari.",
+     "hours": 12
+    },
+    {
+     "id": "L3",
+     "type": "lecture",
+     "title": "Somatik kasalliklar.Xomiladorlik paytida axamiyati.Kuzatish va olib borish protokollari. Somatik kasalliklarda( Yurak qon tomir, siydik ajratish tizimi) vujudga kelgan asoratlarda shifokor taktikasi. Somatik kasalliklarda xomiladorlikni milliy protokollar asosida olib borish.",
+     "hours": 18
+    },
+    {
+     "id": "L4",
+     "type": "lecture",
+     "title": "Xomiladorlik,tugruk va tugrukdan keyingi davrda uchraydigan gipertenziv xolatlar. Xomiladorlik davrida vujudga kelgan gipertenziv xolatlar ni tashxislash va olib borish taktikasi. Gipertenziv xolatlarni og‘ir darajasi va asorat vujudga kelganda shifokor taktikasi.",
+     "hours": 12
+    },
+    {
+     "id": "L5",
+     "type": "lecture",
+     "title": "Xomiladorlik,tugruk va tugrukdan keyingi davrda kon ketish xolatlari. NJYMOK da shifokor taktikasi. Kesar kesish operatsiyasi. Uch juft qon tomirlarni bog‘lash operatsiyasi. Bachadon amputatsiyasi operatsiyasi. Tug‘ruq va chilla davrida og‘ir daraja qon yo‘qotish sababli erta va kechki asoratlar vujudgakelganda shifokor taktikasi.",
+     "hours": 12
+    },
+    {
+     "id": "L6",
+     "type": "lecture",
+     "title": "Antenatal parvarishda xomila xolatini baxolash. Chakalokni reanimatsiya va parvarishi. Xomiladorlik davridagi somatik kaslliklar, gipertenziv buzilishlarini xomilaga ta’siri. Xomilani o‘sishdan orqada qolish sindromi. Xomila disstess sindromi. Chaqaloqlarni reanimatsiyasi prinsiplari.",
+     "hours": 12
+    },
+    {
+     "id": "L7",
+     "type": "lecture",
+     "title": "Nuqsonli xomila aniqlangan xolatlarda xomiladorlikni olib borish va xomiladorlikni to‘xtatish tamoyillari.Samarali texnologiyalar moxiyatlari. Skrining natijalarini interpritatsiya qilish. Xomila nuqsonlarini klassifikatsiyasi. Aborlar. Abort turlari, sabablari,metodlari.",
+     "hours": 12
+    },
+    {
+     "id": "L8",
+     "type": "lecture",
+     "title": "Bachadondan anomal qon ketishlar. FIGO klassifikatsiyasi bo‘yicha tashxislash. Ayollar jinsiy a’zolarini fon va rak oldi kasalliklarini tashxislash, davolash, va profilaktikasi.",
+     "hours": 12
+    },
+    {
+     "id": "L9",
+     "type": "lecture",
+     "title": "SPKYa,Endometrioz va bachadon miomasini tashxislash, klinikasi va davolash usullari.",
+     "hours": 6
+    },
+    {
+     "id": "L10",
+     "type": "lecture",
+     "title": "Reproduktiv salomatlikni OIV xolatida zamonaviy olib borish. OIV aniqlanganda pregravidvr tayyorgarlik, xomiladorlikni va tug‘ruqni olib borish. ARV profilaktika. Vertikal transmissiya, Chilla davrida tuqqan ayol va chaqaloqni parvarishlash, ARV terapiya prinsiplari.",
+     "hours": 6
+    },
+    {
+     "id": "L11",
+     "type": "lecture",
+     "title": "Reproduktiv salomatlikni muxofaza kilishda zamonaviy texnologiyalar. Bepushtlikda shifokor taktikasi. Yordamchi reproduktiv texnologiyalar. EKU.",
+     "hours": 12
+    },
+    {
+     "id": "L12",
+     "type": "lecture",
+     "title": "Bachadon bo‘yni saratoniga skrining o‘tkazish tamoyillari. Bachadon bo‘ynini tekshirishda labarotor va instrumental usullar. SIN I, CIN II, LSIL da ayollarni kuzatish prinsiplari.",
+     "hours": 12
+    },
+    {
+     "id": "L13",
+     "type": "lecture",
+     "title": "Sut bezi saratoni skriningi. Sut bezini mustaqil profilaktik tekshirish algoritmiga o‘rgatish, instrumental tekshirish turlari. Sut bezi kasalliklari klassifikatsiyasi, klinikasi va davolash.",
+     "hours": 12
+    }
+   ]
+  }
+ ]
+}

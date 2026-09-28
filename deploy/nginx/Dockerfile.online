@@ -1,0 +1,5 @@
+FROM nginx:1.27-alpine
+
+RUN apk add --no-cache wget
+
+COPY deploy/nginx/docker-gateway.online.conf /etc/nginx/conf.d/default.conf

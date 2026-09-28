@@ -44,7 +44,7 @@ export default function SavedWorkList({
 
   if (!items.length) {
     return (
-      <div className="rounded-xl border border-black/10 bg-white/60 p-8 text-center text-[14px] text-black/45">
+      <div className="py-10 text-center text-[13px] text-slate-400">
         {emptyText || t('toolbar.saved')}
       </div>
     );
@@ -66,14 +66,14 @@ export default function SavedWorkList({
 
   return (
     <div className="space-y-3">
-      <div className="divide-y divide-black/5 rounded-xl border border-black/10 bg-white/70 overflow-hidden">
+      <div className="grid gap-2 sm:grid-cols-2">
         {visible.map((item) => {
           const active = activeId === item.id;
           return (
             <div
               key={item.id}
-              className={`flex items-center gap-3 px-4 py-3 transition-colors ${
-                active ? 'bg-blue-50' : 'hover:bg-black/[0.03]'
+              className={`group flex items-center gap-3 rounded-xl bg-white px-3.5 py-3 ring-1 transition-all duration-200 ${
+                active ? 'ring-slate-900/25' : 'ring-slate-900/[0.06] hover:ring-slate-900/15'
               }`}
             >
               <button
@@ -82,26 +82,35 @@ export default function SavedWorkList({
                 className="min-w-0 flex-1 text-left"
               >
                 <p
-                  className={`text-[14px] font-semibold leading-snug ${
-                    active ? 'text-blue-800' : 'text-black/85'
+                  className={`line-clamp-2 text-[13px] leading-[1.5] ${
+                    active ? 'font-semibold text-slate-900' : 'font-medium text-slate-700'
                   }`}
                 >
                   {localizedTitleFromCache(item.topic, language)}
                 </p>
-                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-black/50">
+                <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
                   <span className="inline-flex items-center gap-1">
                     <User size={12} />
                     {item.author?.trim() || '—'}
                   </span>
                   <span>{formatWhen(item.createdAt)}</span>
+                  {item.retiredReason && (
+                    // Eski qoidada yaratilgan: fanga mos kelmagan bemor ssenariysi.
+                    <span
+                      className="rounded bg-amber-50 px-1.5 py-px font-medium text-amber-800"
+                      title={t('toolbar.retiredHint')}
+                    >
+                      {t('toolbar.retired')}
+                    </span>
+                  )}
                 </p>
               </button>
 
-              {onDelete && item.canDelete !== false && (
+              {onDelete && (item.source === 'local' || item.canDelete === true) && (
                 <button
                   type="button"
                   onClick={() => onDelete(item.id)}
-                  className="shrink-0 rounded-lg border border-transparent p-2 text-rose-600 hover:border-rose-200 hover:bg-rose-50"
+                  className="shrink-0 rounded-lg p-2 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
                   aria-label={t('toolbar.deleteVersion')}
                 >
                   <Trash2 size={15} />
@@ -118,19 +127,19 @@ export default function SavedWorkList({
             type="button"
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={safePage === 0}
-            className="rounded-lg border border-black/10 bg-white p-2 text-black/60 disabled:opacity-30 hover:border-black/20"
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-900/[0.04] hover:text-slate-900 disabled:pointer-events-none disabled:opacity-25"
             aria-label={t('common.previous')}
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="text-[13px] font-semibold tabular-nums text-black/60">
+          <span className="text-[12px] tabular-nums text-slate-400">
             {safePage + 1} / {pageCount}
           </span>
           <button
             type="button"
             onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
             disabled={safePage >= pageCount - 1}
-            className="rounded-lg border border-black/10 bg-white p-2 text-black/60 disabled:opacity-30 hover:border-black/20"
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-900/[0.04] hover:text-slate-900 disabled:pointer-events-none disabled:opacity-25"
             aria-label={t('common.next')}
           >
             <ChevronRight size={16} />

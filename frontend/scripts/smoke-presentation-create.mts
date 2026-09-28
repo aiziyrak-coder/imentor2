@@ -68,7 +68,9 @@ function parseJsonLoose<T>(raw: string): T {
 
 async function buildPptxBuffer(deck: Deck): Promise<Buffer> {
   const mod = await import('pptxgenjs');
-  const PptxGenJS = (mod as { default?: new () => InstanceType<typeof import('pptxgenjs')> }).default ?? mod;
+  // `pptxgenjs` modul turi konstruktor emas, shuning uchun `default` ni
+  // noma'lum konstruktor sifatida olamiz - quyida tuzilma bilan tavsiflanadi.
+  const PptxGenJS = (mod as { default?: unknown }).default ?? mod;
   const pptx = new (PptxGenJS as new () => {
     author: string;
     title: string;
@@ -155,7 +157,7 @@ async function main() {
   const ai = await req('POST', '/v1/education-ai/completion/', {
     token,
     body: {
-      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o',
+      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-nano',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

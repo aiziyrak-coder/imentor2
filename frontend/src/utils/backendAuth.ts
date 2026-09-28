@@ -165,6 +165,35 @@ export async function performOnlineTestStudentLogin(input: {
   });
 }
 
+/** Talaba seansi — parol bilan ham, yuz bilan ham bir xil (`ot_<ID>`, guruh tokendan). */
+function establishStudentSession(bundle: BackendTokenBundle, fallbackId: string): LocalStaffUser {
+  const sid = String(bundle.student_id || fallbackId);
+  const now = Date.now();
+  const firstName = bundle.first_name || '';
+  const lastName = bundle.last_name || '';
+  const displayName = `${firstName} ${lastName}`.trim() || sid;
+  return establishLocalSessionFromProfile({
+    uid: `ot_${sid}`,
+    displayName,
+    firstName,
+    lastName,
+    phoneDisplay: sid,
+    phoneDigits: sid,
+    faculty: '',
+    department: '',
+    direction: '',
+    email: `${sid}@onlinetest.local`,
+    password: '',
+    role: 'student',
+    createdAt: now,
+    updatedAt: now,
+    lastActiveAt: now,
+    onlineTestStudentId: sid,
+    studyGroup: bundle.group_name || '',
+    participantKind: 'student',
+  });
+}
+
 export async function loginStudentWithOnlineTest(
   studentId: string,
   password: string,
@@ -175,30 +204,7 @@ export async function loginStudentWithOnlineTest(
     const bundle = await performOnlineTestStudentLogin({ id: sid, password });
     if (bundle.role !== 'student') throw new Error('wrong-password');
     writeCached(bundle);
-    const now = Date.now();
-    const firstName = bundle.first_name || '';
-    const lastName = bundle.last_name || '';
-    const displayName = `${firstName} ${lastName}`.trim() || sid;
-    return establishLocalSessionFromProfile({
-      uid: `ot_${bundle.student_id || sid}`,
-      displayName,
-      firstName,
-      lastName,
-      phoneDisplay: sid,
-      phoneDigits: sid,
-      faculty: '',
-      department: '',
-      direction: '',
-      email: `${sid}@onlinetest.local`,
-      password: '',
-      role: 'student',
-      createdAt: now,
-      updatedAt: now,
-      lastActiveAt: now,
-      onlineTestStudentId: bundle.student_id || sid,
-      studyGroup: bundle.group_name || '',
-      participantKind: 'student',
-    });
+    return establishStudentSession(bundle, sid);
   } catch (err) {
     if (err instanceof HttpError) {
       if (err.status === 401) throw new Error('wrong-password');
@@ -287,10 +293,58 @@ export async function loginStaffWithBackendFallback(
   } catch (err) {
     if (err instanceof HttpError) {
       if (err.status === 401) throw new Error('wrong-password');
+      if (err.status === 403) {
+        // Server qaysi login bilan kirish kerakligini aytishi mumkin — matni saqlanadi.
+        const detail = (err.body as { detail?: unknown } | null)?.detail;
+        throw Object.assign(new Error('account-disabled'), {
+          detail: typeof detail === 'string' ? detail : '',
+        });
+      }
       if (err.status === 409) throw new Error('already-exists');
     }
     throw err;
   }
+}
+
+/** Yuz orqali kirish xatosi: `status` — server javobi (0 — tarmoq), `detail` — foydalanuvchiga matn. */
+export class FaceLoginError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(status: number, detail: string) {
+    super(`face-login-${status}`);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/** Yuz orqali kirish: ketma-ket olingan 2 kadr (JPEG) serverga yuboriladi. */
+export async function loginWithFaceFrames(frames: Blob[]): Promise<LocalStaffUser> {
+  const form = new FormData();
+  frames.forEach((frame, i) => form.append('frames', frame, `frame-${i}.jpg`));
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/v1/auth/face-login/`, { method: 'POST', body: form });
+  } catch {
+    throw new FaceLoginError(0, '');
+  }
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') detail = body.detail;
+    } catch {
+      /* matnsiz javob */
+    }
+    throw new FaceLoginError(res.status, detail);
+  }
+  const bundle = (await res.json()) as BackendTokenBundle;
+  writeCached(bundle);
+  if (bundle.role === 'student') return establishStudentSession(bundle, bundle.username);
+  const existing = findStoredUserByPhone(bundle.username);
+  return establishLocalSessionFromProfile(
+    buildLocalUserFromBackendLogin(bundle.username, '', bundle, existing),
+  );
 }
 
 /** Ro‘yxatdan o‘tish: avval server, keyin mahalliy profil. */
@@ -472,6 +526,12 @@ export async function syncSessionRoleFromServer(): Promise<UserRole | null> {
     });
   }
   return role;
+}
+
+/** Saqlangan, muddati o'tmagan token — yangilamaydi va chiqarib yubormaydi (xato hisobotlari uchun). */
+export function peekBackendAccessToken(): string | null {
+  const cached = readCached();
+  return cached?.access && cached.accessExpMs > Date.now() ? cached.access : null;
 }
 
 export async function getBackendAccessToken(): Promise<string | null> {

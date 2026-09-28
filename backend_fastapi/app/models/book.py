@@ -18,6 +18,15 @@ class SubjectBook(Base):
     source_archive: Mapped[str] = mapped_column(String(255), default="")
     file: Mapped[str] = mapped_column(String(512), default="")
     language: Mapped[str] = mapped_column(String(8), default="")
+    # "book" — darslik/qo'llanma; "protocol" — milliy klinik protokol, SanPin, SSV buyrug'i.
+    # Protokol AI javobida MAJBURIY manba: kafedra fanlarida undan chetga chiqilmaydi (2026-09-24).
+    kind: Mapped[str] = mapped_column(String(16), default="book", server_default="book")
+    # O'qituvchi sozlamalardan o'zi yuklagan bo'lsa — uning logini ("" — admin/skript yuklagan).
+    # O'chirishni faqat shu o'qituvchi yoki admin qila oladi.
+    owner_key: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    # "ready" | "processing" (fonda indekslanmoqda) | "failed" (matn chiqmadi).
+    status: Mapped[str] = mapped_column(String(16), default="ready", server_default="ready")
+    status_note: Mapped[str] = mapped_column(String(255), default="", server_default="")
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))

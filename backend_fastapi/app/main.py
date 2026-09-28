@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -11,19 +12,31 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.admin import register_admin
 from app.api.routes import (
+    admin_reports,
+    analytics,
     auth,
+    client_errors,
     clinic_admin,
     clinical_group,
     content_catalog,
     device_pairing,
+    face_login,
     education_ai,
     external_api,
     health,
     legacy,
     live_test,
+    malaka,
+    online_admin,
+    online_lesson,
+    online_student,
+    online_teacher,
     prepared_content,
+    rector,
     staff_admin,
+    staff_self,
     staff_location,
+    student_contingent,
     subject_book,
     syllabus_catalog,
     topic_content,
@@ -51,6 +64,21 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+# Gunicorn/uvicorn faqat o'zining loglarini sozlaydi, ilova loggerlari esa
+# standart WARNING darajasida qolardi — ya'ni token sarfi va RAG hajmi kabi
+# hisob qatorlari hech qayerga chiqmasdi. Shuni ochamiz (darajani `IMENTOR_LOG_LEVEL`
+# bilan o'zgartirish mumkin).
+_LEVEL = os.environ.get("IMENTOR_LOG_LEVEL", "INFO").upper()
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+for _name in ("app", "imentor"):
+    _lg = logging.getLogger(_name)
+    _lg.setLevel(_LEVEL)
+    if not _lg.handlers:
+        _lg.addHandler(_handler)
+    _lg.propagate = False
+
+
 app = FastAPI(title="iMentor API (FastAPI)", version="0.1.0", lifespan=lifespan)
 
 # Sillabus katalogi ~1.5 MB JSON qaytaradi — gzip'siz har bir o'qituvchi
@@ -71,19 +99,31 @@ register_admin(app)
 
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+app.include_router(face_login.router, prefix="/api/v1", tags=["face-login"])
 app.include_router(syllabus_catalog.router, prefix="/api/v1", tags=["syllabus"])
 app.include_router(live_test.router, prefix="/api/v1", tags=["live-test"])
+app.include_router(online_admin.router, prefix="/api/v1", tags=["online-admin"])
+app.include_router(online_teacher.router, prefix="/api/v1", tags=["online-teacher"])
+app.include_router(online_lesson.router, prefix="/api/v1", tags=["online-lesson"])
+app.include_router(online_student.router, prefix="/api/v1", tags=["online-student"])
+app.include_router(malaka.router, prefix="/api/v1", tags=["malaka"])
 app.include_router(staff_location.router, prefix="/api/v1", tags=["staff-location"])
+app.include_router(student_contingent.router, prefix="/api/v1", tags=["student-contingent"])
 app.include_router(clinical_group.router, prefix="/api/v1", tags=["clinical-group"])
 app.include_router(clinic_admin.router, prefix="/api/v1", tags=["clinic-admin"])
 app.include_router(subject_book.router, prefix="/api/v1", tags=["subject-book"])
 app.include_router(device_pairing.router, prefix="/api/v1", tags=["device-pairing"])
 app.include_router(staff_admin.router, prefix="/api/v1", tags=["staff-admin"])
+app.include_router(staff_self.router, prefix="/api/v1", tags=["staff-self"])
+app.include_router(client_errors.router, prefix="/api/v1", tags=["client-errors"])
 app.include_router(content_catalog.router, prefix="/api/v1", tags=["content-catalog"])
 app.include_router(topic_content.router, prefix="/api/v1", tags=["topic-content"])
 app.include_router(education_ai.router, prefix="/api/v1", tags=["education-ai"])
 app.include_router(external_api.router, prefix="/api/v1", tags=["external-api"])
 app.include_router(prepared_content.router, prefix="/api/v1", tags=["prepared-content"])
+app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
+app.include_router(admin_reports.router, prefix="/api/v1", tags=["admin-reports"])
+app.include_router(rector.router, prefix="/api/v1", tags=["rector"])
 app.include_router(legacy.router, prefix="/api/v1", tags=["legacy"])
 app.include_router(legacy.root_router, prefix="/api", tags=["legacy"])
 

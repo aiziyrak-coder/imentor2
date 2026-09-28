@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search, FilterX, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search, FilterX, ChevronLeft, ChevronRight, Printer, ScanFace } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isValidStaffLogin, normalizeStaffLogin, type UserRole } from '../../utils/localStaffAuth';
 import {
@@ -8,6 +8,8 @@ import {
   upsertStaffMember,
   type StaffDirectoryEntry,
 } from '../../utils/staffDirectoryApi';
+import { openStaffCredentials } from '../../utils/staffCredentialsHtml';
+import AdminFaceLinks from './AdminFaceLinks';
 import { fetchAdminSyllabusCatalogStats } from '../../utils/syllabusApi';
 import { fetchPublicKafedralar } from '../../utils/academicCatalogApi';
 import { matchDepartmentByName } from '../../utils/departmentMatch';
@@ -80,6 +82,7 @@ export default function AdminStaffManagement() {
   const [editing, setEditing] = useState<StaffDirectoryEntry | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [showAdd, setShowAdd] = useState(false);
+  const [showFaceLinks, setShowFaceLinks] = useState(false);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
@@ -417,19 +420,46 @@ export default function AdminStaffManagement() {
             <p className="text-[12px] text-black/50">{t('admin.staffManagementSubtitle')}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setShowAdd(true);
-            setEditing(null);
-            setForm({ ...emptyForm });
-            setError(null);
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold shadow-md"
-        >
-          <Plus size={18} /> {t('admin.addStaff')}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              const ok = openStaffCredentials(filteredRows, { onlyInitial: true });
+              if (!ok) {
+                setError(
+                  "Chop etish oynasi bloklandi. Brauzer manzil qatoridagi “popup” ruxsatini yoqib, qayta urinib ko‘ring.",
+                );
+              }
+            }}
+            title="Hali kirmagan xodimlarning login va boshlang'ich parolini kafedralar bo'yicha chop etish"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-black/10 text-black/70 text-[13px] font-semibold shadow-sm hover:bg-black/[0.03]"
+          >
+            <Printer size={17} /> Login ro'yxati
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFaceLinks((v) => !v)}
+            title="cam.fermi.uz'dagi yuzni iMentor hisobiga bog'lash (yuz orqali kirish uchun)"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-black/10 text-black/70 text-[13px] font-semibold shadow-sm hover:bg-black/[0.03]"
+          >
+            <ScanFace size={17} /> Yuz ↔ hisob
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdd(true);
+              setEditing(null);
+              setForm({ ...emptyForm });
+              setError(null);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold shadow-md"
+          >
+            <Plus size={18} /> {t('admin.addStaff')}
+          </button>
+        </div>
       </div>
+
+      {showFaceLinks && <AdminFaceLinks staff={rows} onClose={() => setShowFaceLinks(false)} />}
 
       {error && !(showAdd || editing) && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-800">

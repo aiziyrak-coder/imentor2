@@ -152,8 +152,11 @@ describe('enrichTestSession — variant izohlari', () => {
     expect(out.questions[0].question).toContain('akantoliz');
   });
 
-  it('izohlar tarjimadan OLDIN qo\'shiladi — tarjimaga ham tushadi', async () => {
-    const translateInputs: string[] = [];
+  it('izohlar sessiyaga qo\'shiladi — tarjimani server qiladi, brauzer emas', async () => {
+    // Tarjima serverga ko'chgan (saqlanganda `case_i18n.ensure_translations` fonda ishlaydi):
+    // brauzer tarjima so'rovini yubormasligi, lekin izohlar saqlanadigan sessiyada bo'lishi shart —
+    // aks holda server ru/en versiyalarni izohsiz tarjima qilardi.
+    const otherCalls: string[] = [];
     openaiJson.mockImplementation(async (opts: { model: string; user: string; system: string }) => {
       if (opts.model === 'gpt-test' && opts.system.includes('variantning berilgan i raqami')) {
         return {
@@ -165,14 +168,13 @@ describe('enrichTestSession — variant izohlari', () => {
           ],
         };
       }
-      translateInputs.push(opts.user);
-      throw new Error('tarjima kerak emas');
+      otherCalls.push(opts.system);
+      throw new Error('kutilmagan so\'rov');
     });
 
-    await aiService.enrichTestSession(baseSession(), 'uz');
-    expect(translateInputs.length).toBeGreaterThan(0);
-    // Tarjimaga yuborilgan manbada izohlar allaqachon bo'lishi shart.
-    expect(translateInputs.every((u) => u.includes('optionExplanations'))).toBe(true);
+    const out = await aiService.enrichTestSession(baseSession(), 'uz');
+    expect(out.questions[0].optionExplanations).toEqual(['izoh-0', 'izoh-1', 'izoh-2', 'izoh-3', 'izoh-4']);
+    expect(otherCalls.filter((sys) => /translat|tarjima/i.test(sys))).toHaveLength(0);
   });
 
   it('AI kam izoh qaytarsa — kelgani o\'z o\'rnida qoladi, qolgani bo\'sh', async () => {

@@ -38,3 +38,22 @@ def normalize_staff_login(value: str) -> str:
         return staff_id
 
     raise ValueError("Login telefon raqami (998XXXXXXXXX) yoki Xodim ID bo'lishi kerak.")
+
+
+# Kirill yozuvidagi, lotinchaga o'xshash harflar. Telefonda klaviatura
+# kirillchada qolgan tinglovchi "АВ 1234567" deb yozadi — ko'zga bir xil,
+# lekin boshqa belgi, va kirish "parol xato" bilan tugardi.
+_CYRILLIC_LOOKALIKES = str.maketrans(
+    {"А": "A", "В": "B", "С": "C", "Е": "E", "а": "A", "в": "B", "с": "C", "е": "E"}
+)
+
+
+def normalize_listener_login(value: str) -> str:
+    """Malaka tinglovchisi logini — pasport seriyasi va raqami.
+
+    Farmoyishda "AD 2383789" deb yozilgan; tinglovchi "ad2383789",
+    "AD-2383789" yoki bo'sh joy bilan yozishi mumkin. Hammasi bitta
+    shaklga keltiriladi: faqat lotin harfi va raqam, katta harf.
+    """
+    raw = (value or "").translate(_CYRILLIC_LOOKALIKES)
+    return "".join(ch for ch in raw if ch.isascii() and ch.isalnum()).upper()

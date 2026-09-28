@@ -15,6 +15,8 @@ export type SubjectBookItem = {
   file_url: string;
   file_size: number;
   is_active: boolean;
+  /** "book" — darslik; "protocol" — milliy klinik protokol, SanPin, SSV buyrug'i. */
+  kind?: 'book' | 'protocol';
   created_at: string;
 };
 
@@ -24,6 +26,7 @@ export type SubjectBookDepartmentStat = {
   name: string;
   books_count: number;
   chunks_count: number;
+  protocols_count?: number;
 };
 
 export type SubjectBookStats = {

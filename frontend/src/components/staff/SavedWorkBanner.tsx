@@ -22,17 +22,18 @@ export default function SavedWorkBanner({
   if (count <= 0) return null;
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-4 py-2.5">
-      <p className="text-[13px] text-sky-900/80 min-w-0">
+    // Eslatma — quti emas, qator: mazmun tepasida turadi va uni bosmaydi.
+    <div className="flex items-center justify-between gap-3 border-t border-slate-900/[0.07] pt-3">
+      <p className="min-w-0 text-[12.5px] text-slate-500">
         {t('common.savedWorkBanner', { count: String(count) })}
       </p>
       {onOpen && (
         <button
           type="button"
           onClick={onOpen}
-          className="inline-flex items-center gap-1.5 shrink-0 rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-sky-800 hover:bg-sky-50"
+          className="inline-flex shrink-0 items-center gap-1.5 text-[12.5px] font-semibold text-blue-600 transition-colors hover:text-blue-700"
         >
-          <History size={15} />
+          <History size={14} />
           {t('common.database')}
         </button>
       )}

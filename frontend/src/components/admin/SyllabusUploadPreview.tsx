@@ -44,6 +44,10 @@ export default function SyllabusUploadPreview({
     (n, v) => n + countTopicsByType(v.topics).practicals,
     0,
   );
+  const totalClinicals = data.variants.reduce(
+    (n, v) => n + countTopicsByType(v.topics).clinicals,
+    0,
+  );
   const totalIndependents = data.variants.reduce(
     (n, v) => n + countTopicsByType(v.topics).independents,
     0,

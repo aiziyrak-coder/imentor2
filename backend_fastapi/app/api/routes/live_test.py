@@ -19,6 +19,7 @@ from app.schemas.live_test import (
     LiveTestUpsertRequest,
 )
 from app.services import live_test_service as svc
+from app.services.analytics_service import create_student_attempt_from_submission
 from app.services.pagination import paginate
 
 router = APIRouter()
@@ -26,6 +27,21 @@ router = APIRouter()
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
 # Admin natijalar sahifasida fan biriktirilmagan (eski) testlar guruhi uchun kalit.
 UNASSIGNED_SUBJECT_KEY = "__unassigned__"
+
+
+# Jonli test darsda ishlatiladi: urinishlarning 99% sessiya ochilgandan keyin
+# 12 soat ichida keladi. Ilgari o'qituvchi yopmagan sessiya (1 050 ta, 2026-09-26)
+# abadiy ochiq qolardi va eski QR bilan kunlar o'tib yuborilgan javob boshqa
+# kunning statistikasiga tushardi. 24 soatdan keyin sessiya yopiq hisoblanadi.
+SESSION_TTL = dt.timedelta(hours=24)
+
+
+def _closed(obj: LiveTestSession) -> bool:
+    """Yopilgan yoki muddati o'tgan."""
+    if obj.is_closed:
+        return True
+    created = obj.created_at
+    return created is not None and dt.datetime.now(dt.timezone.utc) - created > SESSION_TTL
 
 
 def _get_session(db: Session, session_key: str) -> LiveTestSession | None:
@@ -121,7 +137,8 @@ def my_submissions(
                 "id": s.id,
                 "session_key": s.session.session_key,
                 "topic": str(payload.get("topic") or ""),
-                "subject_code": code,
+                # `own-<telefon>-…` — o'qituvchining shaxsiy fan kodi, talabaga ketmaydi.
+                "subject_code": "" if code.startswith("own-") else code,
                 "subject_name": subject_names.get(code, ""),
                 "first_name": s.first_name,
                 "last_name": s.last_name,
@@ -155,7 +172,7 @@ def get_public_live_test(
         topic=payload.get("topic", ""),
         questions=questions,
         created_at_ms=created_ms,
-        is_closed=bool(obj.is_closed),
+        is_closed=_closed(obj),
         closed_at_ms=closed_ms,
     )
 
@@ -188,7 +205,7 @@ def submit_answer(
     obj = _get_session(db, session_key)
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
-    if obj.is_closed:
+    if _closed(obj):
         raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
     student_id = auth.student_id
@@ -215,6 +232,21 @@ def submit_answer(
     )
     db.add(sub)
     try:
+        db.flush()
+        started_at = None
+        if payload.started_at_ms:
+            try:
+                started_at = dt.datetime.fromtimestamp(int(payload.started_at_ms) / 1000.0, tz=dt.timezone.utc)
+            except (TypeError, ValueError, OSError):
+                started_at = None
+        duration = int(payload.duration_sec or 0)
+        create_student_attempt_from_submission(
+            db,
+            session=obj,
+            submission=sub,
+            started_at=started_at,
+            duration_sec=duration,
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -240,7 +272,7 @@ def upsert_draft(
     obj = _get_session(db, session_key)
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
-    if obj.is_closed:
+    if _closed(obj):
         raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
     student_id = auth.student_id

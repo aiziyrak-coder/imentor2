@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, Sparkles } from 'lucide-react';
 import type { PreparedContentSummary } from '../../utils/preparedContentStore';
 import SavedWorkBanner from './SavedWorkBanner';
 import SavedWorkList from './SavedWorkList';
@@ -57,6 +57,9 @@ export default function ContentTopicToolbar({
   const [showVersions, setShowVersions] = useState(false);
   const showTopicInput = !lockTopicFromSyllabus || !topic;
 
+  const nothingYet =
+    !loading && versions.length === 0 && topicValue.trim() !== '' && !hasUnsavedActiveContent;
+
   const createButton = (
     <button
       type="button"
@@ -69,7 +72,7 @@ export default function ContentTopicToolbar({
     </button>
   );
 
-  return (
+  const header = (
     <StaffTopicHeader moduleLabel={moduleLabel} topic={topic} hint={hint}>
       <div className="space-y-4 pt-1">
         {showTopicInput && (
@@ -88,7 +91,7 @@ export default function ContentTopicToolbar({
           </div>
         )}
 
-        {!showTopicInput && (
+        {!showTopicInput && !nothingYet && (
           <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
             {createButton}
           </div>
@@ -103,7 +106,7 @@ export default function ContentTopicToolbar({
         )}
 
         {versions.length > 0 && showVersions && (
-          <div className="space-y-2 pt-1 border-t border-black/5">
+          <div className="space-y-2 border-t border-slate-900/[0.07] pt-3">
             <div className="flex items-center justify-between gap-2">
               <p className={staffLabel}>
                 {resolvedVersionsTitle} ({versions.length})
@@ -111,7 +114,7 @@ export default function ContentTopicToolbar({
               <button
                 type="button"
                 onClick={() => setShowVersions(false)}
-                className="shrink-0 rounded-lg border border-black/10 bg-white/70 px-2.5 py-1 text-[12px] font-semibold text-black/60 hover:border-black/20"
+                className="shrink-0 text-[12.5px] font-semibold text-slate-500 transition-colors hover:text-slate-900"
               >
                 {t('common.close')}
               </button>
@@ -125,11 +128,31 @@ export default function ContentTopicToolbar({
           </div>
         )}
 
-        {!loading && versions.length === 0 && topicValue.trim() && !hasUnsavedActiveContent && (
-          <p className="text-[12px] text-black/45">{t('toolbar.noVersions', { action: createLabel })}</p>
-        )}
       </div>
     </StaffTopicHeader>
+  );
+
+  return (
+    <>
+      {header}
+      {nothingYet && (
+        <div className="mx-auto max-w-sm px-4 py-16 text-center">
+          <Sparkles size={22} className="mx-auto mb-3 text-slate-300" />
+          <p className="text-[13px] leading-relaxed text-slate-500">
+            {t('toolbar.noVersions', { action: createLabel })}
+          </p>
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={loading || !topicValue.trim()}
+            className={`${staffBtnPrimary} mt-5`}
+          >
+            <Plus size={16} />
+            {createLabel}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

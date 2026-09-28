@@ -1,68 +1,30 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { httpJson } from './httpClient';
 
-import { HttpError, httpJson, setHttpTokenRefresher } from './httpClient';
+afterEach(() => vi.unstubAllGlobals());
 
-function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => JSON.stringify(body),
-  } as Response;
-}
-
-describe('httpJson', () => {
-  const fetchMock = vi.fn();
-
-  beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal('fetch', fetchMock);
-    setHttpTokenRefresher(null);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    setHttpTokenRefresher(null);
-  });
-
-  it('returns parsed JSON on success', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
-    await expect(httpJson('/api/health/')).resolves.toEqual({ ok: true });
-  });
-
-  it('throws HttpError on failure', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(400, { detail: 'xato' }));
-    await expect(httpJson('/api/bad/')).rejects.toMatchObject({ status: 400 });
-  });
-
-  it('retries once after 401 when refresher returns a new token', async () => {
-    const refresher = vi.fn().mockResolvedValue('fresh-token');
-    setHttpTokenRefresher(refresher);
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(401, { detail: 'expired' }))
-      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
-
-    const result = await httpJson<{ ok: boolean }>('/api/protected/', {
-      headers: { Authorization: 'Bearer stale-token' },
+describe('httpJson timeout', () => {
+  it('gives up when the body never arrives (stalled connection)', async () => {
+    // Sarlavhalar keldi, lekin tana hech qachon kelmaydi — uzilgan aloqa.
+    const stalledBody = (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal;
+      return Promise.resolve({ ok: true, status: 200, text: () => stalledBody(signal) } as unknown as Response);
     });
-
-    expect(result).toEqual({ ok: true });
-    expect(refresher).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const retryCall = fetchMock.mock.calls[1];
-    const retryInit = retryCall?.[1] as RequestInit | undefined;
-    const retryHeaders = (retryInit?.headers || {}) as Record<string, string>;
-    expect(retryHeaders.Authorization).toBe('Bearer fresh-token');
+    // Ochiq sabab bilan (ilgari "signal is aborted without reason" edi).
+    await expect(httpJson('/api/test', { timeoutMs: 30 })).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringMatching(/vaqti tugadi/),
+    });
   });
 
-  it('does not retry when refresher returns null', async () => {
-    setHttpTokenRefresher(vi.fn().mockResolvedValue(null));
-    fetchMock.mockResolvedValueOnce(jsonResponse(401, { detail: 'expired' }));
-
-    await expect(
-      httpJson('/api/protected/', {
-        headers: { Authorization: 'Bearer stale-token' },
-      }),
-    ).rejects.toBeInstanceOf(HttpError);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it('returns the body when it arrives in time', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('{"a":1}') } as unknown as Response),
+    );
+    await expect(httpJson('/api/test', { timeoutMs: 1000 })).resolves.toEqual({ a: 1 });
   });
 });

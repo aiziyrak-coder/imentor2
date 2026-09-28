@@ -1,0 +1,22 @@
+# Standart: git o'zi aniqlaydi, ish katalogida platformaga moslashtiradi.
+* text=auto
+
+# Shell skriptlari HAR DOIM LF bilan saqlansin. CRLF bo'lsa `sh` qator
+# oxiridagi CR ni buyruqning bir qismi deb o'qiydi va konteyner
+# entrypoint'i yoki cron vazifasi tushunarsiz xato bilan yiqiladi.
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+migrate-entrypoint.sh text eol=lf
+
+# Binar fayllarga git tegmasin.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.pptx binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

@@ -83,18 +83,36 @@ _UZ_LATIN_WORDS = (
 )
 
 
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9'’\-]*")
+
+
 def _letters(text: str) -> int:
     return len(_CYRILLIC.findall(text)) + len(_LATIN.findall(text))
 
 
-def looks_wrong_language(text: str, lang: str) -> bool:
+def _drop_shared_latin(text: str, source: str) -> str:
+    """Asl sarlavhada ham bor lotin so'zlarini olib tashlaydi.
+
+    Mahsulot nomlari tarjima qilinmaydi ("Internet Explorer, Mozilla Firefox,
+    Google Chrome"). Ular ko'p bo'lsa, to'g'ri ruscha tarjimada ham lotin
+    harflari kirilchadan ko'p bo'lib qolardi va tarjima rad etilardi (2026-09-23).
+    """
+    if not source:
+        return text
+    shared = {w.lower() for w in _LATIN_WORD.findall(source) if len(w) > 2}
+    if not shared:
+        return text
+    return _LATIN_WORD.sub(lambda m: "" if m.group(0).lower() in shared else m.group(0), text)
+
+
+def looks_wrong_language(text: str, lang: str, source: str = "") -> bool:
     """Matn `lang` tilida EMASLIGI aniq bo'lsa True.
 
     Ehtiyotkor: qisqa yoki harfsiz matnlarga (raqam, kod) tegmaydi — faqat
     yozuv tizimi ochiq-oydin mos kelmasa rad etadi. Asosiy maqsad — model
     rus tili so'ralganda inglizcha (yoki aksincha) qaytargan holatni tutish.
     """
-    value = (text or "").strip()
+    value = _drop_shared_latin((text or "").strip(), source or "")
     if _letters(value) < 8:
         return False
     cyr = len(_CYRILLIC.findall(value))
@@ -155,11 +173,22 @@ def _parse_translation_list(raw: str) -> list | None:
     return None
 
 
+_DOUBLED_APOSTROPHE = re.compile(r"(?<=\w)''(?=\w)")
+
+
+def fix_doubled_apostrophes(text: str) -> str:
+    """So'z ichidagi ikkilangan tutuq belgisini bittaga keltiradi: o''zgarish → o'zgarish.
+
+    Faqat harflar orasidagi `''` tegiladi — tirnoq sifatida ishlatilgani qoladi.
+    """
+    return _DOUBLED_APOSTROPHE.sub("'", text or "")
+
+
 def _translate_batch(api_key: str, model: str, items: list[str], target: str) -> dict[str, str]:
     """`items` ni `target` tiliga tarjima qiladi: {asl: tarjima}."""
     if not items:
         return {}
-    payload = json.dumps(items, ensure_ascii=False)
+    payload = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
     try:
         raw = oai.generate_openai_chat(
             api_key,
@@ -188,6 +217,7 @@ def _translate_batch(api_key: str, model: str, items: list[str], target: str) ->
                 {"role": "user", "content": payload},
             ],
             model=model,
+            usage_kind="syllabus_translate",
             max_tokens=8000,
             temperature=0.1,
             timeout_sec=180,
@@ -216,9 +246,12 @@ def _translate_batch(api_key: str, model: str, items: list[str], target: str) ->
             m = _NUM_PREFIX.match(dst)
             if m and not _NUM_PREFIX.match(src):
                 dst = m.group(1).strip()
+            # Model ba'zan tutuq belgisini ikkilab yozadi ("Yallig''lanish") —
+            # SQL qochirishiga o'xshaydi, lekin matnda hech qachon kerak emas.
+            dst = fix_doubled_apostrophes(dst)
             if not dst or dst == src:
                 continue
-            if looks_wrong_language(dst, target):
+            if looks_wrong_language(dst, target, src):
                 # Model boshqa tilda qaytardi (masalan "ru" so'ralganda
                 # inglizcha) — bunday "tarjima" saqlansa, interfeys butunlay
                 # noto'g'ri tilda ko'rinadi. Saqlamaymiz: asl sarlavha qoladi.
@@ -307,6 +340,12 @@ def ensure_uzbek_latin_source(db, syllabus, api_key: str, model: str) -> bool:
     Ruscha sillabusga tegmaydi. Maqsad: interfeysda o'zbekcha hech qachon
     kirillcha ko'rinmasin.
     """
+    # O'qituvchi o'zi yuklagan fan — uning asl matni. Uni fonda qayta yozish
+    # mavzularni nomi bo'yicha birlashtirishni buzardi (kirillcha Excel qayta
+    # yuklansa hamma mavzu "yangi" bo'lib qolardi) va orada saqlangan tahrir
+    # ustidan eski variantlarni yozib yuborishi mumkin edi.
+    if getattr(syllabus, "created_by", ""):
+        return False
     source_lang = (syllabus.instruction_language or "uz").strip().lower()
     titles = collect_topic_titles(syllabus)
     name = (syllabus.subject_name or "").strip()

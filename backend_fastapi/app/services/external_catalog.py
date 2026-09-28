@@ -61,9 +61,13 @@ def external_catalog_subject_detail(obj: CourseSyllabus) -> dict:
 
 
 def active_syllabus_stmt():
+    """Tashqi (fermi.uz) va statistika uchun fanlar: faol va umumiy.
+    O'qituvchining shaxsiy fani (kodida telefon raqami) tashqariga chiqmaydi."""
+    from app.services.syllabus_access import public_syllabus_clause
+
     return (
         select(CourseSyllabus)
-        .where(CourseSyllabus.is_active.is_(True))
+        .where(public_syllabus_clause())
         .order_by(CourseSyllabus.sort_order, CourseSyllabus.subject_name)
     )
 
@@ -248,7 +252,7 @@ def build_syllabus_catalog_stats(db: Session) -> dict:
                 AcademicDepartment.code,
                 AcademicDepartment.sort_order,
                 func.count(CourseSyllabus.id)
-                .filter(CourseSyllabus.is_active.is_(True))
+                .filter(CourseSyllabus.is_active.is_(True), CourseSyllabus.created_by == "")
                 .label("subjects_count"),
             )
             .select_from(AcademicDepartment)
@@ -264,9 +268,14 @@ def build_syllabus_catalog_stats(db: Session) -> dict:
         ).all()
 
     subjects_count = db.execute(
-        select(func.count()).select_from(CourseSyllabus).where(CourseSyllabus.is_active.is_(True))
+        select(func.count()).select_from(CourseSyllabus).where(
+            CourseSyllabus.is_active.is_(True), CourseSyllabus.created_by == ""
+        )
     ).scalar_one()
-    subjects_total = db.execute(select(func.count()).select_from(CourseSyllabus)).scalar_one()
+    # O'qituvchi yuklagan shaxsiy fanlar katalog sonlariga kirmaydi.
+    subjects_total = db.execute(
+        select(func.count()).select_from(CourseSyllabus).where(CourseSyllabus.created_by == "")
+    ).scalar_one()
     variants_count = db.execute(
         select(func.count(func.distinct(CourseSyllabus.direction_code))).where(
             CourseSyllabus.is_active.is_(True),

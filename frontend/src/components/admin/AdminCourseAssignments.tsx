@@ -98,7 +98,12 @@ export default function AdminCourseAssignments() {
       setTeachers(staff.filter((u) => u.role === 'hodim'));
       setSelections(sels);
 
-      const academic = (stats?.by_department || []).map((d) => ({
+      // Aniq tur: `stats.by_department` ikki xil manbadan kelishi mumkin va
+      // union ustida `.map` massivlar unionini beradi - bunda
+      // `matchDepartmentByName` generigi cheklovga qulab, `id` yo'qoladi.
+      const academic: { id: number; name: string; code: string }[] = (
+        stats?.by_department || []
+      ).map((d) => ({
         id: d.id,
         name: d.name,
         code: d.code || d.name,

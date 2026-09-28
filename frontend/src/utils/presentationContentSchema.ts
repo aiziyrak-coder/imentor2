@@ -42,6 +42,10 @@ export type ContentSlide = {
   /** Design Layer to‘ldiradi — Wikimedia data URL */
   imageUrl?: string;
   imageCredit?: string;
+  /** Rasmning asl havolasi. data:URL bazaga yozilmaydi (juda og'ir),
+   *  shuning uchun saqlangan taqdimot ochilganda rasm shu havoladan
+   *  qayta tortiladi — aks holda deck rasmsiz qolardi. */
+  imageSourceUrl?: string;
 };
 
 export type PresentationContent = {
@@ -117,6 +121,22 @@ const IMAGE_SLIDE_TYPES: SlideType[] = [
   'case_study',
 ];
 
+/**
+ * Raqam haqiqiymi yoki model qoldirgan bo'sh joy.
+ *
+ * Model `key_stat` ni HAR slaydda qaytaradi, ma'lumot bo'lmasa `{number: "0", label: ""}`.
+ * Ilgari bu "bor" deb hisoblanib, statistika slaydida faqat bitta "0" kartochkasi
+ * chizilar, asosiy matn (bullets) esa tashlab yuborilardi — o'qituvchilar
+ * "1–2 sahifa bor, qolgani bo'sh" deb shikoyat qilishgan (2026-09-24).
+ */
+export function isRealStat(stat: { number?: string; label?: string } | null | undefined): boolean {
+  if (!stat) return false;
+  const number = String(stat.number || '').trim();
+  const label = String(stat.label || '').trim();
+  if (!label) return false;
+  return Boolean(number) && !/^(0|—|-|–|n\/a)$/i.test(number);
+}
+
 function normalizeBody(raw: unknown, slideType: SlideType): SlideBody {
   const b = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const body: SlideBody = {};
@@ -142,9 +162,9 @@ function normalizeBody(raw: unknown, slideType: SlideType): SlideBody {
           label: clipWords(String(r.label || ''), 16),
         };
       })
-      .filter((x) => x.number || x.label);
-  } else if (body.key_stat && (slideType === 'statistics' || !body.stats?.length)) {
-    body.stats = [body.key_stat];
+      .filter((x) => isRealStat(x));
+  } else if (isRealStat(body.key_stat) && (slideType === 'statistics' || !body.stats?.length)) {
+    body.stats = [body.key_stat as { number: string; label: string }];
   }
 
   if (Array.isArray(b.columns)) {
@@ -197,7 +217,7 @@ function hasDataForType(slide: ContentSlide, type: SlideType): boolean {
   const b = slide.body;
   switch (type) {
     case 'statistics':
-      return (b.stats?.length || 0) >= 2 || Boolean(b.key_stat?.number);
+      return (b.stats || []).filter((x) => isRealStat(x)).length >= 2 || isRealStat(b.key_stat);
     case 'comparison_table':
       return (b.comparison_rows?.length || 0) >= 2;
     case 'process_flow':
@@ -251,103 +271,6 @@ function diversifyTypes(slides: ContentSlide[]): ContentSlide[] {
   });
 }
 
-function fallbackSlides(title: string, subject: string): ContentSlide[] {
-  return [
-    {
-      slide_type: 'title',
-      title,
-      subtitle: subject,
-      body: { bullets: [] },
-      image_query: 'medical education lecture hall',
-    },
-    {
-      slide_type: 'agenda',
-      title: 'Dars rejasi',
-      body: {
-        bullets: [
-          'Asosiy tushunchalar',
-          'Klinik belgilari',
-          'Diagnostika',
-          'Davolash tamoyillari',
-          'Xulosa',
-        ],
-      },
-    },
-    {
-      slide_type: 'content_bullets',
-      title: 'Asosiy tushunchalar',
-      body: {
-        bullets: [
-          'Markaziy taʼriflar: asosiy atamalar klinik kontekstda ochiladi va talaba uchun amaliy mezon beriladi.',
-          'Tasniflash: asosiy turlari farqlovchi belgilari bilan ajratiladi va davolash yoʻnalishiga bogʻlanadi.',
-          'Normal va patologik holat farqi: qaysi belgilar ogohlantiruvchi ekanligi aniq koʻrsatiladi.',
-          'Amaliy xulosa: shikoyatdan birinchi diagnostik qadamgacha qisqa klinik zanjir beriladi.',
-        ],
-      },
-      image_query: 'medical anatomy diagram',
-    },
-    {
-      slide_type: 'statistics',
-      title: 'Klinik ahamiyat',
-      body: {
-        stats: [
-          { number: '1/3', label: 'Uchrash chastotasi' },
-          { number: '72h', label: 'Erkta tashxis oynasi' },
-          { number: '90%', label: 'Toʻgʻri davoda natija' },
-        ],
-      },
-    },
-    {
-      slide_type: 'process_flow',
-      title: 'Diagnostika ketma-ketligi',
-      body: {
-        process_steps: [
-          { step_number: 1, label: 'Anamnez', description: 'Shikoyat va xavf omillari' },
-          { step_number: 2, label: 'Koʻrik', description: 'Obyektiv belgilar' },
-          { step_number: 3, label: 'Tekshiruv', description: 'Laboratoriya yoki instrumental' },
-          { step_number: 4, label: 'Qaror', description: 'Tashxis va reja' },
-        ],
-      },
-    },
-    {
-      slide_type: 'comparison_table',
-      title: 'Differensial jihatlar',
-      body: {
-        comparison_rows: [
-          { criteria: 'Boshlanishi', left: 'Oʻtkir', right: 'Surunkali' },
-          { criteria: 'Belgilar', left: 'Yorqin', right: 'Sekin' },
-          { criteria: 'Yondashuv', left: 'Shoshilinch', right: 'Kuzatuv' },
-        ],
-      },
-    },
-    {
-      slide_type: 'case_study',
-      title: 'Klinik holat',
-      body: {
-        bullets: [
-          'Yosh bemor asosiy shikoyat bilan keladi va muhim anamnez elementi klinik yoʻnalishni belgilaydi.',
-          'Birinchi differensial gipoteza shikoyat va obyektiv topilmalar asosida shakllanadi.',
-          'Keyingi diagnostik qadam: eng xavfsiz va informativ tekshiruvdan boshlanadi.',
-          'Qaror: tashxis ehtimoli va bemor xavfsizligi boʻyicha birinchi chora tanlanadi.',
-        ],
-      },
-      image_query: 'clinical dermatology patient examination',
-    },
-    {
-      slide_type: 'summary',
-      title: 'Xulosa',
-      body: {
-        bullets: [
-          'Taʼrif: asosiy tushunchalar aniq mezonlar bilan esda qolishi kerak.',
-          'Erkta belgilar: ogohlantiruvchi simptomlarni oʻz vaqtida tanib olish muhim.',
-          'Diagnostika: ketma-ketlik arzon va xavfsiz usullardan murakkabgacha boradi.',
-          'Davolash: individual yondashuv monitoring va profilaktika bilan birga olib boriladi.',
-        ],
-      },
-    },
-  ];
-}
-
 /** OpenAI response_format.json_schema uchun */
 export const PRESENTATION_JSON_SCHEMA = {
   name: 'imentor_presentation_content',
@@ -359,17 +282,16 @@ export const PRESENTATION_JSON_SCHEMA = {
       presentation_title: { type: 'string' },
       subject_area: { type: 'string' },
       author: { type: 'string' },
-      // DIQQAT: OpenAI strict Structured Outputs `minItems`/`maxItems` ni
-      // QO'LLAMAYDI — ular bo'lsa so'rov 400 bilan yiqilib, har generatsiya
-      // sxemasiz prompt-fallback'ga tushib qolardi. Slaydlar soni promptda
-      // va normalizatsiyada (MIN_SLIDES..MAX_SLIDES) nazorat qilinadi.
+      // Supported by current non-fine-tuned OpenAI models; verified on the live model.
       slides: {
         type: 'array',
+        minItems: 20,
+        maxItems: 25,
         items: {
           type: 'object',
           additionalProperties: false,
           properties: {
-            slide_type: { type: 'string', enum: [...SLIDE_TYPES] },
+            slide_type: { type: 'string', enum: SLIDE_TYPES.filter(type => type !== 'references') },
             title: { type: 'string' },
             subtitle: { type: 'string' },
             body: {
@@ -517,18 +439,13 @@ export function normalizePresentationContent(
       speaker_notes: s?.speaker_notes ? String(s.speaker_notes).trim().slice(0, 800) : undefined,
       imageUrl: typeof s?.imageUrl === 'string' ? s.imageUrl : undefined,
       imageCredit: typeof s?.imageCredit === 'string' ? s.imageCredit : undefined,
+      imageSourceUrl: typeof s?.imageSourceUrl === 'string' ? s.imageSourceUrl : undefined,
     });
   }
   let slides = mapped;
 
-  if (slides.length < MIN_SLIDES_WITH_FILLER) {
-    const fb = fallbackSlides(presentation_title, subject_area);
-    for (const filler of fb) {
-      if (slides.length >= MIN_SLIDES_WITH_FILLER) break;
-      if (slides.some((s) => s.title.toLowerCase() === filler.title.toLowerCase())) continue;
-      slides.push(filler);
-    }
-  }
+  // Never invent filler slides, medical statistics or Uzbek text when AI returns a short deck.
+  if (!slides.length) throw new Error('Presentation has no usable slides.');
 
   // Birinchi slayd title bo'lsin
   if (slides[0] && slides[0].slide_type !== 'title') {

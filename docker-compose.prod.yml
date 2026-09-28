@@ -35,9 +35,22 @@ x-backend-env: &backend-env
   DJANGO_JWT_ACCESS_MINUTES: ${DJANGO_JWT_ACCESS_MINUTES:-720}
   DJANGO_JWT_REFRESH_DAYS: ${DJANGO_JWT_REFRESH_DAYS:-14}
   IMENTOR_EXTERNAL_API_KEYS: ${IMENTOR_EXTERNAL_API_KEYS:-}
+  # Rektor hisoboti sahifasining paroli (imentor.uz/rektor). Bo'sh
+  # bo'lsa sahifa umuman ochilmaydi — himoyasiz hisobot qolmasin.
+  RECTOR_REPORT_PASSWORD: ${RECTOR_REPORT_PASSWORD:-}
+  # Dekanlar hisobot paroli (imentor.uz/rektor, dekan logini bilan).
+  DEAN_PASSWORD_DEKAN_DAVOLASH: ${DEAN_PASSWORD_DEKAN_DAVOLASH:-}
+  DEAN_PASSWORD_DEKAN_TPI: ${DEAN_PASSWORD_DEKAN_TPI:-}
+  DEAN_PASSWORD_DEKAN_PEDIATRIYA: ${DEAN_PASSWORD_DEKAN_PEDIATRIYA:-}
+  DEAN_PASSWORD_DEKAN_STOM: ${DEAN_PASSWORD_DEKAN_STOM:-}
   ONLINE_TEST_API_BASE_URL: ${ONLINE_TEST_API_BASE_URL:-}
+  ONLINE_TEST_API_FALLBACK_URL: ${ONLINE_TEST_API_FALLBACK_URL:-https://online-imtixon.uz}
   ONLINE_TEST_CONSUMER_API_KEY: ${ONLINE_TEST_CONSUMER_API_KEY:-}
+  ONLINE_TEST_HOST_HEADER: ${ONLINE_TEST_HOST_HEADER:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  # HEMIS — dars jadvalining haqiqiy manbasi, faqat o'qiladi.
+  HEMIS_API_URL: ${HEMIS_API_URL:-}
+  HEMIS_API_TOKEN: ${HEMIS_API_TOKEN:-}
   ADMIN_PHONE: ${ADMIN_PHONE:-998907863888}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
   DEMO_ADMIN_PHONES: ${DEMO_ADMIN_PHONES:-998907863888,998901110001}
@@ -55,6 +68,13 @@ x-backend-env: &backend-env
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    # Backend 4 ishchi x (pool 8 + overflow 12) = 80 ulanish ochishi mumkin,
+    # standart chegara esa 100 — zaxira deyarli yo'q edi va ishchilar soni
+    # oshirilsa API butunlay yiqilardi. 94 GB xotirada 200 ulanish arzon.
+    # Standart 64 MB parallel so-rovlar va indeks qurish uchun juda kam —
+    # vektor qidiruvi shu sababli sekin ishlardi.
+    shm_size: 2gb
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-imentor}
       POSTGRES_USER: ${POSTGRES_USER:-imentor}
@@ -171,8 +191,12 @@ services:
       # Worker soni oshirilsa, app/core/db.py dagi pool qiymatlarini ham
       # qayta hisoblang: workers x (pool_size + max_overflow) < max_connections.
       GUNICORN_WORKERS: ${GUNICORN_WORKERS_FASTAPI:-4}
-      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT_FASTAPI:-300}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT_FASTAPI:-600}
       APP_THREAD_LIMIT: ${APP_THREAD_LIMIT:-48}
+    # appi.online-imtixon.uz DNS → 87.192.230.208 (tashqi IP). Server ichidan
+    # shu IP:443 ga NAT loopback yo'q — faqat LAN IP orqali nginx ishlaydi.
+    extra_hosts:
+      - "appi.online-imtixon.uz:192.168.0.101"
     volumes:
       - media_data:/app/media
     depends_on:
@@ -186,17 +210,37 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  # Yuz orqali kirish: rasmdan ArcFace embedding (faqat ichki tarmoq, port ochilmaydi).
+  # Image — cam.fermi.uz'ning `camera-api-api` image'idan olingan qat'iy nusxa
+  # (`docker tag camera-api-api imentor-face-base:20260917`): insightface va
+  # onnxruntime qayta yig'ilmaydi, cam.fermi.uz yangilansa ham bu xizmat o'zgarmaydi.
+  # Model fayllari `imentor_face_models` hajmida (buffalo_l, cam.fermi.uz bilan bir xil).
+  face_api:
+    image: imentor-face-base:20260917
+    working_dir: /srv
+    command: ["python", "-m", "uvicorn", "face_service.main:app", "--host", "0.0.0.0", "--port", "8200", "--workers", "1"]
+    environment:
+      OMP_NUM_THREADS: "4"
+      FACE_MAX_PARALLEL: "4"
+    volumes:
+      - ./face_service:/srv/face_service:ro
+      - imentor_face_models:/home/appuser/.insightface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request,sys; sys.exit(0 if json.load(urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=4)).get('ok') else 1)"]
+      interval: 20s
+      timeout: 6s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
-        VITE_ENABLE_DEMO_AUTH: ${VITE_ENABLE_DEMO_AUTH:-true}
-        VITE_DEMO_ADMIN_PHONE: ${DEMO_ADMIN_PHONE:-998901110001}
-        VITE_DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-AdminDemo123}
-        VITE_DEMO_STAFF_PHONE: ${DEMO_HODIM_PHONE:-998901112233}
-        VITE_DEMO_STAFF_PASSWORD: ${DEMO_HODIM_PASSWORD:-TestHodim123}
+        # Demo parollar frontendga uzatilmaydi — ular ochiq JS faylga tushardi.
+        VITE_ENABLE_DEMO_AUTH: ${VITE_ENABLE_DEMO_AUTH:-false}
     depends_on:
       backend_fastapi:
         condition: service_healthy
@@ -206,6 +250,57 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  # Online ta'lim portali — `onlinetalim.fermi.uz`.
+  #
+  # AYNAN o'sha image, lekin ALOHIDA konteyner va alohida port. Sabab: bu
+  # mustaqil loyiha, uni yangilash yoki qayta ishga tushirish iMentor
+  # frontendini umuman qimirlatmasligi kerak. Ilova qaysi qobiqni
+  # ko'rsatishini brauzerdagi domen nomi hal qiladi (`main.tsx`).
+  frontend_online:
+    image: imentor-frontend
+    depends_on:
+      frontend:
+        condition: service_healthy
+    # Port CHIQARILMAYDI: bu shunchaki statik server bo'lib, `/api/` ni
+    # backendga uzatmaydi. Tashqariga `nginx_online` gateway'i chiqadi.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "5" }
+
+  # Online portal gateway'i — `onlinetalim.fermi.uz` shu yerga keladi.
+  #
+  # iMentor'ning `nginx` xizmatidan MUSTAQIL: o'z konfigi, o'z porti.
+  # Ikkalasi bir xil vazifani bajaradi, lekin biri ikkinchisini qayta
+  # ishga tushirmaydi.
+  nginx_online:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile.online
+    ports:
+      - "${ONLINE_HTTP_BIND:-127.0.0.1}:${ONLINE_HTTP_PORT:-9060}:80"
+    depends_on:
+      backend_fastapi:
+        condition: service_healthy
+      frontend_online:
+        condition: service_healthy
+    volumes:
+      - media_data:/var/www/media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/api/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options: { max-size: "20m", max-file: "5" }
 
   nginx:
     build:
@@ -218,6 +313,9 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+    volumes:
+      # Fayllarni nginx to'g'ridan-to'g'ri beradi — backend oqimi band bo'lmasin.
+      - media_data:/var/www/media:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/api/health/"]
       interval: 15s
@@ -229,3 +327,5 @@ volumes:
   postgres_data:
   redis_data:
   media_data:
+  imentor_face_models:
+    external: true

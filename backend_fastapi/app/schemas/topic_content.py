@@ -48,6 +48,8 @@ class TopicVideoOut(BaseModel):
     embed_url: str
     author_name: str
     created_at: dt.datetime
+    # Faqat qo'shgan o'qituvchi (yoki admin) o'chira oladi — tugma shunga qarab chiqadi.
+    can_delete: bool = False
 
 
 class TopicVideoCreateRequest(BaseModel):

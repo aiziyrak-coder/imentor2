@@ -1010,6 +1010,14 @@ export default function AdminSyllabusCatalog() {
                     ) : (
                       <p className="font-bold text-slate-900 flex items-center gap-2 flex-wrap">
                         {row.subject_name}
+                        {row.teacher_owned && (
+                          <span
+                            className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                            title="O‘qituvchi Excel’dan o‘zi yuklagan shaxsiy fan — faqat unga ko‘rinadi. O‘chirilsa yashiriladi, materiallari saqlanadi."
+                          >
+                            O‘qituvchi yuklagan
+                          </span>
+                        )}
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
                           {instructionLanguageBadge(resolveSyllabusInstructionLanguage(row))}
                         </span>

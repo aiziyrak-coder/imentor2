@@ -56,7 +56,7 @@ function buildScenariosHtml(session: CaseStudySession, lang: AppLanguage, meta?:
     .map(
       (q, i) => `
         <div data-pdf-block style="margin-bottom:28px;">
-          ${q.focus ? `<p data-pdf-keep-next style="margin:0 0 6px;font-size:11px;font-weight:700;color:#047857;text-transform:uppercase;">${escapeHtml(caseFocusLabel(q.focus, lang))}</p>` : ''}
+          ${q.focus ? `<p data-pdf-keep-next style="margin:0 0 6px;font-size:11px;font-weight:700;color:#047857;text-transform:uppercase;">${escapeHtml(caseFocusLabel(q.focus, lang, session.domain))}</p>` : ''}
           <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#111827;line-height:1.6;white-space:pre-wrap;">
             ${i + 1}. ${escapeHtml(q.scenario || '')}
           </p>
@@ -85,7 +85,7 @@ function buildAnswerKeyHtml(session: CaseStudySession, lang: AppLanguage, meta?:
       const refs = referencesBlock(q.references, t(lang, 'pdf.caseReferences'));
       return `
         <div data-pdf-block style="margin-bottom:32px;">
-          ${q.focus ? `<p data-pdf-keep-next style="margin:0 0 6px;font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;">${escapeHtml(caseFocusLabel(q.focus, lang))}</p>` : ''}
+          ${q.focus ? `<p data-pdf-keep-next style="margin:0 0 6px;font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;">${escapeHtml(caseFocusLabel(q.focus, lang, session.domain))}</p>` : ''}
           <p style="margin:0 0 10px;font-size:14px;font-weight:700;color:#374151;line-height:1.5;white-space:pre-wrap;">
             ${i + 1}. ${escapeHtml((q.scenario || '').slice(0, 180))}${(q.scenario || '').length > 180 ? '…' : ''}
           </p>

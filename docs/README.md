@@ -101,7 +101,7 @@
 | PostgreSQL | 16 | Ma'lumotlar bazasi |
 | Redis | 7 | Cache, throttle, Celery broker |
 | Celery | 5.4 | AI vazifalar (background worker) |
-| OpenAI API | gpt-4o / gpt-4o-mini | AI generatsiya |
+| OpenAI API | gpt-4.1-nano (+ text-embedding-3-small) | AI generatsiya |
 
 - Docker + Docker Compose (`dev` va `prod` — alohida to'liq stack fayllar)
 - Docker ichidagi **nginx gateway** — frontend, API va media routing
@@ -316,9 +316,9 @@ Default port: `http://127.0.0.1:9050` (`IMENTOR_HTTP_PORT=9050`).
 | `DJANGO_SERVE_MEDIA` | Media fayllarni serve qilish | `True` (Docker) |
 | `DJANGO_ALLOW_LEGACY_PREPARED_CONTENT_API` | Eski himoyasiz API | `False` (prod) |
 | `DJANGO_ALLOW_OPEN_REGISTRATION` | Ochiq ro'yxatdan o'tish | `False` (prod) |
-| `OPENAI_CHAT_MODEL` | Asosiy chat modeli | `gpt-4o` |
-| `OPENAI_FAST_MODEL` | Tez model | `gpt-4o-mini` |
-| `OPENAI_REASONER_MODEL` | Murakkab reasoning | `gpt-4o` |
+| `OPENAI_CHAT_MODEL` | Asosiy chat modeli | `gpt-4.1-nano` |
+| `OPENAI_FAST_MODEL` | Tez model | `gpt-4.1-nano` |
+| `OPENAI_REASONER_MODEL` | Murakkab reasoning | `gpt-4.1-nano` |
 | `GUNICORN_WORKERS` | Gunicorn worker soni | `2` |
 | `CELERY_CONCURRENCY` | Celery parallel tasklar | `4` (dev), `6` (prod) |
 | `DJANGO_AI_EDUCATION_RATE` | Ta'lim AI limit | `60/hour` |

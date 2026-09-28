@@ -1,3 +1,6 @@
+import { translatePreparedContent } from '../utils/preparedContentStore';
+import type { AppLanguage } from '../i18n/language';
+import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
 import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import { pushAppNotification } from '../utils/notifications';
 import {
@@ -48,11 +51,10 @@ import { messageFromAiError } from '../utils/aiErrors';
 import { parseKeywordsInput } from '../utils/generationVariety';
 import { downloadCaseAnswerKeyPdf, downloadCaseScenariosPdf } from '../utils/buildCasePdf';
 import { loadLatestLectureText } from '../utils/lectureExcerpt';
-import { makeGenerationScope } from '../utils/subjectDomain';
+import { hydrateGenerationScope, makeGenerationScope } from '../utils/subjectDomain';
 import {
   caseFocusAccentBorderClass,
   caseFocusBadgeClass,
-  caseFocusIconBgClass,
   caseFocusLabel,
   sortCaseQuestionsByFocus,
 } from '../utils/caseFocusLabels';
@@ -95,6 +97,19 @@ export default function CaseStudies() {
   /** `keepKeywords` — foydalanuvchi kiritgan kalit so'zlar saqlanib qolsin.
    * Ilgari Bazadan variant ochilganda inputdagi yangi kalit so'zlar
    * yuklangan sessiyanikiga almashtirilardi va yozilgani yo'qolardi. */
+  const [translating, setTranslating] = useState(false);
+  const selectCaseLanguage = async (target: AppLanguage) => {
+    if (!activeVersionId || translating) return;
+    setTranslating(true);
+    try {
+      const translated = await translatePreparedContent<CaseStudySession & { primaryLanguage?: AppLanguage; translations?: Partial<Record<AppLanguage, Partial<CaseStudySession>>> }>(activeVersionId, target);
+      const view = target === translated.primaryLanguage ? translated : { ...translated, ...translated.translations?.[target] };
+      setCaseSession(view);
+      setRevealedAnswers(new Array(view.questions.length).fill(false));
+    } catch (err) { setError(messageFromAiError(err, t('case.errorLoadVersion'), language)); }
+    finally { setTranslating(false); }
+  };
+
   const applySession = useCallback(
     (data: CaseStudySession, versionId: string | null, keepKeywords = false) => {
       setCaseSession(data);
@@ -168,9 +183,17 @@ export default function CaseStudies() {
   };
 
   const parsedKeywords = useMemo(() => parseKeywordsInput(keywords), [keywords]);
-  // Ma'ruza va Taqdimot bilan bir xil: kontent INTERFEYS tilida yaratiladi
-  // (ilgari sillabusning o'qitish tili olinardi va bo'limlar mos kelmasdi).
-  const contentLanguage = language;
+  const contentLanguage = contentLanguageFor(globalTopic, language);
+  const generationDomain = useMemo(
+    () =>
+      makeGenerationScope({
+        topic,
+        subjectName: globalTopic?.subjectName,
+        departmentName: globalTopic?.departmentName,
+        subjectCode: globalTopic?.subjectCode,
+      }).domain,
+    [topic, globalTopic?.subjectName, globalTopic?.departmentName, globalTopic?.subjectCode],
+  );
 
   const handleGenerate = async (currentTopic: string = topic) => {
     if (!currentTopic.trim()) return;
@@ -179,10 +202,9 @@ export default function CaseStudies() {
     setError(null);
     try {
       const lectureText = await loadLatestLectureText(globalTopic ?? currentTopic);
-      const scope = makeGenerationScope({
+      const scope = await hydrateGenerationScope({
         topic: currentTopic,
-        subjectName: globalTopic?.subjectName,
-        departmentName: globalTopic?.departmentName,
+        context: globalTopic,
         lectureText,
       });
       const data = await aiService.generateCaseStudy(
@@ -316,7 +338,12 @@ export default function CaseStudies() {
   };
 
   return (
-    <StaffPageLayout spacious className="print:p-0 print:max-w-none print:m-0">
+    <StaffPageLayout
+      title={t('nav.cases')}
+      icon={Stethoscope}
+      accent="violet"
+       spacious className="print:p-0 print:max-w-none print:m-0"
+    >
       <ContentTopicToolbar
         moduleLabel={t('case.create')}
         topic={staffTopic}
@@ -333,12 +360,19 @@ export default function CaseStudies() {
         onSelectVersion={(id) => void handleSelectVersion(id)}
         onDeleteVersion={handleDeleteVersion}
         versionsTitle={t('case.savedVersions')}
+        hint={t(
+          generationDomain === 'academic'
+            ? 'case.modeAcademic'
+            : generationDomain === 'biomedical'
+              ? 'case.modeBiomedical'
+              : 'case.modeClinical',
+        )}
         extra={
           <div className="space-y-2">
             <label className={`flex items-center gap-2 ${staffLabel}`}>
               <Tags size={14} />
               {t('case.keywordsLabel')}
-              <span className="text-black/35">({t('case.keywordsOptional')})</span>
+              <span className="text-slate-300">({t('case.keywordsOptional')})</span>
             </label>
             <input
               value={keywords}
@@ -347,7 +381,7 @@ export default function CaseStudies() {
               disabled={loading}
               className={staffInput}
             />
-            <p className="text-[11px] text-black/45">{t('case.keywordsHint')}</p>
+            <p className="text-[11px] text-slate-400">{t('case.keywordsHint')}</p>
           </div>
         }
       />
@@ -360,15 +394,10 @@ export default function CaseStudies() {
           actionBusy={retryingSave}
         />
       )}
-      {loading && <StaffLoading label={t('case.generating')} />}
-
-      {!loading && !caseSession && topic.trim() && (
-        <StaffPanel className="p-10 text-center print:hidden">
-          <Stethoscope strokeWidth={2} size={32} className="mx-auto text-[#083047]/50 mb-4" />
-          <p className="text-[14px] text-black/55 max-w-md mx-auto">
-            {t('case.noSavedHint', { action: t('case.create') })}
-          </p>
-        </StaffPanel>
+      {loading && (
+        <StaffLoading
+          label={t(generationDomain === 'academic' ? 'case.generatingAcademic' : 'case.generating')}
+        />
       )}
 
       {!loading && caseSession && (
@@ -381,6 +410,12 @@ export default function CaseStudies() {
                 : caseSession.topic}
             </p>
             <div className="flex flex-wrap gap-2">
+              {(['uz', 'ru', 'en'] as const).map(lang => (
+                <button key={lang} type="button" disabled={translating || !activeVersionId}
+                  onClick={() => void selectCaseLanguage(lang)} className="rounded-lg border px-3 py-2 text-xs font-semibold uppercase disabled:opacity-50">
+                  {translating ? '…' : lang}
+                </button>
+              ))}
               <StaffToolbarButton onClick={() => void handleGenerate(topic)} disabled={loading}>
                 <RefreshCw size={16} />
                 {t('case.regenerate')}
@@ -401,7 +436,7 @@ export default function CaseStudies() {
               {caseSession.keywords.map((kw) => (
                 <span
                   key={kw}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-100 text-[#083047] text-[12px] font-semibold"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-500"
                 >
                   <Tags size={12} /> {kw}
                 </span>
@@ -410,10 +445,10 @@ export default function CaseStudies() {
           )}
 
           <div className="flex items-center gap-2 print:hidden">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-[#083047]/50">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
               {t('case.viewLabel')}
             </p>
-            <div className="h-px flex-1 bg-black/5" />
+            <div className="h-px flex-1 bg-slate-900/[0.07]" />
           </div>
 
           <div className="space-y-4">
@@ -424,24 +459,22 @@ export default function CaseStudies() {
                 <StaffPanel
                   key={i}
                   large
-                  className={`overflow-hidden border-l-4 ${caseFocusAccentBorderClass(q.focus)} print:shadow-none print:border print:break-inside-avoid`}
+                  className={`overflow-hidden border-l-2 ${caseFocusAccentBorderClass(q.focus)} print:shadow-none print:border print:break-inside-avoid`}
                 >
                   <div className="p-5 sm:p-7 flex items-start gap-4">
-                    <div
-                      className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${caseFocusIconBgClass(q.focus)}`}
-                    >
-                      <FocusIcon size={20} strokeWidth={2} />
+                    <div className="mt-0.5 shrink-0 text-slate-300">
+                      <FocusIcon size={17} strokeWidth={2} />
                     </div>
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-black/35">
+                        <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                           {t('case.questionLabel')} {i + 1}
                         </span>
                         {q.focus && (
                           <span
                             className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase tracking-wide ${caseFocusBadgeClass(q.focus)}`}
                           >
-                            {caseFocusLabel(q.focus, language)}
+                            {caseFocusLabel(q.focus, language, caseSession.domain)}
                           </span>
                         )}
                       </div>
@@ -474,7 +507,7 @@ export default function CaseStudies() {
                       >
                         <h4 className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-slate-600">
                           <KeyRound size={14} className="shrink-0" />
-                          {caseSession.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}
+                          {caseSession.domain === 'clinical' ? t('case.clinicalOpinion') : t('case.academicOpinion')}
                         </h4>
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 sm:px-5 sm:py-5">
                           <CaseAnswerView
@@ -497,7 +530,7 @@ export default function CaseStudies() {
                   {/* Print: har doim javobni ko'rsatish */}
                   <div className="hidden print:block px-7 pb-7 pl-[84px] space-y-3">
                     <h4 className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-slate-600">
-                      {caseSession.domain === 'academic' ? t('case.academicOpinion') : t('case.clinicalOpinion')}
+                      {caseSession.domain === 'clinical' ? t('case.clinicalOpinion') : t('case.academicOpinion')}
                     </h4>
                     <CaseAnswerView
                       text={q.answer}

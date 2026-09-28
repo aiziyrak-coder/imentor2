@@ -48,8 +48,9 @@ describe('LoginPage', () => {
     syncMock.mockResolvedValue(undefined);
   });
 
-  async function switchToStaffLogin(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole('button', { name: 'Xodim' }));
+  // Talaba tabi olib tashlangan — sahifa darhol xodim formasi bilan ochiladi.
+  async function switchToStaffLogin(_user: ReturnType<typeof userEvent.setup>) {
+    expect(screen.queryByRole('button', { name: 'Talaba' })).toBeNull();
   }
 
   it('shows validation error for too short login', async () => {
@@ -62,7 +63,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Kirish' }));
 
     expect(
-      screen.getByText("Telefon raqamini to'liq kiriting yoki Xodim ID ni yozing."),
+      screen.getByText("JSHSHIR, Xodim ID yoki to'liq telefon raqamini kiriting."),
     ).toBeInTheDocument();
     expect(loginMock).not.toHaveBeenCalled();
   });
@@ -107,6 +108,6 @@ describe('LoginPage', () => {
     await user.type(screen.getByPlaceholderText(/parol/i), 'bad');
     await user.click(screen.getByRole('button', { name: 'Kirish' }));
 
-    expect(await screen.findByText(/Telefon yoki parol noto'g'ri/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Login yoki parol noto'g'ri/i)).toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ import { fetchAdminCatalogStats, type CatalogStats } from '../../utils/contentCa
 import { fetchStaffDirectory } from '../../utils/staffDirectoryApi';
 import { fetchAcademicCatalog } from '../../utils/academicCatalogApi';
 import { fetchAdminLiveTestStats, type AdminLiveTestStatRow } from '../../utils/liveTestApi';
+import { fetchAdminSyllabusCatalogStats, type SyllabusCatalogStats } from '../../utils/syllabusApi';
 import { useUiText } from '../../i18n/useUiText';
 import {
   DonutChart,
@@ -85,17 +86,34 @@ export default function AdminDashboardHome() {
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [catalogStats, setCatalogStats] = useState<SyllabusCatalogStats | null>(null);
   const [liveTestStats, setLiveTestStats] = useState<AdminLiveTestStatRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [staff, catalogContentStats, syllabusStats, testStats, academicCatalog] = await Promise.all([
-        fetchStaffDirectory().catch(() => []),
-        fetchAdminCatalogStats().catch(() => null),
-        fetchAdminSyllabusCatalogStats().catch(() => null),
-        fetchAdminLiveTestStats().catch(() => []),
-        fetchAcademicCatalog().catch(() => null),
+      const [staffRes, catalogRes, syllabusRes, testRes, academicRes] = await Promise.allSettled([
+        fetchStaffDirectory(),
+        fetchAdminCatalogStats(),
+        fetchAdminSyllabusCatalogStats(),
+        fetchAdminLiveTestStats(),
+        fetchAcademicCatalog(),
       ]);
+
+      const staff = staffRes.status === 'fulfilled' ? staffRes.value : [];
+      const catalogContentStats = catalogRes.status === 'fulfilled' ? catalogRes.value : null;
+      const syllabusStats = syllabusRes.status === 'fulfilled' ? syllabusRes.value : null;
+      const testStats = testRes.status === 'fulfilled' ? testRes.value : [];
+      const academicCatalog = academicRes.status === 'fulfilled' ? academicRes.value : null;
+
+      if (
+        staffRes.status === 'rejected' &&
+        catalogRes.status === 'rejected' &&
+        syllabusRes.status === 'rejected'
+      ) {
+        setLoadError(t('admin.error.loadFailed'));
+      }
+
       setStaffCount(staff.length);
       setTeacherCount(staff.filter((s) => String(s.role || '') === 'hodim').length);
       setTodayLogins(staff.filter((s) => isToday(s.last_login)).length);
@@ -119,10 +137,12 @@ export default function AdminDashboardHome() {
         setCatalogStats(syllabusStats);
       }
       setLiveTestStats(testStats);
+    } catch {
+      setLoadError(t('admin.error.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -203,6 +223,12 @@ export default function AdminDashboardHome() {
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> {t('admin.refresh')}
         </button>
       </motion.div>
+
+      {loadError && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-800">
+          {loadError}
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -299,7 +325,9 @@ export default function AdminDashboardHome() {
               centerLabel={t('admin.dashboardTotalContent')}
             />
           ) : (
-            <p className="text-[13px] text-slate-400 py-8 text-center">{t('admin.dashboardLoading')}</p>
+            <p className="text-[13px] text-slate-400 py-8 text-center">
+              {loading ? t('admin.dashboardLoading') : t('admin.dashboardNoContentStats')}
+            </p>
           )}
           {totals ? (
             <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 gap-2">
@@ -333,7 +361,11 @@ export default function AdminDashboardHome() {
                 { key: 'all', label: t('admin.dashboardTotalContent'), value: totals.total_count, color: '#312e81' },
               ]}
             />
-          ) : null}
+          ) : (
+            <p className="text-[13px] text-slate-400 py-8 text-center">
+              {loading ? t('admin.dashboardLoading') : t('admin.dashboardNoContentStats')}
+            </p>
+          )}
           {totals ? (
             <div className="mt-4 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-xl border border-slate-100 bg-white/70 px-2 py-2">

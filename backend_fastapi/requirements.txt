@@ -5,6 +5,8 @@ SQLAlchemy==2.0.36
 alembic==1.14.0
 psycopg[binary]==3.2.3
 pgvector==0.3.6
+# Yuz orqali kirish: embedding solishtirish (app/services/face_login.py).
+numpy>=1.26
 pydantic==2.10.4
 pydantic-settings==2.7.0
 python-jose[cryptography]==3.3.0
@@ -13,6 +15,9 @@ celery==5.4.0
 redis>=5.0.0
 requests>=2.31.0
 python-docx>=1.1.0
+# Malaka test importi: PDF va Word 97-2003 (.doc) dan matn olish.
+pypdf>=4.0
+olefile>=0.47
 python-multipart==0.0.20
 sqladmin==0.20.1
 itsdangerous==2.2.0

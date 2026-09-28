@@ -14,6 +14,7 @@ import {
   Upload,
   X,
   ZoomIn,
+  MonitorPlay,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GlobalTopicContext, AppNavigationContext, AppLanguageContext } from '../App';
@@ -24,6 +25,7 @@ import { extractPdfTextFromBlob } from '../utils/presentationTopicNorm';
 import PdfSlideViewer from './PdfSlideViewer';
 import { apiErrorMessage } from '../utils/apiErrorMessage';
 import { outputLanguageLooksWrong } from '../utils/outputLanguage';
+import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
 import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
 import {
   loadLatestPreparedContent,
@@ -45,6 +47,7 @@ import StaffTopicHeader from './staff/StaffTopicHeader';
 import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffPanel from './staff/StaffPanel';
+import StaffSectionLabel from './staff/StaffSectionLabel';
 import { staffBtnGhost, staffBtnPrimary, staffBtnSecondary } from './staff/staffUi';
 
 function formatSize(bytes: number): string {
@@ -226,7 +229,7 @@ function PresentationLightbox({ items, index, onClose, onIndexChange }: Lightbox
                 <a
                   href={downloadUrl}
                   download={item.file_name}
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 text-white text-[14px] font-semibold hover:bg-blue-500"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2.5 text-[13.5px]"
                 >
                   <Download size={18} /> {t('common.download')}
                 </a>
@@ -353,8 +356,10 @@ export default function PresentationMaterials() {
       // Ma'ruza o'sha paytdagi interfeys tilida saqlanadi. Hozirgi til boshqa
       // bo'lsa, model bir tildagi manbadan boshqa tilda slayd yasashga majbur
       // bo'ladi va natija aralash chiqishi mumkin — buni oldindan aytamiz.
+      // Taqdimot ham fan tilida — ma'ruza, keys va test bilan bir xil qoida.
+      const contentLanguage = contentLanguageFor(globalTopic, language);
       setLanguageWarning(
-        outputLanguageLooksWrong(lectureText, language)
+        outputLanguageLooksWrong(lectureText, contentLanguage)
           ? t('presentation.warnLectureLanguage')
           : null,
       );
@@ -378,8 +383,8 @@ export default function PresentationMaterials() {
         topicType: globalTopic.type,
         subjectName: globalTopic.subjectName,
         variantLabel: globalTopic.variantLabel,
-        // Foydalanuvchi UI'da tanlagan til ustuvor (lekin bilan bir xil qoida).
-        language,
+        language: contentLanguage,
+        departmentName: globalTopic.departmentName,
         mode: hasPdfContext ? 'enhance' : 'generate',
         lectureText,
         sourceFileName: hasPdfContext ? pdfItem?.file_name : undefined,
@@ -424,7 +429,7 @@ export default function PresentationMaterials() {
           subjectName: globalTopic.subjectName,
           topicId: globalTopic.id,
           variantLabel: globalTopic.variantLabel,
-          language,
+          language: contentLanguage,
         },
       });
       if (!built.size) {
@@ -466,7 +471,11 @@ export default function PresentationMaterials() {
 
   if (!topicReady || !globalTopic) {
     return (
-      <StaffPageLayout>
+      <StaffPageLayout
+        title={t('nav.presentation')}
+        icon={MonitorPlay}
+        accent="amber"
+      >
         <StaffEmptyState
           icon={BookOpen}
           title={t('presentation.noTopic')}
@@ -479,7 +488,11 @@ export default function PresentationMaterials() {
   }
 
   return (
-    <StaffPageLayout>
+    <StaffPageLayout
+      title={t('nav.presentation')}
+      icon={MonitorPlay}
+      accent="amber"
+    >
       <StaffTopicHeader
         moduleLabel={t('presentation.title')}
         topic={localizedTopic}
@@ -532,9 +545,9 @@ export default function PresentationMaterials() {
       {error && <StaffErrorAlert message={error} />}
 
       {languageWarning && (
-        <StaffPanel className="p-4 border border-amber-200 bg-amber-50/80">
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
           <p className="text-[13px] text-amber-900/90">{languageWarning}</p>
-        </StaffPanel>
+        </div>
       )}
 
       {aiLoading && (
@@ -545,7 +558,7 @@ export default function PresentationMaterials() {
                 <Sparkles size={20} className="animate-pulse" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[14px] font-bold text-[#083047]">{t('presentation.aiGenerating')}</p>
+                <p className="text-[13.5px] font-semibold text-slate-900">{t('presentation.aiGenerating')}</p>
                 {aiProgress ? (
                   <p className="text-[12px] text-sky-700 font-semibold mt-0.5 truncate">{aiProgress}</p>
                 ) : null}
@@ -558,22 +571,25 @@ export default function PresentationMaterials() {
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="animate-spin text-[#083047]/60" size={36} />
+          <Loader2 className="animate-spin text-slate-300" size={36} />
         </div>
       ) : items.length === 0 ? (
-        <StaffPanel className="py-12 text-center text-black/45 text-[14px] space-y-1.5">
-          <p>{t('presentation.empty')}</p>
-        </StaffPanel>
+        <div className="mx-auto max-w-sm px-4 py-16 text-center">
+          <Presentation size={22} className="mx-auto mb-3 text-slate-300" />
+          <p className="text-[13px] leading-relaxed text-slate-500">{t('presentation.empty')}</p>
+        </div>
       ) : (
         <div className="space-y-2">
-          <h3 className="text-[14px] font-bold text-[#083047]">{t('presentation.topicVersions')}</h3>
-          <p className="text-[12.5px] text-black/45">{t('presentation.topicVersionsHint')}</p>
+          <StaffSectionLabel count={items.length}>
+            {t('presentation.topicVersions')}
+          </StaffSectionLabel>
+          <p className="text-[12.5px] text-slate-400">{t('presentation.topicVersionsHint')}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
           {items.map((item, idx) => (
             <motion.div
               key={item.id}
               layout
-              className="group relative ios-glass rounded-2xl border border-white/70 overflow-hidden shadow-sm"
+              className="group relative overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.06]"
             >
               <button
                 type="button"
@@ -586,8 +602,8 @@ export default function PresentationMaterials() {
                 </span>
               </button>
               <div className="p-3 space-y-1">
-                <p className="text-[13px] font-semibold text-black/85 line-clamp-2">{item.title || item.file_name}</p>
-                <p className="text-[11px] text-black/45">
+                <p className="text-[13px] font-semibold text-slate-800 line-clamp-2">{item.title || item.file_name}</p>
+                <p className="text-[11px] text-slate-400">
                   {kindLabel(item.kind)} · {formatSize(item.file_size)} · {item.author_name}
                 </p>
               </div>

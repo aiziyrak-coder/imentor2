@@ -37,9 +37,7 @@ function collectBoundaries(container: HTMLElement, pxRatio: number): Boundaries 
   const unique = (values: number[]) =>
     Array.from(new Set(values.filter((v) => v > 0))).sort((a, b) => a - b);
 
-  const blocks = unique(
-    Array.from(container.querySelectorAll('[data-pdf-block]')).map(toCanvasY),
-  );
+  const blocks = unique(Array.from(container.querySelectorAll('[data-pdf-block]')).map(toCanvasY));
   // `data-pdf-keep-next` — sarlavha/yorliq: undan keyin kesilsa, sahifa oxirida
   // yolg'iz "ЛЕЧЕНИЕ" turib qolardi, matni esa keyingi sahifada.
   const elements = unique(
@@ -144,45 +142,51 @@ function sliceToDataUrl(source: HTMLCanvasElement, start: number, end: number): 
 }
 
 export async function renderHtmlToPdf(html: string, filename: string): Promise<void> {
-  const container = document.createElement('div');
-  container.style.position = 'fixed';
-  container.style.left = '-10000px';
-  container.style.top = '0';
-  container.style.width = '760px';
-  container.style.background = '#ffffff';
-  container.innerHTML = html;
-  document.body.appendChild(container);
+  return renderHtmlDocumentsToPdf([html], filename);
+}
 
-  try {
-    const canvas = await html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
+/** Draw bounded HTML fragments one at a time so long rosters cannot exceed canvas limits. */
+export async function renderHtmlDocumentsToPdf(
+  documents: Iterable<string>,
+  filename: string,
+): Promise<void> {
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const contentWidthMm = pdf.internal.pageSize.getWidth() - PAGE_MARGIN_X_MM * 2;
+  const usableMm = pdf.internal.pageSize.getHeight() - PAGE_MARGIN_Y_MM * 2;
+  let pageIndex = 0;
+  for (const html of documents) {
+    const container = document.createElement('div');
+    Object.assign(container.style, {
+      position: 'fixed',
+      left: '-10000px',
+      top: '0',
+      width: '760px',
+      background: '#ffffff',
     });
-
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    // Kontent chekkalar ichiga joylashadi (chapdan/o'ngdan ham bo'sh joy qoladi).
-    const contentWidthMm = pdfWidth - PAGE_MARGIN_X_MM * 2;
-    const pxPerMm = canvas.width / contentWidthMm;
-    const usableMm = pdfHeight - PAGE_MARGIN_Y_MM * 2;
-    const pagePx = Math.floor(usableMm * pxPerMm);
-    const pxRatio = canvas.height / container.getBoundingClientRect().height;
-    const { blocks, elements } = collectBoundaries(container, pxRatio);
-
-    const pages = planPageCuts({
-      canvasHeight: canvas.height,
-      pagePx,
-      blocks,
-      elements,
-      findClean: (maxEnd, minEnd) => findCleanRow(canvas, maxEnd, minEnd),
-    });
-
-    let pageIndex = 0;
-    for (const { start, end } of pages) {
-      const imgData = sliceToDataUrl(canvas, start, end);
-      if (imgData) {
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    try {
+      await document.fonts?.ready;
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+      if (!canvas.width || !canvas.height) throw new Error('PDF canvas is empty');
+      const pxPerMm = canvas.width / contentWidthMm;
+      const pagePx = Math.floor(usableMm * pxPerMm);
+      const pxRatio = canvas.height / container.getBoundingClientRect().height;
+      const { blocks, elements } = collectBoundaries(container, pxRatio);
+      const pages = planPageCuts({
+        canvasHeight: canvas.height,
+        pagePx,
+        blocks,
+        elements,
+        findClean: (maxEnd, minEnd) => findCleanRow(canvas, maxEnd, minEnd),
+      });
+      for (const { start, end } of pages) {
+        const imgData = sliceToDataUrl(canvas, start, end);
+        if (!imgData) throw new Error('PDF page could not be rendered');
         if (pageIndex > 0) pdf.addPage();
         pdf.addImage(
           imgData,
@@ -194,10 +198,23 @@ export async function renderHtmlToPdf(html: string, filename: string): Promise<v
         );
         pageIndex += 1;
       }
+      canvas.width = 0;
+      canvas.height = 0;
+    } finally {
+      container.remove();
     }
-
-    pdf.save(filename);
-  } finally {
-    document.body.removeChild(container);
   }
+  if (!pageIndex) throw new Error('No PDF pages');
+  for (let i = 1; i <= pageIndex; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(8);
+    pdf.setTextColor(100);
+    pdf.text(
+      `${i} / ${pageIndex}`,
+      pdf.internal.pageSize.getWidth() / 2,
+      pdf.internal.pageSize.getHeight() - 5,
+      { align: 'center' },
+    );
+  }
+  pdf.save(filename);
 }

@@ -91,7 +91,9 @@ def resolve_login_role(db: Session, user: User, requested_role: str | None) -> s
     if requested == "admin" and user.username in demo_admin_phone_allowlist():
         ensure_admin_group(db, user)
         return "admin"
-    return resolve_user_role_from_db(db, user) or "hodim"
+    # Rolsiz hisob endi o'qituvchi bo'lib kirmaydi (2026-09-26) — bo'sh qaytadi,
+    # login yo'li uni rad etadi.
+    return resolve_user_role_from_db(db, user) or ""
 
 
 def get_user_by_username(db: Session, username: str) -> User | None:

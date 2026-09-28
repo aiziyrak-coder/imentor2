@@ -1,5 +1,5 @@
 import { DEFAULT_TEST_DIFFICULTY, type TestDifficulty } from './testDifficulty';
-import type { SubjectDomain } from './subjectDomain';
+import { isPatientFree, type SubjectDomain } from './subjectDomain';
 
 type CaseLike = { questions: Array<{ scenario?: string }> };
 type TestLike = { questions: Array<{ question?: string }> };
@@ -35,7 +35,7 @@ export function buildCaseStructurePrompt(topic: string, domain: SubjectDomain = 
       ? `MAVZU BO'LIMLARI: ${themes.map((s, i) => `${i + 1}) ${s}`).join('; ')}. ` +
         'Har keys shu bo\'limlardan BIRIGA chuqur bog\'lansin, mavzudan tashqariga CHIQMASIN.'
       : '';
-  if (domain === 'academic') {
+  if (isPatientFree(domain)) {
     return [
       `Variatsiya ID: ${generationNonce()}.`,
       `Mavzu: "${topic}".`,
@@ -44,9 +44,9 @@ export function buildCaseStructurePrompt(topic: string, domain: SubjectDomain = 
       '1-keys focus="profilaktika": xatolik, xavfsizlik yoki standartni buzmaslik qarori.',
       '2-keys focus="davolash": aniq yechim/usul tanlash (ikki yaqin variant, biri mos emas).',
       '3-keys focus="tashxis": ildiz sabab / to\'g\'ri model / qaysi tushuncha mos keladi.',
-      'Qaror AYNAN shu fan va mavzuga tegishli. Kasallik, dori, lab, vital belgi YO\'Q (fan klinik bo\'lmasa).',
-      'TAQIQLANGAN NAMUNA: 55 yoshli ayol, diabet, HbA1c 9.5%, metformin, elektron pochta xizmati qaysi xavfsiz emas. ' +
-        'Bu informatika/elektronika mavzusini sun\'iy ravishda klinik qiladi — YARATILMASIN.',
+      'Qaror AYNAN shu fan va mavzuga tegishli. Individual bemor kartasi (yosh + shikoyat + tashxis + dori) YO\'Q.',
+      'TAQIQLANGAN NAMUNA: "68 yoshli erkak, 3 kun qorin og\'rig\'i..." — nazariy, tashkiliy yoki gumanitar mavzuni ' +
+        'sun\'iy ravishda klinik qiladi va mavzuni tekshirmaydi — YARATILMASIN.',
     ]
       .filter(Boolean)
       .join(' ');
@@ -74,14 +74,16 @@ export function buildCaseStructurePrompt(topic: string, domain: SubjectDomain = 
  * Mutaxassis: kam ma'lumot, oson tashxis, yuzaki yechim — shuni tuzatadi.
  */
 export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): string {
-  if (domain === 'academic') {
+  if (isPatientFree(domain)) {
     return [
       'QATTIQ QOIDALAR — oliy ta\'lim AMALIY vaziyat, klinik keys EMAS:',
       'MAVZUGA BOG\'LIQLIK: muammo, ma\'lumotlar va yechim AYNAN fan va mavzu (va ma\'ruza, bo\'lsa) doirasida.',
-      'BEMOR YO\'Q: yosh+jins+kasallik+dori vignette TAQIQLANADI. HbA1c, qon bosimi, puls, qorin og\'rig\'i, appenditsit YO\'Q.',
-      'Ishtirokchi: talaba, muhandis, o\'qituvchi, tizim administratori — kasalliksiz.',
-      'QIYINLIK: bitta ta\'rif = javob EMAS. Kamida ikkita chalg\'ituvchi, lekin mantiqiy cheklov (standart, formula, protokol).',
-      'Yechimda aniq qadam, formula, sozlama yoki qoida; nima uchun muqobil noto\'g\'ri.',
+      // Klinik nozologiyani nomma-nom sanash modelni aynan o\'sha tomonga
+      // yetaklaydi. Umumiy belgilar yetarli - kasallik nomi berilmaydi.
+      'BEMOR YO\'Q: yosh+jins+kasallik+dori vignette TAQIQLANADI. HbA1c, qon bosimi, puls, qorin og\'rig\'i YO\'Q.',
+      'Ishtirokchi: mavzuga mos mutaxassis, jamoa yoki muassasa (o\'qituvchi, bosh hamshira, sanitariya shifokori, tadqiqotchi, rahbar, muhandis) — individual bemor emas.',
+      'QIYINLIK: bitta ta\'rif = javob EMAS. Kamida ikkita chalg\'ituvchi, lekin mantiqiy cheklov (me\'yor, qonun, tamoyil, standart, formula, protokol).',
+      'Yechimda aniq qadam, me\'yor, qoida yoki tamoyil; nima uchun muqobil noto\'g\'ri.',
       'HAJM: vaziyat 520–720 so\'z, yechim 700–920 so\'z. Har maydon 4–8 dens gap.',
     ].join(' ');
   }
@@ -163,7 +165,7 @@ export function buildTestVarietyPrompt(
   domain: SubjectDomain = 'clinical',
 ): string {
   const anglePool =
-    domain === 'academic'
+    isPatientFree(domain)
       ? difficulty === 'easy'
         ? TEST_ACADEMIC_EASY
         : TEST_ACADEMIC_ANGLES
@@ -185,15 +187,15 @@ export function buildTestVarietyPrompt(
       ? `MAVZU BO'LIMLARI: ${themes.map((s, i) => `${i + 1}) ${s}`).join('; ')}. ` +
         'Savollarni shu bo\'limlar bo\'ylab taqsimlang — har bo\'limdan kamida bittadan. Mavzudan CHIQMANG.'
       : '';
-  if (domain === 'academic') {
+  if (isPatientFree(domain)) {
     return [
       `Variatsiya ID: ${generationNonce()}.`,
       `Mavzu: "${topic}". ${count} ta NOYOB test savoli.`,
       themeBlock,
       'HAR SAVOL 2–3 zich jumla: aniq shart (raqam/cheklov/standart) + qaror. Ta\'rif ("X nima?") TAQIQLANADI.',
-      'KLINIK BEMOR YO\'Q: diabet, HbA1c, metformin, qon bosimi, yoshli bemor + kasallik vignette YARATILMASIN.',
-      'TAQIQLANGAN NAMUNA: "55 yoshli ayol, qandli diabet, yangi elektron pochta, HbA1c 9.5%, metformin. Qaysi xizmat xavfsiz emas?" —',
-      'bu informatika savolini sun\'iy klinik qiladi, mantiqsiz.',
+      'INDIVIDUAL BEMOR VIGNETTE YO\'Q: "N yoshli bemor + shikoyat + tashxis/dori" ko\'rinishidagi savol YARATILMASIN.',
+      'TAQIQLANGAN NAMUNA: "Dinshunoslik" mavzusiga "45 yoshli erkak hansirash bilan murojaat qildi..." —',
+      'bu mavzuni tekshirmaydi, mantiqsiz.',
       'QAT\'IY: to\'g\'ri javob shu FAN va MAVZU (va ma\'ruza) tushunchasi bo\'lsin. Boshqa fan aralashtirilmasin.',
       'To\'g\'ri javoblar takrorlanmasin. Avvalgi savollarni nusxalamang.',
       `Savol uslublari: ${angles.join('; ')}.`,

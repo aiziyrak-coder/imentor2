@@ -67,3 +67,6 @@ class PreparedContentSummaryOut(BaseModel):
     author_display_name: str = ""
     created_at: dt.datetime
     can_delete: bool = False
+    #: Bo'sh bo'lmasa — material eskirgan (masalan klinik bo'lmagan fanga bemor
+    #: ssenariysi). Tarixda ko'rinadi, lekin avtomatik yuklanmaydi.
+    retired_reason: str = ""

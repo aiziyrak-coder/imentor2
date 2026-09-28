@@ -6,19 +6,41 @@
 }
 
 body {
-  background-color: #f2f2f7;
+  background-color: #f4f6fa;
   color: #1c1c1e;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * Yuza.
+ *
+ * Ilgari bu yarim shaffof "shisha" edi: 45% oq fon va 40px blur. Rangli
+ * fon ustida u kulrang-loyqa bo'lib chiqar, ichidagi matn kontrastini
+ * yo'qotardi, kartochka chegarasi esa deyarli ko'rinmasdi — shuning uchun
+ * sahifa "yuvilgan" ko'rinardi.
+ *
+ * Endi yuza to'liq oq, chegarasi aniq, soyasi ikki qatlamli: yaqin va
+ * qattiq (chekka uchun) hamda uzoq va yumshoq (chuqurlik uchun).
+ */
 .ios-glass {
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+  background: #ffffff;
+  border: 1px solid rgba(8, 48, 71, 0.07);
+  box-shadow:
+    0 1px 2px rgba(8, 48, 71, 0.04),
+    0 12px 32px -14px rgba(8, 48, 71, 0.14);
+}
+
+/* Ustiga kelganda kartochka bir oz ko'tariladi. */
+.ios-glass-hover {
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+.ios-glass-hover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 2px rgba(8, 48, 71, 0.05),
+    0 18px 40px -16px rgba(8, 48, 71, 0.22);
 }
 
 .ios-glass-dark {
@@ -29,17 +51,18 @@ body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
+/* Modal va suzuvchi panel — yuzadan bir pog'ona balandroq. */
 .ios-glass-panel {
-  background: rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(60px) saturate(200%);
-  -webkit-backdrop-filter: blur(60px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2), 0 20px 40px rgba(0,0,0,0.06);
+  background: #ffffff;
+  border: 1px solid rgba(8, 48, 71, 0.08);
+  box-shadow:
+    0 2px 4px rgba(8, 48, 71, 0.05),
+    0 28px 64px -24px rgba(8, 48, 71, 0.28);
 }
 
 .ios-active-link {
-  background: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: none;
 }
 
 .ios-shadow {
@@ -77,76 +100,109 @@ body {
   animation: floatOrb 8s ease-in-out infinite;
 }
 
-@keyframes landingShimmer {
-  0% { background-position: 0% center; }
-  100% { background-position: 200% center; }
+/*
+ * Landing sahifa (PublicLandingPage) — `lp-` prefiksi.
+ * Ranglar logodan: to'q ko'k (#0b3a6e) va firuza (#14b8a6).
+ */
+.lp-hero-bg {
+  background:
+    radial-gradient(60rem 36rem at 85% -10%, rgba(20, 184, 166, 0.16), transparent 60%),
+    radial-gradient(48rem 30rem at -10% 10%, rgba(14, 116, 204, 0.12), transparent 60%),
+    #f7fafc;
 }
 
-@keyframes landingBlob {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(30px, -20px) scale(1.05); }
-  66% { transform: translate(-20px, 15px) scale(0.95); }
+.lp-grid {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
 }
 
-.landing-accent-text {
-  background: linear-gradient(135deg, #2563eb 0%, #059669 35%, #7c3aed 70%, #2563eb 100%);
-  background-size: 200% auto;
+.lp-accent {
+  background: linear-gradient(100deg, #0b3a6e 0%, #0e7490 45%, #14b8a6 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: landingShimmer 8s ease-in-out infinite;
 }
 
-.landing-dot-grid {
-  background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
-  background-size: 28px 28px;
+.lp-primary {
+  background: linear-gradient(180deg, #0f4c81 0%, #0b3a6e 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 10px 24px -10px rgba(11, 58, 110, 0.65);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
-
-.landing-blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  animation: landingBlob 18s ease-in-out infinite;
-  opacity: 0.5;
-}
-
-.landing-blob-1 {
-  width: 480px;
-  height: 480px;
-  background: #bfdbfe;
-  top: -8%;
-  left: -5%;
-}
-
-.landing-blob-2 {
-  width: 420px;
-  height: 420px;
-  background: #a7f3d0;
-  top: 15%;
-  right: -8%;
-  animation-delay: -6s;
-}
-
-.landing-blob-3 {
-  width: 360px;
-  height: 360px;
-  background: #ddd6fe;
-  bottom: 5%;
-  left: 35%;
-  animation-delay: -12s;
-}
-
-.landing-cta-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #0891b2 100%);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.landing-cta-primary:hover {
+.lp-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.25);
+  filter: brightness(1.08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 16px 30px -12px rgba(11, 58, 110, 0.7);
 }
 
-.landing-cta-band {
-  background: linear-gradient(135deg, #eff6ff 0%, #ecfdf5 50%, #f5f3ff 100%);
-  border: 1px solid rgba(226, 232, 240, 0.9);
+.lp-card {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -16px rgba(15, 23, 42, 0.18);
+}
+
+.lp-window {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.04),
+    0 30px 60px -24px rgba(11, 58, 110, 0.35),
+    0 0 0 8px rgba(255, 255, 255, 0.55);
+}
+
+/* Mockupdagi "AI yozmoqda" qatorlari */
+.lp-line {
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e2e8f0, #cbd5e1);
+  transform-origin: left center;
+  animation: lpWrite 9s ease-in-out infinite;
+}
+@keyframes lpWrite {
+  0% { transform: scaleX(0); opacity: 0.4; }
+  12%, 88% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+
+.lp-caret {
+  animation: lpBlink 1s steps(2, start) infinite;
+}
+@keyframes lpBlink {
+  to { visibility: hidden; }
+}
+
+.lp-float {
+  animation: lpFloat 7s ease-in-out infinite;
+}
+@keyframes lpFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.lp-pulse-dot {
+  box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.55);
+  animation: lpPulse 2.2s ease-out infinite;
+}
+@keyframes lpPulse {
+  0% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
+}
+
+.lp-cta-band {
+  background:
+    radial-gradient(40rem 20rem at 90% 0%, rgba(20, 184, 166, 0.35), transparent 60%),
+    radial-gradient(36rem 22rem at 0% 100%, rgba(14, 116, 204, 0.35), transparent 60%),
+    linear-gradient(135deg, #0a2540 0%, #0b3a6e 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-line,
+  .lp-caret,
+  .lp-float,
+  .lp-pulse-dot {
+    animation: none;
+  }
 }

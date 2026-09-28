@@ -1,5 +1,4 @@
 import { Loader2 } from 'lucide-react';
-import { staffCard, STAFF_HEADING } from './staffUi';
 
 type Props = {
   label: string;
@@ -8,10 +7,14 @@ type Props = {
 
 export default function StaffLoading({ label, hint }: Props) {
   return (
-    <div className={`${staffCard} py-16 flex flex-col items-center gap-4`}>
-      <Loader2 size={36} className="animate-spin text-[#083047]/70" />
-      <p className={`text-[15px] font-semibold ${STAFF_HEADING}`}>{label}</p>
-      {hint && <p className="text-[13px] text-black/45 max-w-md text-center px-4">{hint}</p>}
+    <div className="flex flex-col items-center gap-3 py-20">
+      <Loader2 size={22} className="animate-spin text-slate-300" />
+      <p className="text-[13.5px] font-medium text-slate-500">{label}</p>
+      {hint && (
+        <p className="max-w-md px-4 text-center text-[12.5px] leading-relaxed text-slate-400">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

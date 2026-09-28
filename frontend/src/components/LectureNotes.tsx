@@ -1,3 +1,4 @@
+import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
 import React, { useState, useEffect, useContext, useRef, useCallback } from 'react';
 import { buildPreparedContentMeta } from '../utils/preparedContentMeta';
 import { pushAppNotification } from '../utils/notifications';
@@ -10,6 +11,7 @@ import {
   CheckCircle2,
   BookOpen,
   RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import LectureMarkdown from './staff/LectureMarkdown';
@@ -22,7 +24,8 @@ import {
 } from '../App';
 import { useUiText } from '../i18n/useUiText';
 import { formatTopicLessonLabel } from '../utils/topicLessonLabel';
-import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
+import { isTopicContextComplete, topicContextKey, resolveTopicNorm } from '../utils/syllabusTopicContext';
+import { readLectureForTopic, writeLectureForTopic } from '../utils/lectureLocalCache';
 import {
   listPreparedForTopicSynced,
   loadPreparedByIdSynced,
@@ -35,12 +38,13 @@ import { useLocalizedTopic } from '../i18n/useLocalizedTopic';
 import { copyTextToClipboard } from '../utils/copyText';
 import StaffPageLayout from './staff/StaffPageLayout';
 import SavedWorkList from './staff/SavedWorkList';
+import StaffSectionLabel from './staff/StaffSectionLabel';
 import StaffTopicHeader from './staff/StaffTopicHeader';
 import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffLoading from './staff/StaffLoading';
 import StaffPanel from './staff/StaffPanel';
-import { resolveSubjectDomain } from '../utils/subjectDomain';
+import { hydrateGenerationScope } from '../utils/subjectDomain';
 import {
   staffBtnGhost,
   staffBtnPrimary,
@@ -101,7 +105,6 @@ export default function LectureNotes() {
   }, [globalTopic]);
 
   // Mavzu ochilganda shu fan/mavzudagi OXIRGI ma'ruza avtomatik chiqadi.
-  // Qayta generatsiya qilinmaguncha yangi matn yaratilmaydi.
   useEffect(() => {
     let cancelled = false;
     const lookup = globalTopic ?? topic;
@@ -114,11 +117,19 @@ export default function LectureNotes() {
       setOpeningSaved(false);
       return;
     }
+    const cachedNorm = resolveTopicNorm(globalTopic);
+    const cached = cachedNorm ? readLectureForTopic(cachedNorm) : '';
+    if (cached) {
+      setLectureSession({ topic: globalTopic?.title || topic, content: cached });
+      setEditedContent(cached);
+      setLectureContent(cached);
+    } else {
+      setLectureSession(null);
+      setEditedContent('');
+      setLectureContent('');
+      setActiveVersionId(null);
+    }
     setOpeningSaved(true);
-    setLectureSession(null);
-    setEditedContent('');
-    setLectureContent('');
-    setActiveVersionId(null);
     void (async () => {
       const rows = await listPreparedForTopicSynced('lecture', lookup, { shared: true });
       if (cancelled) return;
@@ -129,11 +140,12 @@ export default function LectureNotes() {
       }
       const session = await loadPreparedByIdSynced<LectureNote>('lecture', rows[0].id);
       if (cancelled) return;
-      if (session) {
+      if (session?.content) {
         setActiveVersionId(rows[0].id);
         setLectureSession(session);
         setEditedContent(session.content);
         setLectureContent(session.content);
+        if (cachedNorm) writeLectureForTopic(cachedNorm, session.content);
       }
       setOpeningSaved(false);
     })();
@@ -151,12 +163,11 @@ export default function LectureNotes() {
     setError(null);
     setStreamingContent('');
     try {
-      const contentLanguage = language;
-      const domain = resolveSubjectDomain({
-        departmentName: globalTopic?.departmentName,
-        subjectName: globalTopic?.subjectName,
-        topic,
-      });
+      const contentLanguage = contentLanguageFor(globalTopic, language);
+      // Keys va test bilan BIR XIL qaror: serverdagi rasmiy klinik kafedra
+      // bayrog'i va fan kodi ham hisobga olinadi (2026-09-26). Ilgari ma'ruza
+      // faqat nom qolipiga qarardi va keys/testdan boshqa domen chiqishi mumkin edi.
+      const domain = (await hydrateGenerationScope({ topic, context: globalTopic })).domain;
       const data = await aiService.generateLectureNotes(
         topic,
         description,
@@ -168,6 +179,8 @@ export default function LectureNotes() {
       setLectureSession(data);
       setEditedContent(data.content);
       setLectureContent(data.content);
+      const cacheNorm = resolveTopicNorm(globalTopic);
+      if (cacheNorm) writeLectureForTopic(cacheNorm, data.content);
       // Kalit sifatida SARLAVHA emas, tuzilmali topicNorm ishlatiladi
       // (sillabus::yo'nalish::mavzu kodi) — aks holda mavzu nomi tarjima
       // qilinganda saqlangan ma'ruza topilmay qolardi.
@@ -279,7 +292,11 @@ export default function LectureNotes() {
 
   if (!topicFromSyllabus && !topic.trim()) {
     return (
-      <StaffPageLayout>
+      <StaffPageLayout
+        title={t('nav.lectures')}
+        icon={BookOpen}
+        accent="blue"
+      >
         <StaffEmptyState
           icon={BookOpen}
           title={t('presentation.noTopic')}
@@ -292,7 +309,11 @@ export default function LectureNotes() {
   }
 
   return (
-    <StaffPageLayout>
+    <StaffPageLayout
+      title={t('nav.lectures')}
+      icon={BookOpen}
+      accent="blue"
+    >
       <StaffTopicHeader
         moduleLabel={t('lecture.generateBadge')}
         topic={staffTopic}
@@ -316,18 +337,25 @@ export default function LectureNotes() {
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        {!lectureSession && !openingSaved && (
+      </StaffTopicHeader>
+
+      {!lectureSession && !openingSaved && !loading && (
+        <div className="mx-auto max-w-sm px-4 py-16 text-center">
+          <Sparkles size={22} className="mx-auto mb-3 text-slate-300" />
+          <p className="text-[13px] leading-relaxed text-slate-500">
+            {t('toolbar.noVersions', { action: t('lecture.generateButton') })}
+          </p>
           <button
             type="button"
             onClick={handleGenerate}
             disabled={loading || !topic.trim()}
-            className={staffBtnPrimary}
+            className={`${staffBtnPrimary} mt-5`}
           >
             {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
             {t('lecture.generateButton')}
           </button>
-        )}
-      </StaffTopicHeader>
+        </div>
+      )}
 
       {error && (
         <StaffErrorAlert
@@ -355,7 +383,7 @@ export default function LectureNotes() {
             {/* Streaming paytida oddiy matn (Markdown EMAS) — har harfda butun
                 matnni qayta parse qilish sekinlashtiradi va "muzlab qolganday"
                 ko'rinadi. To'liq formatlash faqat generatsiya tugagach. */}
-            <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-black/80">
+            <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-slate-700">
               {streamingContent}
               <span className="inline-block w-2 h-4 bg-sky-500 ml-0.5 animate-pulse align-middle" />
             </pre>
@@ -413,6 +441,27 @@ export default function LectureNotes() {
             </div>
           </StaffPanel>
 
+          {lectureSession.incomplete && (
+            <div
+              role="alert"
+              className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                <p className="text-[13.5px] leading-relaxed">{t('lecture.incompleteNotice')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={loading}
+                className={`${staffBtnPrimary} shrink-0 disabled:opacity-50`}
+              >
+                <RefreshCw size={15} />
+                {t('lecture.regenerate')}
+              </button>
+            </div>
+          )}
+
           <StaffPanel className="p-6 sm:p-8 lg:p-10" large>
             {isEditing ? (
               <div className="space-y-4">
@@ -429,7 +478,9 @@ export default function LectureNotes() {
                   <button
                     type="button"
                     onClick={async () => {
-                      const next = { ...lectureSession, content: editedContent };
+                      // O'qituvchi matnni o'zi to'ldirib saqlasa — "chala" belgisi olinadi.
+                      const { incomplete: _wasIncomplete, ...rest } = lectureSession;
+                      const next = { ...rest, content: editedContent };
                       setLectureSession(next);
                       globalLecture.setContent(editedContent);
                       try {
@@ -482,8 +533,10 @@ export default function LectureNotes() {
 
       {savedLectures.length > 0 && !loading && !openingSaved && (
         <div className="space-y-2 pt-2">
-          <h3 className={`text-[14px] font-bold ${STAFF_HEADING}`}>{t('lecture.topicVersions')}</h3>
-          <p className="text-[12.5px] text-black/45">{t('lecture.topicVersionsHint')}</p>
+          <StaffSectionLabel count={savedLectures.length}>
+            {t('lecture.topicVersions')}
+          </StaffSectionLabel>
+          <p className="text-[12.5px] text-slate-400">{t('lecture.topicVersionsHint')}</p>
           <SavedWorkList
             items={savedLectures}
             activeId={activeVersionId}

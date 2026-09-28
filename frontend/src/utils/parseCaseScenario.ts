@@ -29,10 +29,13 @@ export function parseCaseScenario(raw: string, language: AppLanguage = 'uz'): Ca
 
   const labeled: CaseScenarioBlock[] = [];
   const chunks = text.split(/\n{2,}/).map((c) => c.trim()).filter(Boolean);
+  let hashed = 0;
   for (const chunk of chunks) {
     const lines = chunk.split('\n');
-    const first = (lines[0] || '').trim().replace(/^#{1,3}\s*/, '');
+    const head = (lines[0] || '').trim();
+    const first = head.replace(/^#{1,3}\s*/, '');
     if (lines.length >= 2 && looksLikeHeading(first)) {
+      if (/^#{1,3}\s/.test(head)) hashed += 1;
       labeled.push({
         id: first.toLowerCase(),
         title: first,
@@ -40,7 +43,11 @@ export function parseCaseScenario(raw: string, language: AppLanguage = 'uz'): Ca
       });
     }
   }
-  if (labeled.length >= 3 && labeled.every((b) => b.body)) {
+  // `###` aniq belgi: bunda ikkita bo'lim ham yetarli. Belgisiz matnda esa
+  // sarlavha taxmin qilinadi, shuning uchun kamida uchtasi talab etiladi -
+  // aks holda oddiy qisqa birinchi qator sarlavha deb o'qilib ketardi.
+  const enough = hashed === labeled.length && labeled.length === chunks.length ? 2 : 3;
+  if (labeled.length >= enough && labeled.every((b) => b.body)) {
     return labeled;
   }
 
