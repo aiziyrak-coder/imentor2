@@ -264,6 +264,7 @@ export default function StaffTeachingSubjectsPicker({
                       key={syllabus.id}
                       type="button"
                       onClick={() => toggle(syllabus.id)}
+                      title={syllabus.department_name ? `${syllabus.subject_name} — ${syllabus.department_name}` : syllabus.subject_name}
                       className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] transition ${
                         isActive
                           ? 'border-blue-400 bg-blue-50'
@@ -314,6 +315,7 @@ export default function StaffTeachingSubjectsPicker({
                   key={syllabus.id}
                   type="button"
                   onClick={() => toggle(syllabus.id)}
+                  title={syllabus.subject_name}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-blue-400 bg-blue-50 px-2.5 py-1.5 text-[12px] transition hover:border-rose-300 hover:bg-rose-50"
                 >
                   <Check size={14} className="shrink-0 text-blue-600" />
@@ -374,6 +376,7 @@ export default function StaffTeachingSubjectsPicker({
                         key={syllabus.id}
                         type="button"
                         onClick={() => toggle(syllabus.id)}
+                        title={syllabus.subject_name}
                         className={`inline-flex items-center gap-1.5 pl-2.5 pr-2.5 py-1.5 rounded-lg border text-[12px] transition ${
                           isActive
                             ? 'border-blue-400 bg-blue-50'
