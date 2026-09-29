@@ -14,7 +14,16 @@ import {
 import { readXlsxRows } from '../../utils/xlsxRows';
 import { readDocxSyllabus } from '../../utils/docxSyllabus';
 import { subjectNameFromRows } from '../../utils/ownSubjectTemplate';
+import { isInternationalSyllabus } from '../../utils/syllabusInstructionLanguage';
 import { staffBtnPrimary, staffInput, staffLabel } from './staffUi';
+
+const INTL_MARK = /\s*\((xorijiy|xalqaro|international)[^)]*\)/gi;
+
+/** Guruh tanlovi nomdagi "(Xalqaro)" belgisi orqali saqlanadi — fanlar ro'yxati shu bo'yicha ajratadi. */
+function nameForScope(raw: string, intl: boolean): string {
+  const base = raw.replace(INTL_MARK, '').replace(/\s+/g, ' ').trim();
+  return intl ? `${base} (Xalqaro)` : base;
+}
 
 /** Namuna fayl `public/` dan beriladi — o'qituvchi uni to'ldirib qaytaradi. */
 export const OWN_SUBJECT_TEMPLATE_URL = '/namuna-fan-mavzulari.xlsx';
@@ -48,6 +57,7 @@ export default function OwnSubjectUpload({
   const [topics, setTopics] = useState<SyllabusTopic[]>([]);
   const [name, setName] = useState(editing?.subject_name ?? '');
   const [lang, setLang] = useState<AppLanguage>((editing?.instruction_language as AppLanguage) || 'uz');
+  const [intl, setIntl] = useState(() => (editing ? isInternationalSyllabus(editing) : false));
 
   const onFile = async (file: File) => {
     setError(null);
@@ -69,6 +79,7 @@ export default function OwnSubjectUpload({
         }
         if (!editing) {
           setName(doc.subjectName);
+          if (isInternationalSyllabus({ subject_name: doc.subjectName, direction_code: '' })) setIntl(true);
           setLang(inferPdfLanguage(doc.topics.map((x) => x.title).join('\n')));
         }
         return;
@@ -82,7 +93,9 @@ export default function OwnSubjectUpload({
       setTopics(parsed.topics);
       // Tahrirlashda o'qituvchi yozgan nom va til saqlanadi.
       if (!editing) {
-        setName(subjectNameFromRows(rows, file.name));
+        const fromFile = subjectNameFromRows(rows, file.name);
+        setName(fromFile);
+        if (isInternationalSyllabus({ subject_name: fromFile, direction_code: '' })) setIntl(true);
         setLang(inferPdfLanguage(parsed.topics.map((x) => x.title).join('\n')));
       }
     } catch {
@@ -99,7 +112,7 @@ export default function OwnSubjectUpload({
       setError(null);
       try {
         const res = await updateOwnSyllabus(editing.id, {
-          subjectName: name.trim(),
+          subjectName: nameForScope(name, intl),
           instructionLanguage: lang,
           ...(topics.length
             ? { fileName, topics: topics.map((x) => ({ title: x.title, type: x.type || 'lecture' })) }
@@ -120,7 +133,7 @@ export default function OwnSubjectUpload({
     setError(null);
     try {
       const row = await createOwnSyllabus({
-        subjectName: name.trim(),
+        subjectName: nameForScope(name, intl),
         fileName,
         instructionLanguage: lang,
         topics: topics.map((x) => ({ title: x.title, type: x.type || 'lecture' })),
@@ -148,6 +161,33 @@ export default function OwnSubjectUpload({
   };
 
   const nameAndLang = (
+    <div className="space-y-3">
+    <div className="space-y-1">
+      <span className={staffLabel}>Guruh turi</span>
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:max-w-md" role="radiogroup">
+        {([
+          [false, 'O‘zbek guruhlari'],
+          [true, 'Xalqaro (xorijiy)'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={label}
+            type="button"
+            role="radio"
+            aria-checked={intl === value}
+            onClick={() => {
+              setIntl(value);
+              setName((prev) => nameForScope(prev, value));
+              if (value && lang === 'uz') setLang('en');
+            }}
+            className={`rounded-lg px-2 py-2 text-[13px] font-semibold transition ${
+              intl === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
     <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
       <label className="block space-y-1">
         <span className={staffLabel}>{t('ownSubjects.nameLabel')}</span>
@@ -161,6 +201,7 @@ export default function OwnSubjectUpload({
           <option value="en">English</option>
         </select>
       </label>
+    </div>
     </div>
   );
 
