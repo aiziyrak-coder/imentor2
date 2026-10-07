@@ -164,17 +164,18 @@ def _topic_lookup_filter(
     return or_(*clauses)
 
 
-def _can_delete_item(item: PreparedContent, auth: AuthContext, db: Session | None = None) -> bool:
-    """Muallif, admin yoki FAN EGASI (o'zi yuklagan fandagi har qanday kontent)."""
-    if item.owner_key == auth.user.username or auth.role == "admin":
-        return True
-    if db is None:
-        return False
-    sid = item.syllabus_id or _syllabus_id_from_norm(item.topic_norm)
-    return access.is_subject_owner(db, sid, auth.user.username)
+def _can_change_item(item: PreparedContent, auth: AuthContext) -> bool:
+    """O'zgartirish va o'chirish — faqat muallif yoki admin.
+
+    2026-10-07: ilgari fan egasi o'chira, shu fanni o'tadigan o'qituvchi esa
+    ma'ruza/taqdimotni ustidan yozib saqlay olardi. Bitta fanni o'zbek va rus
+    guruhlarida o'tadigan o'qituvchilar bir-birining materialini almashtirib
+    yoki o'chirib yuborardi.
+    """
+    return item.owner_key == auth.user.username or auth.role == "admin"
 
 
-def _summary(item: PreparedContent, auth: AuthContext, db: Session | None = None) -> dict:
+def _summary(item: PreparedContent, auth: AuthContext) -> dict:
     return PreparedContentSummaryOut(
         id=item.id,
         kind=item.kind,
@@ -183,7 +184,7 @@ def _summary(item: PreparedContent, auth: AuthContext, db: Session | None = None
         subject_name=item.subject_name,
         author_display_name=item.author_display_name or "",
         created_at=item.created_at,
-        can_delete=_can_delete_item(item, auth, db),
+        can_delete=_can_change_item(item, auth),
         retired_reason=getattr(item, "retired_reason", "") or "",
     ).model_dump()
 
@@ -230,7 +231,7 @@ def list_my_prepared_content(
             stmt = stmt.where(lookup)
 
     rows = db.execute(stmt.order_by(PreparedContent.created_at.desc())).scalars().all()
-    out = [_summary(r, auth, db) for r in rows]
+    out = [_summary(r, auth) for r in rows]
     return paginate(out, request, default_page_size=100, max_page_size=300)
 
 
@@ -411,16 +412,14 @@ def update_prepared_content_payload(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentOut:
-    """Yozuvning payload'ini almashtirish.
-
-    Keys/test — faqat egasi. Ma'ruza/taqdimot — shu fanni o'tadigan
-    o'qituvchi ham tahrirlab saqlashi mumkin (hamma oxirgisini ko'radi).
-    """
+    """Yozuvning payload'ini almashtirish — faqat muallif yoki admin."""
     item = db.execute(
         select(PreparedContent).where(PreparedContent.id == pk)
     ).scalar_one_or_none()
     if item is None or not _can_view_item(item, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
+    if not _can_change_item(item, auth):
+        raise HTTPException(status_code=403, detail="Faqat muallif yoki admin o'zgartira oladi.")
     # Asosiy matn tahrirlangan-u, tarjimalar o'shaligicha qolgan bo'lsa — ular eskirgan:
     # olib tashlanadi; kerakli til tanlanganda qayta tarjima qilinadi (aks holda ruscha nusxa eski matnni ko'rsatardi).
     refreshed = invalidate_stale_translations(item.kind, item.payload, body.payload)
@@ -441,7 +440,7 @@ def delete_prepared_content(
     ).scalar_one_or_none()
     if item is None or not _can_view_item(item, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
-    if not _can_delete_item(item, auth, db):
+    if not _can_change_item(item, auth):
         raise HTTPException(status_code=403, detail="O'chirish uchun ruxsat yo'q.")
     db.delete(item)
     db.commit()

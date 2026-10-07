@@ -109,7 +109,7 @@ import {
   resolveTopicNorm,
   type SyllabusTopicContext,
 } from './utils/syllabusTopicContext';
-import { readLectureForTopic, writeLectureForTopic } from './utils/lectureLocalCache';
+import { clearLectureCache, readLectureForTopic, writeLectureForTopic } from './utils/lectureLocalCache';
 
 export type { SyllabusTopic };
 
@@ -369,6 +369,7 @@ export default function App() {
       clearDesktopPairedSession(user?.uid);
       logoutLocalStaff();
       clearSyllabusRowCache();
+      clearLectureCache();
       // Interfeys tili ATAYLAB tiklanmaydi: u qurilma sozlamasi (localStorage),
       // hisobga bog'liq emas. Rus/ingliz tilida ishlaydigan o'qituvchi
       // sessiyasi tugaganda login sahifasini o'zbekchada ko'rmasligi kerak.
@@ -521,6 +522,7 @@ export default function App() {
     clearDesktopPairedSession(user?.uid);
     logoutLocalStaff();
     clearSyllabusRowCache();
+    clearLectureCache();
     // Tanlangan interfeys tili saqlanib qoladi (qurilma sozlamasi).
   };
 

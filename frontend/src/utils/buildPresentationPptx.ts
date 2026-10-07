@@ -1125,7 +1125,9 @@ function layoutReferences(
 ): void {
   s.background = { color: C.bgLight };
   addHeaderBadge(s, meta);
-  s.addText(slide.title || 'Foydalanilgan manbalar', {
+  const fallbackTitle =
+    meta.language === 'ru' ? 'Использованные источники' : meta.language === 'en' ? 'References' : 'Foydalanilgan manbalar';
+  s.addText(slide.title || fallbackTitle, {
     x: M,
     y: 0.7,
     w: 12.2,

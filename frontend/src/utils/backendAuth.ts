@@ -534,6 +534,11 @@ export function peekBackendAccessToken(): string | null {
   return cached?.access && cached.accessExpMs > Date.now() ? cached.access : null;
 }
 
+/** Joriy kirgan hisob logini (tarmoqsiz) — qurilmadagi keshni o'qituvchiga bog'lash uchun. */
+export function peekBackendUsername(): string {
+  return readCached()?.username || '';
+}
+
 export async function getBackendAccessToken(): Promise<string | null> {
   const now = Date.now();
   const leewayMs = 30_000;
