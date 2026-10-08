@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # Yuz orqali kirish xizmati (docker-compose `face_api`, faqat ichki tarmoq).
     face_api_url: str = "http://face_api:8200"
 
+    # cam.fermi.uz: JSHSHIR bilan kirishni tasdiqlash (docs/cam-fermi-verify-staff.md).
+    # Ikkalasi bo'lmasa bu kirish yo'li o'chiq (503), boshqa yo'llar o'zgarmaydi.
+    cam_verify_url: str = ""
+    cam_verify_api_key: str = ""
+    cam_verify_timeout: float = 10.0
+
     @property
     def database_url(self) -> str:
         return (

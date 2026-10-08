@@ -25,6 +25,11 @@ from app.services import face_login as fl
 
 PINFL_RE = re.compile(r"^\d{14}$")
 
+#: Sinxronlash tegmaydigan bog'lanishlar: "admin" — qo'lda; "cam" — xodim JSHSHIR bilan
+#: kirganda cam.fermi.uz tasdig'i asosida yaratilgan (`cam_login`). Aks holda soatlik
+#: sinxron uni ism bo'yicha topa olmay bo'shatib, xodim keyingi kirishda yana yangi hisob olardi.
+KEPT_SOURCES = ("admin", "cam")
+
 
 def is_pinfl(value: str) -> bool:
     return bool(PINFL_RE.match(value or ""))
@@ -57,6 +62,7 @@ def plan_links(
     users: list,
     info: dict[str, dict],
     admin_links: dict[str, str],
+    kept_sources: dict[str, str] | None = None,
 ) -> dict[str, tuple[str, str]]:
     """JSHSHIR → (owner_key, link_source). Bog'lab bo'lmaganlari ("", "")."""
     by_pinfl: dict[str, list[dict]] = defaultdict(list)
@@ -81,7 +87,7 @@ def plan_links(
     taken: dict[str, str] = {}
     for pinfl, owner in admin_links.items():
         if pinfl in by_pinfl and owner:
-            plan[pinfl] = (owner, "admin")
+            plan[pinfl] = (owner, (kept_sources or {}).get(pinfl, "admin"))
             taken[owner] = pinfl
 
     for pinfl, rs in by_pinfl.items():
@@ -131,9 +137,11 @@ def sync_pinfl(db: Session, rows: list[dict], *, dry_run: bool = False) -> Pinfl
     }
     users = fl._face_login_users(db)
     info = fl._account_info(db, [u.username for u in users])
-    admin_links = {p.pinfl: p.owner_key for p in existing.values() if p.link_source == "admin" and p.owner_key}
+    kept = {p.pinfl: p for p in existing.values() if p.link_source in KEPT_SOURCES and p.owner_key}
+    admin_links = {pinfl: p.owner_key for pinfl, p in kept.items()}
 
-    plan = plan_links(rows, face_owner_by_person, users, info, admin_links)
+    plan = plan_links(rows, face_owner_by_person, users, info, admin_links,
+                      {pinfl: p.link_source for pinfl, p in kept.items()})
     names = {r["pinfl"]: r["full_name"][:255] for r in rows}
     for pinfl, (owner, source) in plan.items():
         rec = existing.get(pinfl)
@@ -149,7 +157,7 @@ def sync_pinfl(db: Session, rows: list[dict], *, dry_run: bool = False) -> Pinfl
         )
         if source == "name":
             result.linked_name += 1
-        elif source in ("face", "admin"):
+        elif source in ("face", *KEPT_SOURCES):
             result.linked_face += 1
         else:
             result.unlinked += 1
