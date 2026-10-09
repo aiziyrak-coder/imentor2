@@ -87,7 +87,7 @@ def test_headline_counts_lessons_not_groups_and_splits_short_ones():
     rows = [
         # u1: bitta ma'ruza 3 guruhga, 60 daqiqa — to'liq o'tilgan
         lesson(1, group="G1"), lesson(2, group="G2"), lesson(3, group="G3"),
-        # u2: 40 daqiqa — yaqin, lekin yetmagan
+        # u2: 35 daqiqa — yaqin, lekin yetmagan (chegara 40 daqiqa)
         lesson(4, user="u2", room="301"),
         # u3: 10 daqiqa — kirib chiqqan
         lesson(5, user="u3", room="302"),
@@ -96,7 +96,7 @@ def test_headline_counts_lessons_not_groups_and_splits_short_ones():
     ]
     spans = {
         "u1": [(at(13, 0), at(14, 0))],
-        "u2": [(at(13, 0), at(13, 40))],
+        "u2": [(at(13, 0), at(13, 35))],
         "u3": [(at(13, 0), at(13, 10))],
         "u4": [],
     }
@@ -108,7 +108,7 @@ def test_headline_counts_lessons_not_groups_and_splits_short_ones():
 
 def test_short_people_lists_match_the_buckets():
     rows = [lesson(4, user="u2", room="301"), lesson(5, user="u3", room="302")]
-    spans = {"u2": [(at(13, 0), at(13, 40))], "u3": [(at(13, 0), at(13, 10))]}
+    spans = {"u2": [(at(13, 0), at(13, 35))], "u3": [(at(13, 0), at(13, 10))]}
     with patch.object(cr.ms, "_work_spans", return_value=spans), \
          patch.object(cr.ms, "_usage_events", return_value={"u2": [], "u3": []}), \
          patch.object(cr.ta, "engagement_map", return_value={}), \
