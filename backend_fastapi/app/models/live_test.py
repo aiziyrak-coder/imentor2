@@ -52,6 +52,8 @@ class LiveTestDraft(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("core_livetestsession.id", ondelete="CASCADE"))
     participant_key: Mapped[str] = mapped_column(String(64))
+    # Qoralama KIMNIKI: test yopilganda topshiriq shu talabaga yoziladi.
+    student_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
     first_name: Mapped[str] = mapped_column(String(128), default="")
     last_name: Mapped[str] = mapped_column(String(128), default="")
     answers: Mapped[list] = mapped_column(JSONB, default=list)

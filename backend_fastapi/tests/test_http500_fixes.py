@@ -111,7 +111,7 @@ def test_a_slow_face_service_says_so_instead_of_crashing(error):
 def test_two_simultaneous_draft_saves_update_instead_of_failing():
     from app.api.routes import live_test
 
-    obj = SimpleNamespace(id=1, closed_at=None, submissions=[], questions=[])
+    obj = SimpleNamespace(id=1, closed_at=None, submissions=[], drafts=[], questions=[])
     draft = SimpleNamespace(first_name="", last_name="", answers=[], updated_at=None)
     db = MagicMock()
     db.execute.return_value.scalar_one_or_none.side_effect = [None, draft]
@@ -125,7 +125,7 @@ def test_two_simultaneous_draft_saves_update_instead_of_failing():
             "lts_x", payload, db,
             SimpleNamespace(user=SimpleNamespace(username="ot_1"), student_id="1", role="student"),
         )
-    assert out == {"ok": True}
+    assert out == {"ok": True, "answers": [1, 2]}  # saqlangan javoblar qaytadi (2026-10-09)
     # Ikkinchi urinishda BOR qoralama yangilandi.
     assert draft.first_name == "A" and draft.answers == [1, 2]
     db.rollback.assert_called_once()

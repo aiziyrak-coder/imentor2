@@ -65,6 +65,10 @@ import {
   finalizeLiveTestSessionOnServer,
   upsertLiveTestDraftOnServer,
   getLiveTestParticipantKey,
+  saveLocalLiveTestAnswers,
+  loadLocalLiveTestAnswers,
+  clearLocalLiveTestAnswers,
+  countAnswered,
   createLiveTestSessionOnServer,
   type StudentTestQuestion,
 } from '../utils/liveTestApi';
@@ -76,6 +80,7 @@ import {
 } from '../utils/liveTestAnticheat';
 import QRCode from 'qrcode';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
+import { HttpError } from '../api/httpClient';
 import MedicalReferencesList from './staff/MedicalReferencesList';
 import {
   downloadTestAnswerKeyPdf,
@@ -102,6 +107,12 @@ function stripQuestionsForStudentView(questions: TestQuestion[]): StudentTestQue
     if (q.references?.length) item.references = q.references;
     return item;
   });
+}
+
+/** Shu brauzerda kirgan talaba (javoblar va ishtirokchi kaliti shunga bog'lanadi). */
+function studentOwnerKey(): string {
+  const u = getCurrentLocalUser();
+  return normalizeUserRole(u) === 'student' && u ? u.uid || '' : '';
 }
 
 function saveStudentSession(sessionId: string, data: LiveTestSessionDoc): void {
@@ -366,6 +377,7 @@ export default function TestQuestions() {
   });
   const [studentAnswers, setStudentAnswers] = useState<number[]>([]);
   const [studentSubmitted, setStudentSubmitted] = useState(false);
+  const [missingQuestion, setMissingQuestion] = useState<number | null>(null);
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentTest, setStudentTest] = useState<LiveTestSessionDoc | null>(null);
 
@@ -461,12 +473,6 @@ export default function TestQuestions() {
           testStartedAtRef.current = Date.now();
           void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
-          void upsertLiveTestDraftOnServer(studentSessionId, {
-            participantKey: participantKeyRef.current,
-            firstName: '',
-            lastName: '',
-            answers: new Array(doc.questions.length).fill(-1),
-          }).catch(() => {});
           return;
         }
       } catch {
@@ -486,12 +492,6 @@ export default function TestQuestions() {
           testStartedAtRef.current = Date.now();
           void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
-          void upsertLiveTestDraftOnServer(studentSessionId, {
-            participantKey: participantKeyRef.current,
-            firstName: '',
-            lastName: '',
-            answers: new Array(local.questions.length).fill(-1),
-          }).catch(() => {});
         }
         return;
       }
@@ -507,18 +507,51 @@ export default function TestQuestions() {
     };
   }, [isStudentMode, studentSessionId]);
 
+  // Sahifa yangilangan yoki telefon uxlab qolgan bo'lsa talaba to'xtagan
+  // joyidan davom etadi (ilgari javoblar o'chib ketardi). Javoblar va
+  // ishtirokchi kaliti KIRGAN TALABAGA bog'liq: bitta telefondan ikki talaba
+  // yechsa, biri ikkinchisining javoblarini ko'rmaydi.
+  useEffect(() => {
+    if (!isStudentMode || !studentSessionId || !studentTest || !studentAuthed) return;
+    const owner = studentOwnerKey();
+    participantKeyRef.current = getLiveTestParticipantKey(studentSessionId, owner);
+    const saved = loadLocalLiveTestAnswers(studentSessionId, studentTest.questions.length, owner);
+    if (saved) setStudentAnswers(saved);
+  }, [isStudentMode, studentSessionId, studentTest, studentAuthed]);
+
   // Talabaning javob qoralamasi fonda serverga yoziladi — telefon o'chsa yoki
   // sahifa yopilsa ish yo'qolmasin. MUHIM: bu effekt AYNAN talaba rejimi
   // uchun (avval shart teskari yozilgani uchun hech qachon ishlamagan).
   useEffect(() => {
     if (!isStudentMode || !studentSessionId || !studentTest || studentSubmitted || sessionClosed) return;
+    if (!studentAuthed) return;
+    const sent = studentAnswers;
     const timer = window.setTimeout(() => {
       void upsertLiveTestDraftOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
         firstName: studentFirstName,
         lastName: studentLastName,
-        answers: studentAnswers,
-      }).catch(() => {});
+        answers: sent,
+      })
+        .then((saved) => {
+          if (saved.alreadySubmitted) {
+            // Allaqachon topshirgan yoki test yopilganda javoblari qabul qilingan.
+            clearLocalLiveTestAnswers(studentSessionId, studentOwnerKey());
+            setStudentSubmitted(true);
+            return;
+          }
+          // Boshqa qurilma yoki oldingi oynadan saqlangan javoblar ko'proq
+          // bo'lsa — o'shalar tiklanadi.
+          if (saved.answers.length === sent.length && countAnswered(saved.answers) > countAnswered(sent)) {
+            setStudentAnswers((now) => (now === sent ? saved.answers : now));
+          }
+        })
+        .catch((err) => {
+          if (err instanceof HttpError && err.status === 403) {
+            setSessionClosed(true);
+            setError(t('test.sessionClosedStudentHint'));
+          }
+        });
     }, 700);
     return () => window.clearTimeout(timer);
   }, [
@@ -527,6 +560,7 @@ export default function TestQuestions() {
     studentTest,
     studentSubmitted,
     sessionClosed,
+    studentAuthed,
     studentFirstName,
     studentLastName,
     studentAnswers,
@@ -867,6 +901,8 @@ export default function TestQuestions() {
     const next = [...studentAnswers];
     next[questionIndex] = optionIndex;
     setStudentAnswers(next);
+    if (studentSessionId) saveLocalLiveTestAnswers(studentSessionId, next, studentOwnerKey());
+    if (missingQuestion === questionIndex) setMissingQuestion(null);
   };
 
   /** Ball. Javoblar ro'yxati savollar ro'yxatidan uzunroq bo'lishi mumkin
@@ -970,13 +1006,19 @@ export default function TestQuestions() {
       return;
     }
     if (studentAnswers.includes(-1)) {
-      setError(t('test.studentErrorAllQuestions'));
+      // Qaysi savol qolganini talaba o'zi qidirmasin: o'sha savolga olib boriladi.
+      const first = studentAnswers.indexOf(-1);
+      setMissingQuestion(first);
+      setError(`${t('test.studentErrorAllQuestions')} (${first + 1})`);
+      document.getElementById(`student-question-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     setStudentLoading(true);
     setError(null);
     try {
-      await flushLiveTestEvents(studentSessionId, participantKeyRef.current);
+      // Kuzatuv hodisalari kutilmaydi: sekin internetda ular javoblarni
+      // yuborishni 15 soniyagacha ushlab turardi.
+      void flushLiveTestEvents(studentSessionId, participantKeyRef.current).catch(() => undefined);
       const started = testStartedAtRef.current ?? Date.now();
       await submitLiveTestOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
@@ -996,10 +1038,17 @@ export default function TestQuestions() {
       const list = loadLocalSubmissions(studentSessionId);
       list.unshift(item);
       saveLocalSubmissions(studentSessionId, list);
+      clearLocalLiveTestAnswers(studentSessionId, studentOwnerKey());
       setStudentSubmitted(true);
     } catch (err) {
       console.error(err);
-      setError(t('test.studentErrorSubmit'));
+      if (err instanceof HttpError && err.status === 403) {
+        // O'qituvchi testni yopib bo'lgan — "internetni tekshiring" emas.
+        setSessionClosed(true);
+        setError(t('test.sessionClosedStudentHint'));
+      } else {
+        setError(t('test.studentErrorSubmit'));
+      }
     } finally {
       setStudentLoading(false);
     }
@@ -1100,7 +1149,11 @@ export default function TestQuestions() {
                 {/* Talaba ko'rinishi ham o'qituvchinikidek: raqam nishoni,
                     qalin savol matni, bir xil variant o'lchamlari. */}
                 {studentTest.questions.map((q, i) => (
-                  <div key={i} className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-900/[0.06] sm:p-6">
+                  <div
+                    key={i}
+                    id={`student-question-${i}`}
+                    className={`space-y-4 rounded-2xl bg-white p-5 ring-1 sm:p-6 ${missingQuestion === i ? 'ring-2 ring-rose-400' : 'ring-slate-900/[0.06]'}`}
+                  >
                     <div className="flex items-start gap-3">
                       <div className={staffIndexBadge}>{i + 1}</div>
                       <p className={staffQuestionText}>{q.question}</p>
@@ -1126,6 +1179,11 @@ export default function TestQuestions() {
                 ))}
               </div>
 
+              {!studentSubmitted && !sessionClosed && (
+                <p className="text-center text-[13px] font-medium text-slate-500" data-testid="student-progress">
+                  {countAnswered(studentAnswers)} / {studentTest.questions.length}
+                </p>
+              )}
               {!studentSubmitted && !sessionClosed ? (
                 <button
                   onClick={handleStudentSubmit}

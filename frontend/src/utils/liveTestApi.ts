@@ -54,17 +54,58 @@ export function isPublicStudentTestUrl(): boolean {
   return p.get('mode') === 'student' && sid.length > 0;
 }
 
-export function getLiveTestParticipantKey(sessionKey: string): string {
-  const storageKey = `${PARTICIPANT_KEY_PREFIX}${sessionKey}`;
+/** `owner` — kirgan talaba: bitta telefondan ikki talaba yechsa, ular aralashmaydi. */
+export function getLiveTestParticipantKey(sessionKey: string, owner = ''): string {
+  const storageKey = `${PARTICIPANT_KEY_PREFIX}${sessionKey}${owner ? `:${owner}` : ''}`;
   try {
-    const existing = sessionStorage.getItem(storageKey);
-    if (existing) return existing;
+    // localStorage: sahifa yangi oynada qayta ochilsa ham talaba O'SHA
+    // ishtirokchi bo'lib qoladi. Ilgari kalit sessionStorage'da edi — har
+    // yangi oyna serverda alohida bo'sh qoralama ochardi va test yopilganda
+    // u ikkinchi "talaba" bo'lib 0 ball bilan qo'shilardi (2026-10-09).
+    const existing = localStorage.getItem(storageKey) || (owner ? null : sessionStorage.getItem(storageKey));
+    if (existing) {
+      localStorage.setItem(storageKey, existing);
+      return existing;
+    }
     const created = `lp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    sessionStorage.setItem(storageKey, created);
+    localStorage.setItem(storageKey, created);
     return created;
   } catch {
     return `lp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   }
+}
+
+const ANSWERS_PREFIX = 'imentor-live-test-answers-';
+
+/** Talaba belgilagan javoblar shu qurilmada saqlanadi — sahifa yangilansa ham yo'qolmaydi. */
+export function saveLocalLiveTestAnswers(sessionKey: string, answers: number[], owner = ''): void {
+  try {
+    localStorage.setItem(`${ANSWERS_PREFIX}${sessionKey}:${owner}`, JSON.stringify(answers));
+  } catch {
+    /* xotira to'lgan yoki yopiq — serverdagi qoralama baribir bor */
+  }
+}
+
+export function loadLocalLiveTestAnswers(sessionKey: string, questionCount: number, owner = ''): number[] | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`${ANSWERS_PREFIX}${sessionKey}:${owner}`) || 'null');
+    if (!Array.isArray(raw) || raw.length !== questionCount) return null;
+    return raw.map((v) => (Number.isInteger(v) && v >= 0 ? v : -1));
+  } catch {
+    return null;
+  }
+}
+
+export function clearLocalLiveTestAnswers(sessionKey: string, owner = ''): void {
+  try {
+    localStorage.removeItem(`${ANSWERS_PREFIX}${sessionKey}:${owner}`);
+  } catch {
+    /* ahamiyatsiz */
+  }
+}
+
+export function countAnswered(answers: number[]): number {
+  return answers.filter((a) => a >= 0).length;
 }
 
 function apiBaseUrl(): string {
@@ -172,6 +213,13 @@ export async function fetchLiveTestSessionFromServer(
   }
 }
 
+export type LiveTestDraftResult = {
+  /** Serverda saqlangan javoblar (boshqa qurilma yoki oldingi oynadan). */
+  answers: number[];
+  /** Talaba allaqachon topshirgan yoki test yopilganda avtomatik topshirilgan. */
+  alreadySubmitted: boolean;
+};
+
 /** Talaba: draft javoblarni serverga saqlaydi (JWT majburiy). */
 export async function upsertLiveTestDraftOnServer(
   sessionKey: string,
@@ -181,10 +229,10 @@ export async function upsertLiveTestDraftOnServer(
     lastName: string;
     answers: number[];
   }
-): Promise<void> {
+): Promise<LiveTestDraftResult> {
   const token = await getBackendAccessToken();
   if (!token) throw new Error('no-backend-token');
-  await httpJson(`${apiBaseUrl()}/v1/live-tests/${encodeURIComponent(sessionKey)}/drafts/`, {
+  const data = await httpJson<{ answers?: number[]; already_submitted?: boolean }>(`${apiBaseUrl()}/v1/live-tests/${encodeURIComponent(sessionKey)}/drafts/`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: {
@@ -195,6 +243,10 @@ export async function upsertLiveTestDraftOnServer(
     },
     timeoutMs: 15000,
   });
+  return {
+    answers: Array.isArray(data?.answers) ? data.answers : [],
+    alreadySubmitted: Boolean(data?.already_submitted),
+  };
 }
 
 /** Talaba: javoblarni serverga yuboradi (JWT majburiy). */
