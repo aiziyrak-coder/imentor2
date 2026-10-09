@@ -32,6 +32,12 @@ GOOD = 70
 WARN = 40
 
 
+#: "Kirgan, lekin yetmagan" darslar ikkiga bo'linadi: chegaraga YAQIN kelgan
+#: (masalan 40 daqiqa — dars deyarli iMentor'da o'tgan) va shunchaki kirib
+#: chiqqan. Rektor uchun ikkalasining ma'nosi har xil (2026-10-09).
+NEAR_MINUTES = 30
+
+
 def _band(percent: int | None) -> str:
     if percent is None:
         return "none"
@@ -162,6 +168,33 @@ def _attach(row: dict, engagement: dict, profiles: dict, materials: dict) -> Non
     row["material_empty"] = int(mat.get("empty", 0) or 0)
 
 
+def teacher_state(r: dict) -> str:
+    """O'qituvchining davrdagi holati — har kishi FAQAT bitta toifada.
+
+    Ilgari sahifadagi "kirgan, dars o'tmagan" (80) va "umuman ishlatmagan" (110)
+    bir-birini qoplardi: kirib chiqqan, lekin birorta darsni to'liq o'tmagan
+    o'qituvchi ikkalasida ham sanalardi va yig'indi nazoratdagilar sonidan
+    (143) oshib ketardi (2026-10-09).
+    """
+    if not r["monitor_lessons"]:
+        return "offsite"
+    if not r["linked"]:
+        return "unlinked"
+    if r["monitor_used"] >= r["monitor_lessons"]:
+        return "full"          # hamma darsini iMentor'da o'tgan
+    if r["monitor_used"]:
+        return "partial"       # ba'zi darsini o'tgan, qolganini o'tmagan
+    if r.get("on_leave"):
+        return "on_leave"
+    if r.get("short_lessons"):
+        return "opened"        # kirgan, lekin birorta darsni to'liq o'tmagan
+    return "none"              # dars vaqtida umuman ochmagan
+
+
+#: Toifalar sahifada shu tartibda; yig'indisi = nazoratdagi o'qituvchilar.
+TEACHER_STATES = ("full", "partial", "opened", "none", "on_leave", "unlinked")
+
+
 def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
                  query: str = "", groups: tuple[str, ...] = ()) -> tuple[list[dict], list, dict, dict]:
     """O'qituvchi qatorlari + ular qurilgan xom ma'lumot.
@@ -170,7 +203,28 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
     funksiyadan foydalanadi — shunda modaldagi ro'yxat sahifadagi raqam bilan
     bir xil hisobdan chiqadi va ular hech qachon bir-biriga qarama-qarshi bo'lmaydi.
     """
-    lessons = lr._lessons(db, start_day, end_day, department=department, groups=groups)
+    rows, lessons, used, rooms, _ = _teacher_rows(db, start_day, end_day, department=department,
+                                                  query=query, groups=groups)
+    return rows, lessons, used, rooms
+
+
+def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
+                  query: str = "", groups: tuple[str, ...] = ()) -> tuple[list[dict], list, dict, dict, dict]:
+    """`teacher_rows` + hali tugamagan (baholanmaydigan) darslar haqida ma'lumot."""
+    every = lr._lessons(db, start_day, end_day, department=department, groups=groups, pending=True)
+    now = lr.current_time()
+    lessons = [x for x in every if lr.is_over(x, now)]
+    waiting = [x for x in every if not lr.is_over(x, now)]
+    waiting_by: dict[str, int] = defaultdict(int)
+    for lesson in waiting:
+        if lesson.monitor_id:
+            waiting_by[lesson.teacher_username or f"name:{lesson.teacher_name}"] += 1
+    pending = {
+        "lessons": len(waiting),
+        "monitor_lessons": sum(waiting_by.values()),
+        "teachers": len(waiting_by),
+        "as_of": now.isoformat() if waiting else None,
+    }
     # Xom o'lchov: har darsda qancha ishlangan. `used` shundan chegaradan
     # o'tganlarini oladi, qolgani "kirgan, lekin dars o'tilmagan" bo'ladi —
     # rektor aynan shu farqni ko'rishni so'radi (2026-10-08).
@@ -185,7 +239,10 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
     # Dalil: har o'qituvchi monitorli darslarida qancha vaqt ishlagan va
     # nechta darsga shunchaki "kirib chiqqan".
     short: dict[str, int] = defaultdict(int)
+    near: dict[str, int] = defaultdict(int)
     worked: dict[str, int] = defaultdict(int)
+    short_seconds: dict[str, int] = defaultdict(int)
+    near_need = min(NEAR_MINUTES * 60, need)
     for lesson in lessons:
         if not lesson.monitor_id:
             continue
@@ -194,10 +251,21 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
         worked[key] += seconds
         if 0 < seconds < need:
             short[key] += 1
+            short_seconds[key] += seconds
+            if seconds >= near_need:
+                near[key] += 1
     for r in rows:
         key = r["teacher_key"] or f"name:{r['teacher_name']}"
         r["short_lessons"] = short.get(key, 0)
+        # Qisqa darslarning ichidan: chegaraga yaqin (30-49 daq) va juda qisqa (1-29 daq).
+        r["short_near_lessons"] = near.get(key, 0)
+        r["short_brief_lessons"] = short.get(key, 0) - near.get(key, 0)
+        # Qisqa darslarda o'rtacha necha daqiqa ishlagan — "deyarli o'tgan"mi yoki "kirib chiqqan"mi.
+        r["short_avg_minutes"] = round(short_seconds[key] / short[key] / 60) if short.get(key) else 0
         r["monitor_minutes"] = worked.get(key, 0) // 60
+        # O'tilmagan darslar soni va bugun hali tugamagan darslari.
+        r["monitor_missed"] = r["monitor_lessons"] - r["monitor_used"]
+        r["pending_lessons"] = waiting_by.get(key, 0)
 
     # --- Ikkinchi qatlam: darsda ochgani kam, nima qilgani ham kerak.
     engagement = ta.engagement_map(db, start_day, end_day)
@@ -213,17 +281,19 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
     leave = on_leave_logins(db)
     for r in rows:
         r["on_leave"] = bool(r["teacher_key"]) and r["teacher_key"] in leave
+        r["state"] = teacher_state(r)
 
     needle = (query or "").strip().casefold()
     if needle:
         rows = [r for r in rows if needle in f"{r['teacher_name']} {r['teacher_key']}".casefold()]
-    return rows, lessons, used, rooms
+    return rows, lessons, used, rooms, pending
 
 
 def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
              query: str = "", groups: tuple[str, ...] = ()) -> dict:
     """Rektor sahifasining butun mazmuni — bitta so'rovda."""
-    rows, lessons, used, rooms = teacher_rows(db, start_day, end_day, department=department, query=query, groups=groups)
+    rows, lessons, used, rooms, pending = _teacher_rows(db, start_day, end_day, department=department,
+                                                        query=query, groups=groups)
     engagement = ta.engagement_map(db, start_day, end_day)
 
     # --- Asosiy: monitorli darslar
@@ -241,8 +311,12 @@ def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     idle.sort(key=lambda r: -r["monitor_lessons"])
     # Bahonasi yo'qlar va avval xonasi tekshirilishi kerak bo'lganlar — ALOHIDA.
     # Room activity by somebody else is never treated as an individual verdict.
+    # "Qayd yo'q" faqat dars vaqtida UMUMAN ochmaganlarga tegishli: kirib,
+    # lekin darsni to'liq o'tmaganlarda qayd bor — ular alohida toifada.
     blamed = []
-    check_room = idle
+    check_room = [r for r in idle if r["state"] == "none"]
+    states = {name: sum(1 for r in watched if r["state"] == name) for name in TEACHER_STATES}
+    teachers_used = states["full"] + states["partial"]
 
     # --- Kunlik kesim (grafik uchun)
     per_day: dict[dt.date, dict] = defaultdict(lambda: {"monitor": 0, "used": 0})
@@ -339,6 +413,16 @@ def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
             "band": _band(_pct(monitor_used, monitor_lessons)) if monitor_lessons else "none",
             "watched_teachers": len(watched),
             "idle_teachers": len(idle),
+            # O'qituvchi kesimi: darsi borlardan nechtasi kamida bitta darsni
+            # iMentor'da o'tgan. Toifalar bir-birini qoplamaydi, yig'indisi =
+            # `watched_teachers`.
+            "teachers_used": teachers_used,
+            "teacher_percent": _pct(teachers_used, len(watched)),
+            "teacher_buckets": states,
+            # Qisman o'tganlarning o'tilmay qolgan darslari.
+            "partial_missed_lessons": sum(r["monitor_missed"] for r in watched if r["state"] == "partial"),
+            # Hali tugamagan darslar — hech bir raqamga kirmagan.
+            "pending": pending,
             "other_lessons": other_lessons,
             "other_used": other_used,
             "other_percent": _pct(other_used, other_lessons),
@@ -352,6 +436,18 @@ def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
             # Kirgan, lekin darsni iMentor'da o'tmagan: chegaradan past.
             "short_lessons": sum(r.get("short_lessons", 0) for r in rows),
             "short_teachers": sum(1 for r in rows if r.get("short_lessons")),
+            # Monitorli darslar ishlangan vaqt bo'yicha: to'liq (chegaradan o'tgan),
+            # yaqin (30-49 daq), qisqa (1-29 daq), umuman ochilmagan. Yig'indisi =
+            # `monitor_lessons` — sahifadagi taqsimot chizig'i shundan.
+            "work_buckets": {
+                "full": monitor_used,
+                "near": sum(r.get("short_near_lessons", 0) for r in rows),
+                "brief": sum(r.get("short_brief_lessons", 0) for r in rows),
+                "none": monitor_lessons - monitor_used - sum(r.get("short_lessons", 0) for r in rows),
+            },
+            "short_near_teachers": sum(1 for r in rows if r.get("short_near_lessons")),
+            "short_brief_teachers": sum(1 for r in rows if r.get("short_brief_lessons")),
+            "near_minutes": NEAR_MINUTES,
             "min_lesson_minutes": lr.MIN_LESSON_MINUTES,
         },
         "attention": [_attention_row(r) for r in blamed[:60]],
@@ -413,6 +509,14 @@ TEACHER_METRICS: dict[str, str] = {
     "other_lessons": "Monitorsiz xonada darsi bor",
     "offsite": "Monitorli xonada darsi YO‘Q — klinika yoki masofaviy",
     "short": "Kirgan, lekin darsni iMentor’da o‘tmagan",
+    "t_used": "Kamida bitta darsini iMentor’da o‘tganlar",
+    "t_full": "Hamma darsini iMentor’da o‘tganlar",
+    "t_partial": "Ba’zi darsini o‘tgan, qolganini o‘tmaganlar",
+    "t_opened": "Kirgan, lekin birorta darsni to‘liq o‘tmaganlar",
+    "t_none": "Dars vaqtida iMentor’ni umuman ochmaganlar",
+    "short_near": (f"Ishlatgan, lekin {lr.MIN_LESSON_MINUTES} daqiqaga yetmagan "
+                   f"({NEAR_MINUTES}–{lr.MIN_LESSON_MINUTES - 1} daqiqa)"),
+    "short_brief": f"Kirib chiqqan ({NEAR_MINUTES} daqiqadan kam)",
     "other_used": "Monitorsiz darsda iMentor ochganlar",
     "total_lessons": "Jadvalda darsi bor barcha o\u2018qituvchilar",
     "minutes": "iMentor\u2019da ishlagan vaqt bo\u2018yicha",
@@ -462,8 +566,18 @@ def people(db: Session, start_day: dt.date, end_day: dt.date, *, metric: str, ke
         if name == "blamed":
             idle = [r for r in idle if r["excuse"] == "none"]
         elif name == "check_room":
-            idle = [r for r in idle if r["excuse"] == "check_room"]
+            idle = [r for r in idle if r["state"] == "none"]
         add(idle, lambda r: r["monitor_lessons"], "dars")
+    elif name in ("t_used", "t_full", "t_partial", "t_opened", "t_none"):
+        want = ("full", "partial") if name == "t_used" else (name[2:],)
+        for r in rows:
+            if r["state"] not in want:
+                continue
+            # "2 / 4 dars" — nechta darsidan nechtasini o'tgani bir qarashda.
+            label = f"/ {r['monitor_lessons']} dars"
+            if r["state"] == "opened":
+                label += f" · {r['short_lessons']} tasiga kirgan"
+            out.append(_teacher_person(r, r["monitor_used"], label))
     elif name == "on_leave":
         add([r for r in rows if r.get("on_leave")], lambda r: r["monitor_lessons"], "dars")
     elif name == "unlinked":
@@ -472,6 +586,9 @@ def people(db: Session, start_day: dt.date, end_day: dt.date, *, metric: str, ke
         # Qisqa kirib chiqqanlar: eng ko'p "aldagan" oldinda.
         add([r for r in rows if r.get("short_lessons")],
             lambda r: r.get("short_lessons", 0), "dars")
+    elif name in ("short_near", "short_brief"):
+        field = "short_near_lessons" if name == "short_near" else "short_brief_lessons"
+        add([r for r in rows if r.get(field)], lambda r: r.get(field, 0), "dars")
     elif name == "offsite":
         # Monitor bo'yicha baholab bo'lmaydiganlar: butun darsi monitorsiz
         # joyda o'tadi (klinika bazasi, dispanser, masofaviy).
@@ -773,7 +890,7 @@ def teacher_detail(db: Session, owner_key: str, start_day: dt.date, end_day: dt.
     # Xalqaro fakultet dekani o'qituvchining FAQAT o'z guruhlaridagi darsini
     # ko'radi; xona holati esa yuqorida butun muassasa bo'yicha hisoblandi.
     lessons = [x for x in everything if x.teacher_username == owner_key
-               and in_groups(x.group_name, groups)]
+               and any(in_groups(g, groups) for g in (lrs.lesson_groups(x) or ("",)))]
     used = {k: v for k, v in everything_used.items() if k in {x.id for x in lessons}}
     stats = _teacher_stats(lessons, used, rooms)
     row = _teacher_row(next(iter(stats.values()))) if stats else None

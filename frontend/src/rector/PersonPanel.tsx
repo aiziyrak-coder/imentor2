@@ -52,7 +52,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function Lesson({ l }: { l: ScheduledLessonRow }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`rounded-lg ${l.hemis_status === 'missing_from_hemis' ? 'bg-amber-50' : l.monitor_id ? (l.used ? 'bg-emerald-50' : 'bg-rose-50') : 'bg-slate-50'}`}>
+    <div className={`rounded-lg ${l.hemis_status === 'missing_from_hemis' ? 'bg-amber-50' : l.pending ? 'bg-sky-50' : l.monitor_id ? (l.used ? 'bg-emerald-50' : 'bg-rose-50') : 'bg-slate-50'}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -73,6 +73,8 @@ function Lesson({ l }: { l: ScheduledLessonRow }) {
         <span className="w-[76px] shrink-0 text-right font-medium">
           {l.used ? (
             <span className="text-emerald-700">qayd bor</span>
+          ) : l.pending ? (
+            <span className="text-sky-700">tugamagan</span>
           ) : l.monitor_id ? (
             <span className="text-rose-700">qayd yo‘q</span>
           ) : (

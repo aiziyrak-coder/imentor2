@@ -6,6 +6,11 @@ from unittest.mock import MagicMock, patch
 
 from app.services import control_report_service as cr
 
+import pytest
+
+# Hodisa = darsni to'liq iMentor'da o'tgani (50 daqiqa qoidasi, qarang conftest).
+pytestmark = pytest.mark.usefixtures("events_are_full_lessons")
+
 DAY = dt.date(2026, 9, 22)
 
 
@@ -128,3 +133,62 @@ def test_teacher_on_leave_is_never_on_the_red_list():
     assert [r["teacher_name"] for r in out["attention"] + out["check_room"]] == ["A"]
     assert out["headline"]["on_leave_teachers"] == 1
     assert next(r for r in out["teachers"] if r["teacher_key"] == "b")["on_leave"] is True
+
+
+# ------------------------------------------- o'qituvchi kesimi va tugamagan darslar
+
+
+def _run_spans(rows, spans, *, now=None):
+    """Aniq ish oraliqlari bilan: (boshi, oxiri) — necha daqiqa ishlagani muhim."""
+    a, b, c, d = _quiet_activity()
+    clock = patch.object(cr.lr, "current_time", return_value=now or at(23, 0))
+    with patch.object(cr.ms, "_usage_events", return_value={}), \
+            patch.object(cr.ms, "_work_spans", return_value=spans), clock, a, b, c, d:
+        return cr.overview(_db(rows), DAY, DAY)
+
+
+def test_every_teacher_falls_into_exactly_one_bucket():
+    """Hammasini o'tgan / qisman / kirgan-o'tmagan / ochmagan — bir-birini qoplamaydi.
+
+    Ilgari "kirgan, dars o'tmagan" va "umuman ishlatmagan" bitta odamni ikki
+    marta sanardi va yig'indi nazoratdagilardan oshib ketardi.
+    """
+    second = dict(para="4-para", start="13:00", end="14:20")
+    rows = [
+        lesson(1, user="full", name="F"), lesson(2, user="full", name="F", **second),
+        lesson(3, user="part", name="P"), lesson(4, user="part", name="P", **second),
+        lesson(5, user="peek", name="K"), lesson(6, user="peek", name="K", **second),
+        lesson(7, user="none", name="N"),
+    ]
+    spans = {
+        "full": [(at(11, 0), at(12, 20)), (at(13, 0), at(14, 20))],
+        "part": [(at(11, 0), at(12, 20))],          # 2 darsdan 1 tasini o'tgan
+        "peek": [(at(11, 0), at(11, 10))],          # 10 daqiqa kirib chiqqan
+    }
+    out = _run_spans(rows, spans)
+    h = out["headline"]
+    assert h["teacher_buckets"] == {"full": 1, "partial": 1, "opened": 1, "none": 1,
+                                    "on_leave": 0, "unlinked": 0}
+    assert sum(h["teacher_buckets"].values()) == h["watched_teachers"] == 4
+    assert h["teachers_used"] == 2 and h["teacher_percent"] == 50
+    assert h["partial_missed_lessons"] == 1
+    part = next(r for r in out["teachers"] if r["teacher_key"] == "part")
+    assert (part["state"], part["monitor_used"], part["monitor_missed"]) == ("partial", 1, 1)
+    # "Qayd yo'q" ro'yxatida faqat umuman ochmagan — kirib chiqqanda qayd bor.
+    assert [r["teacher_name"] for r in out["check_room"]] == ["N"]
+
+
+def test_lessons_that_have_not_ended_yet_are_not_judged():
+    """Soat 12:30 da 13:00 dagi dars "ishlatilmagan" emas — u hali boshlanmagan."""
+    rows = [lesson(1, user="a", name="A"),
+            lesson(2, user="a", name="A", para="4-para", start="13:00", end="14:20"),
+            lesson(3, user="b", name="B", para="5-para", start="14:30", end="15:50")]
+    out = _run_spans(rows, {"a": [(at(11, 0), at(12, 20))]}, now=at(12, 30))
+    h = out["headline"]
+    assert (h["monitor_lessons"], h["monitor_used"], h["monitor_percent"]) == (1, 1, 100)
+    assert h["watched_teachers"] == 1 and h["teacher_buckets"]["full"] == 1
+    assert h["pending"]["monitor_lessons"] == 2 and h["pending"]["teachers"] == 2
+    assert out["teachers"][0]["pending_lessons"] == 1
+    # Kun tugagach hammasi hisobga kiradi.
+    late = _run_spans(rows, {"a": [(at(11, 0), at(12, 20))]})["headline"]
+    assert late["monitor_lessons"] == 3 and late["pending"]["lessons"] == 0

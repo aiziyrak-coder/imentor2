@@ -36,6 +36,152 @@ type Props = { filters: ReportFilters; onUnauthorized: () => void };
 const DrillContext = createContext<(t: DrillTarget) => void>(() => {});
 
 /** Bosiladigan raqam. Ko'rinishi o'zgarmaydi — faqat bosilganda ro'yxat ochiladi. */
+/**
+ * Monitorli darslar ishlangan vaqt bo'yicha: to'liq o'tilgan, chegaraga yaqin,
+ * kirib chiqqan, umuman ochilmagan. Rektor "ishlatgan, lekin 50 daqiqa emas"
+ * darslarni alohida ko'rishni so'radi (2026-10-09): bitta foiz ularni
+ * "ishlatmagan" bilan bir qopga solib qo'yardi.
+ */
+function WorkBuckets({
+  buckets,
+  total,
+  minMinutes,
+  nearMinutes,
+  nearTeachers,
+  briefTeachers,
+}: {
+  buckets: { full: number; near: number; brief: number; none: number };
+  total: number;
+  minMinutes: number;
+  nearMinutes: number;
+  nearTeachers: number;
+  briefTeachers: number;
+}) {
+  const parts: BucketPart[] = [
+    {
+      key: 'full', value: buckets.full, bar: 'bg-emerald-500', dot: 'bg-emerald-500',
+      label: `To‘liq o‘tilgan (${minMinutes}+ daq)`, metric: 'monitor_used',
+      drill: 'Monitorli darsni to‘liq iMentor’da o‘tganlar', note: '',
+    },
+    {
+      key: 'near', value: buckets.near, bar: 'bg-amber-400', dot: 'bg-amber-400',
+      label: `Ishlatgan, lekin ${minMinutes} daqiqaga yetmagan (${nearMinutes}–${minMinutes - 1} daq)`,
+      metric: 'short_near', drill: `Ishlatgan, lekin ${minMinutes} daqiqaga yetmagan`,
+      note: `${nearTeachers} o‘qituvchi`,
+    },
+    {
+      key: 'brief', value: buckets.brief, bar: 'bg-orange-300', dot: 'bg-orange-300',
+      label: `Kirib chiqqan (${nearMinutes} daqiqadan kam)`, metric: 'short_brief',
+      drill: `Kirib chiqqan (${nearMinutes} daqiqadan kam)`, note: `${briefTeachers} o‘qituvchi`,
+    },
+    {
+      key: 'none', value: buckets.none, bar: 'bg-slate-200', dot: 'bg-slate-300',
+      label: 'Dars vaqtida umuman ochilmagan', metric: '', drill: '', note: '',
+    },
+  ];
+  return (
+    <BucketStrip title="Monitorli darslar — dars vaqtida qancha ishlangan" unit="dars" parts={parts} total={total} />
+  );
+}
+
+type BucketPart = {
+  key: string; value: number; bar: string; dot: string; label: string; metric: string; drill: string; note: string;
+};
+
+/** Bir-birini qoplamaydigan toifalar chizig'i: yig'indisi `total` ga teng. */
+function BucketStrip({ title, unit, parts, total }: { title: string; unit: string; parts: BucketPart[]; total: number }) {
+  const pct = (n: number) => (total ? Math.round((100 * n) / total) : 0);
+  return (
+    <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+      <p className="mb-2 text-[11.5px] text-slate-400">{title}</p>
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+        {parts.map((p) =>
+          p.value ? (
+            <div
+              key={p.key}
+              className={p.bar}
+              style={{ width: `${(100 * p.value) / total}%` }}
+              title={`${p.label}: ${p.value} ${unit} (${pct(p.value)}%)`}
+            />
+          ) : null,
+        )}
+      </div>
+      <div className="mt-2 grid gap-x-6 gap-y-1.5 text-[12.5px] sm:grid-cols-2 lg:grid-cols-4">
+        {parts.map((p) => {
+          const body = (
+            <span className="flex items-baseline gap-2">
+              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${p.dot}`} />
+              <span className="text-slate-600">{p.label}</span>
+              <b className="ml-auto tabular-nums text-slate-900">{p.value}</b>
+              <span className="w-9 text-right tabular-nums text-slate-400">{pct(p.value)}%</span>
+            </span>
+          );
+          return (
+            <div key={p.key}>
+              {p.metric && p.value ? (
+                <Stat metric={p.metric} label={p.drill} className="block w-full px-0 text-left">
+                  {body}
+                </Stat>
+              ) : (
+                body
+              )}
+              {p.note && p.value ? <p className="pl-4 text-[11px] text-slate-400">{p.note}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * O'qituvchilar kesimi: darsi borlardan kim hamma darsini o'tgan, kim faqat
+ * ba'zisini, kim kirib chiqqan, kim umuman ochmagan. Har o'qituvchi FAQAT
+ * bitta toifada — yig'indi nazoratdagilar soniga teng (2026-10-09).
+ */
+function TeacherBuckets({ h }: { h: Report['headline'] }) {
+  const b = h.teacher_buckets;
+  if (!b || !h.watched_teachers) return null;
+  const parts: BucketPart[] = [
+    {
+      key: 'full', value: b.full, bar: 'bg-emerald-500', dot: 'bg-emerald-500',
+      label: 'Hamma darsini o‘tgan', metric: 't_full', drill: 'Hamma darsini iMentor’da o‘tganlar', note: '',
+    },
+    {
+      key: 'partial', value: b.partial, bar: 'bg-amber-400', dot: 'bg-amber-400',
+      label: 'Qisman: ba’zi darsini o‘tgan, qolganini o‘tmagan', metric: 't_partial',
+      drill: 'Ba’zi darsini o‘tgan, qolganini o‘tmaganlar',
+      note: `${h.partial_missed_lessons ?? 0} dars o‘tilmay qolgan`,
+    },
+    {
+      key: 'opened', value: b.opened, bar: 'bg-orange-300', dot: 'bg-orange-300',
+      label: `Kirgan, lekin birorta darsni to‘liq (${h.min_lesson_minutes} daq) o‘tmagan`, metric: 't_opened',
+      drill: 'Kirgan, lekin birorta darsni to‘liq o‘tmaganlar', note: '',
+    },
+    {
+      key: 'none', value: b.none, bar: 'bg-rose-400', dot: 'bg-rose-400',
+      label: 'Dars vaqtida umuman ochmagan', metric: 't_none',
+      drill: 'Dars vaqtida iMentor’ni umuman ochmaganlar', note: '',
+    },
+    {
+      key: 'on_leave', value: b.on_leave, bar: 'bg-slate-300', dot: 'bg-slate-300',
+      label: 'Ta’tilda (HEMIS)', metric: 'on_leave', drill: 'HEMIS bo‘yicha ta’tilda', note: '',
+    },
+    {
+      key: 'unlinked', value: b.unlinked, bar: 'bg-slate-200', dot: 'bg-slate-200',
+      label: 'iMentor hisobi bog‘lanmagan', metric: 'unlinked', drill: 'HEMIS jadvalida bor, iMentor hisobi yo‘q', note: '',
+    },
+  ].filter((p) => p.value > 0 || ['full', 'partial', 'opened', 'none'].includes(p.key));
+  return (
+    <BucketStrip
+      title="Darsi bor o‘qituvchilar — nechtasi darsini iMentor’da o‘tgan"
+      unit="o‘qituvchi"
+      parts={parts}
+      total={h.watched_teachers}
+    />
+  );
+}
+
 function Stat({
   metric,
   label,
@@ -131,7 +277,7 @@ function Cell({ label, value, tone = 'text-slate-700' }: { label: string; value:
   );
 }
 
-export type Flag = 'watched' | 'idle' | 'nothing' | 'profile' | 'nosubject' | 'nomaterial' | 'all';
+export type Flag = 'watched' | 'partial' | 'opened' | 'idle' | 'nothing' | 'profile' | 'nosubject' | 'nomaterial' | 'all';
 export type Sort = 'percent' | 'minutes' | 'created' | 'lessons' | 'name';
 
 const SORTS: Array<[Sort, string]> = [
@@ -144,7 +290,9 @@ const SORTS: Array<[Sort, string]> = [
 
 const CHIPS: Array<[Flag, string]> = [
   ['watched', 'Monitorda dars o‘tadiganlar'],
-  ['idle', 'iMentor ochmaganlar'],
+  ['partial', 'Qisman o‘tganlar'],
+  ['opened', 'Kirgan, o‘tmagan'],
+  ['idle', 'Umuman ochmaganlar'],
   ['nothing', 'Material yaratmaganlar'],
   ['nosubject', 'Fan biriktirmaganlar'],
   ['profile', 'Profili to‘liq emas'],
@@ -156,8 +304,13 @@ export function matches(r: ControlTeacher, flag: Flag): boolean {
   switch (flag) {
     case 'watched':
       return r.monitor_lessons > 0;
+    case 'partial':
+      return r.state === 'partial';
+    case 'opened':
+      return r.state === 'opened';
     case 'idle':
-      return r.monitor_lessons > 0 && r.monitor_used === 0 && r.linked;
+      // Eski javobda `state` yo'q — o'shanda avvalgi qoida.
+      return r.state ? r.state === 'none' : r.monitor_lessons > 0 && r.monitor_used === 0 && r.linked;
     case 'nothing':
       return r.linked && r.created_total === 0;
     case 'profile':
@@ -212,6 +365,21 @@ function TeacherRow({ r, onOpen }: { r: ControlTeacher; onOpen: (p: Person) => v
             {r.linked && (r.profile_percent ?? 0) < 100 && (
               <span className="rounded bg-amber-50 px-1.5 py-px text-[10.5px] text-amber-800">
                 profil {r.profile_percent ?? 0}%
+              </span>
+            )}
+            {r.state === 'partial' && (
+              <span className="rounded bg-amber-50 px-1.5 py-px text-[10.5px] font-medium text-amber-800">
+                {r.monitor_missed} darsini o‘tmagan
+              </span>
+            )}
+            {r.state === 'opened' && (
+              <span className="rounded bg-orange-50 px-1.5 py-px text-[10.5px] font-medium text-orange-800">
+                kirgan, to‘liq o‘tmagan
+              </span>
+            )}
+            {(r.pending_lessons ?? 0) > 0 && (
+              <span className="rounded bg-sky-50 px-1.5 py-px text-[10.5px] text-sky-800">
+                yana {r.pending_lessons} dars oldinda
               </span>
             )}
           </span>
@@ -454,7 +622,9 @@ function AttentionList({
   title,
   hint,
   onOpen,
+  total,
 }: {
+  total?: number;
   rows: ControlAttention[];
   tone: 'rose' | 'amber';
   title: string;
@@ -470,7 +640,10 @@ function AttentionList({
       <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         {icon}
         <h2 className={`text-[14px] font-bold ${head}`}>
-          {title} — {rows.length} o‘qituvchi
+          {title} — {Math.max(total ?? 0, rows.length)} o‘qituvchi
+          {(total ?? 0) > rows.length && (
+            <span className="ml-1 text-[11.5px] font-normal text-slate-500">(birinchi {rows.length} tasi)</span>
+          )}
         </h2>
         <span className="w-full text-[11.5px] text-slate-600 sm:w-auto">{hint}</span>
       </div>
@@ -768,34 +941,47 @@ export function ControlReportView({
               <Stat metric="monitor_used" label="Monitorli darsda iMentor ochganlar" className="px-1">
                 <b className="text-slate-700">{h.monitor_used}</b>
               </Stat>{' '}
-              tasida ishlatilgan
+              tasida to‘liq o‘tilgan
+              {h.work_buckets && h.work_buckets.near + h.work_buckets.brief > 0 && (
+                <>
+                  ,{' '}
+                  <Stat
+                    metric="short"
+                    label={`Kirgan, lekin ${h.min_lesson_minutes} daqiqadan kam ishlagan`}
+                    className="px-1"
+                  >
+                    <b className="text-amber-600">{h.work_buckets.near + h.work_buckets.brief}</b>
+                  </Stat>{' '}
+                  tasida ishlatilgan, lekin {h.min_lesson_minutes} daqiqaga yetmagan
+                </>
+              )}
+            </p>
+            <p className="mt-0.5 text-[11.5px] text-slate-400">
+              Bir vaqtda bir nechta guruhga o‘tilgan dars bitta dars sifatida sanaladi.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-3">
             <div>
-              <p className="text-slate-500">Nazoratdagi o‘qituvchi</p>
+              <p className="text-slate-500">Darsi bor o‘qituvchi</p>
               <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="px-1">
                 <p className="text-[19px] font-bold tabular-nums text-slate-900">{h.watched_teachers}</p>
               </Stat>
             </div>
             <div>
-              <p className="text-slate-500">Kirgan, dars o‘tmagan</p>
-              <Stat
-                metric="short"
-                label={`Kirgan, lekin ${h.min_lesson_minutes} daqiqadan kam ishlagan`}
-                className="px-1"
-              >
-                <p className={`text-[19px] font-bold tabular-nums ${h.short_lessons ? 'text-amber-600' : 'text-slate-900'}`}>
-                  {h.short_teachers}
+              <p className="text-slate-500">Darsini iMentor’da o‘tgan</p>
+              <Stat metric="t_used" label="Kamida bitta darsini iMentor’da o‘tganlar" className="px-1">
+                <p className="text-[19px] font-bold tabular-nums text-slate-900">
+                  {h.teachers_used ?? 0}{' '}
+                  <span className={`text-[14px] ${tone.text}`}>{h.teacher_percent ?? 0}%</span>
                 </p>
               </Stat>
-              <p className="text-[11px] text-slate-400">{h.short_lessons} dars</p>
+              <p className="text-[11px] text-slate-400">kamida bitta darsini</p>
             </div>
             <div>
-              <p className="text-slate-500">Umuman ishlatmagan</p>
-              <Stat metric="idle" label="Monitorli darsda iMentor ochmaganlar" className="px-1">
-                <p className={`text-[19px] font-bold tabular-nums ${h.idle_teachers ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  {h.idle_teachers}
+              <p className="text-slate-500">Umuman ochmagan</p>
+              <Stat metric="t_none" label="Dars vaqtida iMentor’ni umuman ochmaganlar" className="px-1">
+                <p className={`text-[19px] font-bold tabular-nums ${h.teacher_buckets?.none ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {h.teacher_buckets?.none ?? h.idle_teachers}
                 </p>
               </Stat>
             </div>
@@ -814,6 +1000,24 @@ export function ControlReportView({
             </div>
           </div>
         </div>
+        {h.pending && h.pending.monitor_lessons > 0 && (
+          <p className="border-t border-slate-100 bg-sky-50/60 px-4 py-2 text-[12px] text-sky-900 sm:px-5">
+            Soat {(h.pending.as_of || '').slice(11, 16)} holatiga: hali tugamagan{' '}
+            <b>{h.pending.monitor_lessons}</b> ta monitorli dars ({h.pending.teachers} o‘qituvchi) hisobga
+            olinmagan — foizlar faqat tugagan darslar bo‘yicha.
+          </p>
+        )}
+        <TeacherBuckets h={h} />
+        {h.work_buckets && h.monitor_lessons > 0 && (
+          <WorkBuckets
+            buckets={h.work_buckets}
+            total={h.monitor_lessons}
+            minMinutes={h.min_lesson_minutes}
+            nearMinutes={h.near_minutes ?? 30}
+            nearTeachers={h.short_near_teachers ?? 0}
+            briefTeachers={h.short_brief_teachers ?? 0}
+          />
+        )}
         {data.daily.length > 1 && (
           <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
             <p className="mb-2 text-[11.5px] text-slate-400">
@@ -861,9 +1065,10 @@ export function ControlReportView({
       />
       <AttentionList
         rows={data.check_room}
+        total={h.check_room_teachers}
         tone="amber"
         title="Avval xonasini tekshirish kerak"
-        hint="Dars vaqtida foydalanish qaydi yo‘q. Xona va qayd tizimi holati tekshirilishi kerak."
+        hint="Dars vaqtida iMentor umuman ochilmagan. Xona va qayd tizimi holati tekshirilishi kerak."
         onOpen={open}
       />
       <RoomTable rows={data.rooms} />

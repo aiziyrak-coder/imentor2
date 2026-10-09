@@ -46,6 +46,70 @@ AFTER = dt.timedelta(minutes=5)
 MIN_LESSON_MINUTES = int(os.environ.get("IMENTOR_MIN_LESSON_MINUTES") or 40)
 
 
+def _merge_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
+    """Ish oraliqlarini birlashtiradi: kesishmaydigan, boshi va oxiri bo'yicha tartiblangan ro'yxat.
+
+    `_worked_seconds` oxirlar ro'yxatida ikkilik qidiruv qiladi — bu faqat
+    oxirlar ham tartiblangan bo'lsa to'g'ri. Heartbeat oraliqlari har xil
+    uzunlikda (1-15 daqiqa) va bir-birini qoplaydi, shuning uchun boshi bo'yicha
+    tartiblanganda oxirlari tartibsiz bo'lib qolardi va qidiruv kerakli
+    oraliqlarni tashlab yuborardi. Jonli ma'lumotda (2026-10-03..09) 11 ta
+    darsda ishlangan vaqt kam chiqqan, 4 tasi (50,1 daqiqa → 49,7) chegaradan
+    noto'g'ri tushib qolgan edi.
+    """
+    out: list[tuple[dt.datetime, dt.datetime]] = []
+    for a, b in sorted(x for x in spans if x[1] > x[0]):
+        if out and a <= out[-1][1]:
+            if b > out[-1][1]:
+                out[-1] = (out[-1][0], b)
+        else:
+            out.append((a, b))
+    return out
+
+
+def lesson_key(lesson) -> tuple:
+    """Bitta haqiqiy dars: o'qituvchi, sana, vaqt, xona.
+
+    HEMIS har GURUH uchun alohida qator beradi: 4 guruhga bir vaqtda o'qilgan
+    bitta ma'ruza 4 ta "dars" bo'lib sanalardi (2026-10-03..09: 2208 qator,
+    haqiqiy darslar 1637). Hisobot DARSLARNI sanaydi, guruhlarni emas.
+    """
+    return (
+        lesson.teacher_username or f"name:{lesson.teacher_name}",
+        lesson.lesson_date,
+        lesson.start_time or lesson.para,
+        lesson.end_time or "",
+        (lesson.auditorium_name or "").strip().casefold(),
+        # Ehtiyot: monitor belgisi farq qilsa (HEMIS/inventar nomuvofiq) birlashtirilmaydi.
+        lesson.monitor_id or "",
+    )
+
+
+def merge_group_rows(lessons: list) -> list:
+    """Bir darsning guruh qatorlarini bittaga yig'adi.
+
+    Vakil — eng kichik id'li qator; barcha guruhlar `merged_groups` da
+    (ORM ustuni emas, oddiy atribut — bazaga yozilmaydi).
+    """
+    by_key: dict[tuple, list] = {}
+    for lesson in sorted(lessons, key=lambda x: x.id):
+        by_key.setdefault(lesson_key(lesson), []).append(lesson)
+    out = []
+    for rows in by_key.values():
+        head = rows[0]
+        head.merged_groups = tuple(sorted({x.group_name for x in rows if x.group_name}))
+        out.append(head)
+    return out
+
+
+def lesson_groups(lesson) -> tuple[str, ...]:
+    """Dars o'tilgan barcha guruhlar (yig'ilmagan qatorda — o'zining guruhi)."""
+    merged = getattr(lesson, "merged_groups", None)
+    if merged is not None:
+        return merged
+    return (lesson.group_name,) if lesson.group_name else ()
+
+
 def _worked_seconds(spans: list[tuple[dt.datetime, dt.datetime]],
                     ends: list[dt.datetime], start: dt.datetime, end: dt.datetime) -> int:
     """Dars oynasi ichida HAQIQATAN ishlangan soniya.
@@ -53,11 +117,15 @@ def _worked_seconds(spans: list[tuple[dt.datetime, dt.datetime]],
     Bir vaqtda ikki oyna (telefon + monitor) ochiq bo'lsa, o'sha daqiqa ikki
     marta sanalmasin: oraliqlar birlashtiriladi.
 
-    `spans` oxiri bo'yicha tartiblangan, `ends` esa o'sha oxirlar — shuning
-    uchun har dars uchun butun ro'yxat emas, faqat kerakli bo'lagi ko'riladi.
+    `spans` — `_merge_spans` natijasi (kesishmaydigan, tartiblangan), `ends` —
+    o'sha oxirlar. Faqat shunda ikkilik qidiruv to'g'ri: har dars uchun butun
+    ro'yxat emas, faqat kerakli bo'lagi ko'riladi.
     Bunisiz hisobot 19 soniyaga cho'zilgandi (2026-10-08).
     """
-    total = 0
+    # Soniyalar aniq (kasr bilan) yig'iladi va oxirida yaxlitlanadi: ilgari har
+    # bo'lak alohida butunga qirqilardi va darsdan 10-20 soniya yo'qolardi —
+    # chegaradagi darsda (49:59) bu natijani o'zgartiradi.
+    total = 0.0
     reached = start
     for i in range(bisect_left(ends, start), len(spans)):
         a, b = spans[i]
@@ -66,9 +134,9 @@ def _worked_seconds(spans: list[tuple[dt.datetime, dt.datetime]],
         a, b = max(a, start), min(b, end)
         if b <= a or b <= reached:
             continue
-        total += int((b - max(a, reached)).total_seconds())
+        total += (b - max(a, reached)).total_seconds()
         reached = max(reached, b)
-    return total
+    return int(round(total))
 
 
 def _window(lesson: HemisLesson) -> tuple[dt.datetime, dt.datetime]:
@@ -87,8 +155,25 @@ def _window(lesson: HemisLesson) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
+def current_time() -> dt.datetime:
+    """Hozirgi vaqt (Toshkent). Alohida funksiya — testda almashtirish uchun."""
+    return dt.datetime.now(ms.TASHKENT)
+
+
+def is_over(lesson: HemisLesson, now: dt.datetime) -> bool:
+    """Dars jadval bo'yicha tugaganmi.
+
+    Hali tugamagan darsni "ishlatilmagan" deb bo'lmaydi: bugungi kun ertalab
+    ochilganda tushdan keyingi darslar ham maxrajga tushib, foizni sun'iy
+    pasaytirardi (2026-10-09: soat 11:46 da 443 darsdan 77 tasi — 17%).
+    """
+    return _window(lesson)[1] - AFTER <= now
+
+
 def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
-             teacher: str = "", groups: tuple[str, ...] = ()) -> list[HemisLesson]:
+             teacher: str = "", groups: tuple[str, ...] = (),
+             pending: bool = False) -> list[HemisLesson]:
+    """Davrdagi darslar. `pending=False` — faqat TUGAGANLARI (baholanadiganlari)."""
     q = select(HemisLesson).where(HemisLesson.lesson_date >= start_day, HemisLesson.lesson_date <= end_day)
     if teacher:
         q = q.where(HemisLesson.teacher_username == teacher)
@@ -96,9 +181,14 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     if groups:
         # Xalqaro fakultet dekani: faqat o'z guruhlariga o'tilgan darslar.
         rows = [r for r in rows if in_groups(r.group_name, groups)]
+    # Guruh qatorlari bitta darsga yig'iladi — hisobot darslarni sanaydi.
+    rows = merge_group_rows(rows)
     if department:
         needle = ms._norm(department)
         rows = [r for r in rows if needle in ms._norm(r.department_name) or ms._norm(r.department_name) in needle]
+    if not pending and end_day >= current_time().date():
+        now = current_time()
+        rows = [r for r in rows if is_over(r, now)]
     return rows
 
 
@@ -110,7 +200,7 @@ def work_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[int, in
     days = [x.lesson_date for x in lessons]
     lo_day = dt.datetime.combine(min(days), dt.time(0, 0), tzinfo=ms.TASHKENT)
     hi_day = dt.datetime.combine(max(days) + dt.timedelta(days=1), dt.time(0, 0), tzinfo=ms.TASHKENT)
-    spans = ms._work_spans(db, usernames, lo_day, hi_day)
+    spans = {k: _merge_spans(v) for k, v in ms._work_spans(db, usernames, lo_day, hi_day).items()}
     span_ends = {k: [b for _, b in v] for k, v in spans.items()}
     events = ms._usage_events(db, usernames, lo_day, hi_day)
 
@@ -179,8 +269,7 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
         row["days"].add(lesson.lesson_date)
         if lesson.subject_name:
             row["subjects"].add(lesson.subject_name)
-        if lesson.group_name:
-            row["groups"].add(lesson.group_name)
+        row["groups"].update(lesson_groups(lesson))
         if lesson.monitor_id:
             row["with_monitor"] += 1
         hit = used.get(lesson.id)
@@ -258,13 +347,17 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
                 groups: tuple[str, ...] = (),
                 department: str = "", only_missed: bool = False, limit: int = 2000) -> list[dict]:
     """Darslar ro'yxati — kim, qachon, qaysi fan, ishlatildimi."""
-    lessons = _lessons(db, start_day, end_day, department=department, teacher=teacher, groups=groups)
+    # Tugamagan darslar ham ko'rsatiladi, lekin belgi bilan — ular hali baholanmaydi.
+    lessons = _lessons(db, start_day, end_day, department=department, teacher=teacher, groups=groups,
+                       pending=True)
     used = _used_map(db, lessons)
+    now = current_time()
     lessons.sort(key=lambda x: (x.lesson_date, x.para, x.teacher_name))
     out = []
     for lesson in lessons:
         hit = used.get(lesson.id)
-        if only_missed and hit:
+        waiting = not is_over(lesson, now)
+        if only_missed and (hit or waiting):
             continue
         out.append({
             "id": lesson.id,
@@ -277,12 +370,14 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
             "teacher_key": lesson.teacher_username,
             "department": lesson.department_name,
             "subject": lesson.subject_name,
-            "group": lesson.group_name,
+            "group": ", ".join(lesson_groups(lesson)),
             "lesson_type": lesson.lesson_type,
             "room": lesson.auditorium_name,
             "building": lesson.building_name,
             "monitor_id": lesson.monitor_id,
             "used": bool(hit),
+            # Dars hali tugamagan — "qayd yo'q" deb hukm qilinmaydi.
+            "pending": waiting and not hit,
             "students": hit[1] if hit else 0,
             # Dalil: bu qator qaysi HEMIS yozuvidan va qaysi inventar xonasidan
             # kelgani — «menda dars yo'q edi», «xonada monitor yo'q» degan

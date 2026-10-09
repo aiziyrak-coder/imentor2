@@ -849,6 +849,8 @@ export type ScheduledLessonRow = {
   building: string;
   monitor_id: string;
   used: boolean;
+  /** Dars hali tugamagan — baholanmaydi. */
+  pending?: boolean;
   students: number;
   // Dalil: qator qaysi HEMIS yozuvidan va qaysi inventar xonasidan kelgan.
   hemis_id: string;
@@ -926,6 +928,12 @@ export type ControlTeacher = {
   // Nechta darsi ishlayotgani isbotlangan xonada bo'lgan; bahona shu bilan hal bo'ladi.
   proven_lessons: number;
   excuse: 'none' | 'check_room';
+  /** Davrdagi holati — har o'qituvchi faqat bitta toifada. */
+  state?: 'full' | 'partial' | 'opened' | 'none' | 'on_leave' | 'unlinked' | 'offsite';
+  /** Monitorli darslaridan o'tilmay qolgani. */
+  monitor_missed?: number;
+  /** Bugun hali tugamagan (baholanmagan) monitorli darslari. */
+  pending_lessons?: number;
 };
 
 export type ControlRoom = {
@@ -985,6 +993,21 @@ export type ControlReport = {
     short_teachers: number;
     /** Dars "o'tilgan" deyish uchun kerak bo'lgan eng kam daqiqa. */
     min_lesson_minutes: number;
+    /** Monitorli darslar ishlangan vaqt bo'yicha (yig'indisi = monitor_lessons).
+     *  full — chegaradan o'tgan; near — NEAR..chegara; brief — 1..NEAR; none — ochilmagan. */
+    work_buckets?: { full: number; near: number; brief: number; none: number };
+    short_near_teachers?: number;
+    short_brief_teachers?: number;
+    /** "Yaqin" toifasining pastki chegarasi (daqiqa). */
+    near_minutes?: number;
+    /** Kamida bitta darsini iMentor'da o'tgan o'qituvchilar va ularning ulushi. */
+    teachers_used?: number;
+    teacher_percent?: number;
+    /** O'qituvchilar toifalari (yig'indisi = watched_teachers). */
+    teacher_buckets?: { full: number; partial: number; opened: number; none: number; on_leave: number; unlinked: number };
+    partial_missed_lessons?: number;
+    /** Hali tugamagan darslar — hech bir raqamga kirmagan. */
+    pending?: { lessons: number; monitor_lessons: number; teachers: number; as_of: string | null };
   };
   attention: ControlAttention[];
   check_room: ControlAttention[];
