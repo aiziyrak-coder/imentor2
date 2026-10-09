@@ -188,7 +188,8 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
         rows = [r for r in rows if needle in ms._norm(r.department_name) or ms._norm(r.department_name) in needle]
     if not pending and end_day >= current_time().date():
         now = current_time()
-        rows = [r for r in rows if is_over(r, now)]
+        today = now.date()
+        rows = [r for r in rows if r.lesson_date < today or is_over(r, now)]
     return rows
 
 

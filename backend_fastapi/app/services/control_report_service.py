@@ -15,6 +15,8 @@ Hamma raqam bitta manbadan: `core_hemislesson` (HEMIS jadvalining nusxasi).
 from __future__ import annotations
 
 import datetime as dt
+import threading
+import time
 from collections import defaultdict
 
 from sqlalchemy import func, select
@@ -36,6 +38,39 @@ WARN = 40
 #: (masalan 40 daqiqa — dars deyarli iMentor'da o'tgan) va shunchaki kirib
 #: chiqqan. Rektor uchun ikkalasining ma'nosi har xil (2026-10-09).
 NEAR_MINUTES = 30
+
+
+#: Hisobot shu muddatga saqlanadi. Sahifa "Jonli" rejimda har 60 soniyada
+#: qayta so'raydi, bir necha kishi (rektor, dekanlar, monitor) bir vaqtda ochadi,
+#: raqam bosilganda esa butun hisob qaytadan yurardi. 30 kunlik davr 17-20
+#: soniya hisoblanadi — brauzer kutib turolmay "so'rov vaqti tugadi" derdi
+#: (2026-10-09). Testlarda 0 (qarang conftest).
+CACHE_SECONDS = 45
+_cache: dict[tuple, tuple[float, object]] = {}
+_locks: dict[tuple, threading.Lock] = {}
+
+
+def _cached(key: tuple, build):
+    """Bir xil so'rov bir vaqtda kelsa bittasi hisoblaydi, qolgani natijani kutadi."""
+    if CACHE_SECONDS <= 0:
+        return build()
+    with _locks.setdefault(key, threading.Lock()):
+        hit = _cache.get(key)
+        now = time.monotonic()
+        if hit is not None and now - hit[0] < CACHE_SECONDS:
+            return hit[1]
+        value = build()
+        now = time.monotonic()
+        for old in [k for k, (t, _) in _cache.items() if now - t >= CACHE_SECONDS]:
+            _cache.pop(old, None)
+            _locks.pop(old, None)
+        _cache[key] = (now, value)
+        return value
+
+
+def clear_cache() -> None:
+    _cache.clear()
+    _locks.clear()
 
 
 def _band(percent: int | None) -> str:
@@ -211,10 +246,20 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
 def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
                   query: str = "", groups: tuple[str, ...] = ()) -> tuple[list[dict], list, dict, dict, dict]:
     """`teacher_rows` + hali tugamagan (baholanmaydigan) darslar haqida ma'lumot."""
+    key = ("rows", start_day, end_day, department, query, tuple(groups))
+    return _cached(key, lambda: _build_teacher_rows(db, start_day, end_day, department=department,
+                                                    query=query, groups=groups))
+
+
+def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
+                        query: str = "", groups: tuple[str, ...] = ()) -> tuple[list[dict], list, dict, dict, dict]:
     every = lr._lessons(db, start_day, end_day, department=department, groups=groups, pending=True)
     now = lr.current_time()
-    lessons = [x for x in every if lr.is_over(x, now)]
-    waiting = [x for x in every if not lr.is_over(x, now)]
+    today = now.date()
+    lessons, waiting = [], []
+    for x in every:
+        # O'tgan kunlar darsi aniq tugagan — vaqtini hisoblab o'tirilmaydi.
+        (lessons if x.lesson_date < today or lr.is_over(x, now) else waiting).append(x)
     waiting_by: dict[str, int] = defaultdict(int)
     for lesson in waiting:
         if lesson.monitor_id:
@@ -225,6 +270,10 @@ def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departme
         "teachers": len(waiting_by),
         "as_of": now.isoformat() if waiting else None,
     }
+    # Faollik bir marta hisoblanadi va `overview` ga ham shu beriladi: ilgari
+    # u ikki marta yurardi (30 kunlik davrda har biri ~4 soniya).
+    engagement = ta.engagement_map(db, start_day, end_day)
+    pending["_engagement"] = engagement
     # Xom o'lchov: har darsda qancha ishlangan. `used` shundan chegaradan
     # o'tganlarini oladi, qolgani "kirgan, lekin dars o'tilmagan" bo'ladi —
     # rektor aynan shu farqni ko'rishni so'radi (2026-10-08).
@@ -268,7 +317,6 @@ def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departme
         r["pending_lessons"] = waiting_by.get(key, 0)
 
     # --- Ikkinchi qatlam: darsda ochgani kam, nima qilgani ham kerak.
-    engagement = ta.engagement_map(db, start_day, end_day)
     profiles = ta.profile_map(db)
     materials = ta.materials_map(db)
     for r in rows:
@@ -292,9 +340,21 @@ def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departme
 def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
              query: str = "", groups: tuple[str, ...] = ()) -> dict:
     """Rektor sahifasining butun mazmuni — bitta so'rovda."""
+    key = ("overview", start_day, end_day, department, query, tuple(groups))
+    # Nusxa: yo'l (route) dekan uchun ro'yxatlarni almashtiradi — saqlangan
+    # javobning o'zi o'zgarib, keyingi (rektor) so'roviga o'tib ketmasin.
+    return dict(_cached(key, lambda: _build_overview(db, start_day, end_day, department=department,
+                                                     query=query, groups=groups)))
+
+
+def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
+                    query: str = "", groups: tuple[str, ...] = ()) -> dict:
     rows, lessons, used, rooms, pending = _teacher_rows(db, start_day, end_day, department=department,
                                                         query=query, groups=groups)
-    engagement = ta.engagement_map(db, start_day, end_day)
+    engagement = pending["_engagement"]
+    pending = {k: v for k, v in pending.items() if not k.startswith("_")}
+    # Kesh bilan bo'lishilgan ro'yxat — tartiblash boshqa so'rovga ta'sir qilmasin.
+    rows = list(rows)
 
     # --- Asosiy: monitorli darslar
     monitor_lessons = sum(r["monitor_lessons"] for r in rows)

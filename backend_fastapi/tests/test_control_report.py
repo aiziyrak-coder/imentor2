@@ -192,3 +192,18 @@ def test_lessons_that_have_not_ended_yet_are_not_judged():
     # Kun tugagach hammasi hisobga kiradi.
     late = _run_spans(rows, {"a": [(at(11, 0), at(12, 20))]})["headline"]
     assert late["monitor_lessons"] == 3 and late["pending"]["lessons"] == 0
+
+
+def test_report_is_computed_once_within_the_cache_window(monkeypatch):
+    """Jonli rejim va bir necha tomoshabin: bir xil so'rov qayta hisoblanmaydi."""
+    monkeypatch.setattr(cr, "CACHE_SECONDS", 45)
+    rows = [lesson(1, user="a", name="A")]
+    a, b, c, d = _quiet_activity()
+    with patch.object(cr.ms, "_usage_events", return_value={}), \
+            patch.object(cr.ms, "_work_spans", return_value={}) as spans, a, b, c, d:
+        first = cr.overview(_db(rows), DAY, DAY)
+        first["teachers"] = []                      # yo'l javobni o'zgartirsa ham
+        second = cr.overview(_db(rows), DAY, DAY)
+        cr.people(_db(rows), DAY, DAY, metric="t_none")
+    assert spans.call_count == 1
+    assert [r["teacher_name"] for r in second["teachers"]] == ["A"]

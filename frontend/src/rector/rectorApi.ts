@@ -637,7 +637,14 @@ function get<T>(path: string): Promise<T> {
   // umumiy httpClient shu brauzerdagi O'QITUVCHI tokenini yangilab qayta
   // urinardi — u rektor huquqiga ega emas, natijada parol oynasi o'rniga
   // "HTTP 403" chiqib qolardi.
-  return httpJson<T>(`${apiBaseUrl()}/v1/rector${path}`, { headers: authHeader(), retryOnUnauthorized: false });
+  // Umumiy chegara 12 soniya, lekin uzun davr hisoboti (30 kun) serverda
+  // 15-20 soniya hisoblanadi — sahifa natijani kutmay "so'rov vaqti tugadi"
+  // derdi (2026-10-09).
+  return httpJson<T>(`${apiBaseUrl()}/v1/rector${path}`, {
+    headers: authHeader(),
+    retryOnUnauthorized: false,
+    timeoutMs: 90000,
+  });
 }
 
 export function fetchFilters(): Promise<FilterOptions> {
