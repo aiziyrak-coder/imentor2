@@ -22,8 +22,11 @@ export function localizedSubjectName(
   syllabus: Pick<CourseSyllabusRow, 'subject_name' | 'name_i18n' | 'instruction_language'>,
   lang: AppLanguage,
 ): string {
-  if ((syllabus.instruction_language || 'uz') === lang) return syllabus.subject_name;
-  return (syllabus.name_i18n?.[lang] || '').trim() || syllabus.subject_name;
+  // Tarjima bor bo'lsa — doim u. `instruction_language` ba'zan xato (PDF'dan
+  // aniqlangan) va server shunday fanni ham o'girib qo'yadi.
+  const translated = (syllabus.name_i18n?.[lang] || '').trim();
+  if (translated) return translated;
+  return syllabus.subject_name;
 }
 
 /** Mavzu sarlavhasi — tanlangan tilda (tarjima yo'q bo'lsa asl sarlavha). */
@@ -33,11 +36,31 @@ export function localizedTopicTitle(
   lang: AppLanguage,
 ): string {
   if (!syllabus) return originalTitle;
-  if ((syllabus.instruction_language || 'uz') === lang) return originalTitle;
   return (syllabus.topics_i18n?.[lang]?.[originalTitle] || '').trim() || originalTitle;
 }
 
-/** Shu til uchun tarjima yetarlimi? (mavzularning kamida 80%i) */
+/** Mavzu nomining shu tildagi tarjimasi yetishmayaptimi (asl tilda emas va tarjima yo'q). */
+export function topicTitleMissing(
+  syllabus: Pick<CourseSyllabusRow, 'topics_i18n' | 'instruction_language'> | null | undefined,
+  originalTitle: string,
+  lang: AppLanguage,
+): boolean {
+  if (!syllabus || !originalTitle) return false;
+  if ((syllabus.instruction_language || 'uz') === lang) return false;
+  return !(syllabus.topics_i18n?.[lang]?.[originalTitle] || '').trim();
+}
+
+/** Fan nomining tarjimasi yetishmayaptimi. */
+export function subjectNameMissing(
+  syllabus: Pick<CourseSyllabusRow, 'name_i18n' | 'instruction_language'> | null | undefined,
+  lang: AppLanguage,
+): boolean {
+  if (!syllabus) return false;
+  if ((syllabus.instruction_language || 'uz') === lang) return false;
+  return !(syllabus.name_i18n?.[lang] || '').trim();
+}
+
+/** Shu til uchun tarjima to'liqmi? (barcha mavzular) */
 export function hasTranslations(
   syllabus: Pick<CourseSyllabusRow, 'topics_i18n' | 'instruction_language' | 'variants' | 'topics'>,
   lang: AppLanguage,
@@ -59,11 +82,49 @@ export function hasTranslations(
   titles.forEach((t) => {
     if ((map[t] || '').trim()) have += 1;
   });
-  return have / titles.size >= 0.8;
+  // Bitta mavzu ham tarjimasiz qolmasin — ilgari 80% yetarli hisoblanardi va
+  // qolgan 20% mavzu nomi asl tilda ko'rinib turardi.
+  return have === titles.size;
 }
 
 /** Bir sessiyada bir sillabus+til uchun bir marta so'ralsin. */
 const requested = new Set<string>();
+
+/**
+ * Tarjima holati — ekran "Tarjima qilinmoqda…" yoki "qayta urinish"ni
+ * ko'rsatishi uchun. `pending` — server ishlayapti; `failed` — yiqildi.
+ */
+export type SyllabusTranslationState = 'pending' | 'failed';
+const states = new Map<string, SyllabusTranslationState>();
+const stateListeners = new Set<() => void>();
+
+function setState(key: string, state: SyllabusTranslationState | null): void {
+  if (state) states.set(key, state);
+  else states.delete(key);
+  stateListeners.forEach((fn) => fn());
+}
+
+export function syllabusTranslationState(
+  syllabusId: number | null | undefined,
+  lang: AppLanguage,
+): SyllabusTranslationState | null {
+  if (syllabusId == null) return null;
+  return states.get(`${syllabusId}:${lang}`) ?? null;
+}
+
+export function subscribeSyllabusTranslationState(fn: () => void): () => void {
+  stateListeners.add(fn);
+  return () => {
+    stateListeners.delete(fn);
+  };
+}
+
+/** "Qayta urinish" — yiqilgan tarjimani yana so'raydi. */
+export function retrySyllabusTranslation(syllabusId: number, lang: AppLanguage): Promise<boolean> {
+  const key = `${syllabusId}:${lang}`;
+  requested.delete(key);
+  return requestSyllabusTranslation(syllabusId, lang);
+}
 
 /**
  * Yetishmayotgan tarjimani serverda yaratishni so'raydi.
@@ -79,9 +140,10 @@ export async function requestSyllabusTranslation(
   const key = `${syllabusId}:${lang}`;
   if (requested.has(key)) return false;
   requested.add(key);
+  setState(key, 'pending');
   try {
     const token = await getBackendAccessToken();
-    if (!token) { requested.delete(key); return false; }
+    if (!token) { requested.delete(key); setState(key, null); return false; }
     const result = await httpJson<Pick<CourseSyllabusRow, "name_i18n" | "topics_i18n">>(
       `${apiBaseUrl()}/v1/course-syllabuses/${syllabusId}/translate/?lang=${encodeURIComponent(lang)}`,
       {
@@ -93,10 +155,12 @@ export async function requestSyllabusTranslation(
     );
     const row = getCachedSyllabusRow(syllabusId);
     if (row) cacheSyllabusRows([{ ...row, name_i18n: result.name_i18n, topics_i18n: result.topics_i18n }]);
+    setState(key, null);
     return true;
   } catch {
-    // Tarjima bo'lmasa ham ilova ishlayveradi — asl nom ko'rsatiladi.
+    // Tarjima yiqildi — ekranda "qayta urinish" chiqadi.
     requested.delete(key);
+    setState(key, 'failed');
     return false;
   }
 }

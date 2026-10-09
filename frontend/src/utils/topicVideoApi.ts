@@ -50,16 +50,14 @@ export async function fetchTopicVideos(params: {
     variant_label: variantLabel,
     topic_code: params.topicCode,
   });
-  try {
-    const data = await httpJson<TopicVideo[]>(
-      `${apiBaseUrl()}/v1/topic-videos/?${query.toString()}`,
-      { headers: authHeaders(token), timeoutMs: 20000 },
-    );
-    const rows = Array.isArray(data) ? data : [];
-    return rows.filter((row) => matchesTopic(row, params.syllabusId, variantLabel, params.topicCode));
-  } catch {
-    return [];
-  }
+  // Xato yutilmaydi: ilgari tarmoq xatosi bo'sh ro'yxat bo'lib qaytardi va
+  // o'qituvchi "videolarim o'chib ketdi" deb o'ylardi.
+  const data = await httpJson<TopicVideo[]>(
+    `${apiBaseUrl()}/v1/topic-videos/?${query.toString()}`,
+    { headers: authHeaders(token), timeoutMs: 20000 },
+  );
+  const rows = Array.isArray(data) ? data : [];
+  return rows.filter((row) => matchesTopic(row, params.syllabusId, variantLabel, params.topicCode));
 }
 
 /** O'qituvchi: mavzuga YouTube video qo'shadi (taqdimot yuklagani kabi). */

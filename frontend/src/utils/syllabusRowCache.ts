@@ -50,7 +50,6 @@ export function localizedTitleFromCache(title: string, lang: AppLanguage): strin
   const original = (title || '').trim();
   if (!original) return title;
   for (const row of rows.values()) {
-    if ((row.instruction_language || 'uz') === lang) continue;
     const hit = row.topics_i18n?.[lang]?.[original];
     if (hit && hit.trim()) return hit.trim();
   }

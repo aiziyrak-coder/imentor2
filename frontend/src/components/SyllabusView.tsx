@@ -22,7 +22,12 @@ import {
   localizedSubjectName,
   localizedTopicTitle,
   requestSyllabusTranslation,
+  retrySyllabusTranslation,
+  subjectNameMissing,
+  syllabusTranslationState,
+  topicTitleMissing,
 } from '../utils/syllabusI18n';
+import { useSyllabusTranslationTick } from '../i18n/useSyllabusTranslationState';
 import type { UserRole } from '../utils/localStaffAuth';
 import {
   deleteOwnSyllabus,
@@ -53,11 +58,12 @@ import {
   type TopicMaterialCoverage,
 } from '../utils/topicMaterialCoverage';
 import { PAGE_ROOT } from '../layout/pageContainer';
+import { PREPARED_CONTENT_CHANGED_EVENT } from '../utils/preparedContentStore';
 
 interface SyllabusViewProps {
   userRole: UserRole | null;
   selectedTopic: SyllabusTopicContext | null;
-  onSelectTopic: (topic: SyllabusTopicContext) => void;
+  onSelectTopic: (topic: SyllabusTopicContext, opts?: { silent?: boolean }) => void;
   onClearTopic: () => void;
   onOpenLectures: (topic: SyllabusTopicContext) => void;
 }
@@ -98,27 +104,22 @@ export default function SyllabusView({
   })();
 
   // Interfeys tili almashganda, tarjimasi yetishmayotgan fanlar uchun
-  // serverdan tarjima so'raymiz. Natija darhol kerak emas — server uni
-  // bazaga yozadi va keyingi yuklashda tayyor bo'ladi (idempotent, shuning
-  // uchun bir necha o'qituvchi bir vaqtda so'rasa ham xavfsiz).
+  // serverdan tarjima so'raymiz (idempotent — bir necha o'qituvchi bir
+  // vaqtda so'rasa ham xavfsiz). Tarjima kelguncha tarjimasiz nomlar o'rnida
+  // "Tarjima qilinmoqda…" belgisi turadi — asl tildagi nom ko'rsatilmaydi.
+  useSyllabusTranslationTick();
   useEffect(() => {
     const pending = mySubjects
       .map((s) => s.syllabus)
-      .filter((syl) => syl && !hasTranslations(syl, language));
+      .filter((syl) => syl && (!hasTranslations(syl, language) || subjectNameMissing(syl, language)));
     if (!pending.length) return;
     let cancelled = false;
     (async () => {
-      // Tarjima fonda ketadi — "kuting, tarjima qilinmoqda" alerti
-      // ko'rsatilmaydi (foydalanuvchi so'rovi), faqat tugagani bildiriladi.
-      let any = false;
-      for (const syl of pending) {
-        if (cancelled) return;
-        const ok = await requestSyllabusTranslation(syl.id, language);
-        if (ok && !cancelled) {
-          any = true;
-          void load();
-        }
-      }
+      // Fanlar parallel o'giriladi — ketma-ket bo'lsa oxirgi fan bir necha
+      // daqiqa "Tarjima qilinmoqda…" holatida turardi.
+      const results = await Promise.all(pending.map((syl) => requestSyllabusTranslation(syl.id, language)));
+      const any = results.some(Boolean);
+      if (any && !cancelled) void load();
       if (any && !cancelled) {
         pushAppNotification({
           title: t('common.doneTitle'),
@@ -174,11 +175,18 @@ export default function SyllabusView({
       shunchaki chiqmaydi — sahifa ishlashda davom etadi. */
   useEffect(() => {
     let alive = true;
-    void fetchTopicMaterialCoverage().then((map) => {
-      if (alive) setCoverage(map);
-    });
+    const refresh = () => {
+      void fetchTopicMaterialCoverage().then((map) => {
+        if (alive) setCoverage(map);
+      });
+    };
+    refresh();
+    // Sahifa fonda ochiq turadi — boshqa bo'limda ma'ruza/test saqlanganda
+    // yoki o'chirilganda nuqtalar shu hodisa orqali yangilanadi.
+    window.addEventListener(PREPARED_CONTENT_CHANGED_EVENT, refresh);
     return () => {
       alive = false;
+      window.removeEventListener(PREPARED_CONTENT_CHANGED_EVENT, refresh);
     };
   }, [mySelections.length]);
 
@@ -222,6 +230,7 @@ export default function SyllabusView({
     topic: SyllabusTopic,
     syllabus: CourseSyllabusRow,
     variantLabel: string,
+    silent = false,
   ) => {
     const instructionLanguage = resolveSyllabusInstructionLanguage(syllabus);
     const context = buildTopicContext(
@@ -233,7 +242,7 @@ export default function SyllabusView({
       instructionLanguage,
       syllabus.department_name || '',
     );
-    onSelectTopic(context);
+    onSelectTopic(context, { silent });
     return context;
   };
 
@@ -286,7 +295,9 @@ export default function SyllabusView({
    */
   useEffect(() => {
     if (loading || selectedTopic || !activeSyllabus || activeTopics.length === 0) return;
-    pickTopic(activeTopics[0], activeSyllabus, activeLabel);
+    // Avtomatik tanlov — "Mavzu tanlandi" bildirishnomasi chiqarilmaydi,
+    // aks holda har fan almashganda tarix keraksiz yozuv bilan to'lardi.
+    pickTopic(activeTopics[0], activeSyllabus, activeLabel, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- faqat birinchi bo'sh holatda ishga tushsin
   }, [loading, selectedTopic, activeSyllabus, activeTopics, activeLabel]);
 
@@ -420,6 +431,13 @@ export default function SyllabusView({
                   removed: String(stats.removed ?? 0),
                   kept: String(stats.kept_with_material ?? 0),
                 }),
+                titleKey: 'common.doneTitle',
+                bodyKey: 'ownSubjects.updated',
+                bodyParams: {
+                  added: String(stats.added ?? 0),
+                  removed: String(stats.removed ?? 0),
+                  kept: String(stats.kept_with_material ?? 0),
+                },
                 level: 'success',
               });
               void load();
@@ -432,6 +450,8 @@ export default function SyllabusView({
               pushAppNotification({
                 title: t('common.doneTitle'),
                 body: t('ownSubjects.created'),
+                titleKey: 'common.doneTitle',
+                bodyKey: 'ownSubjects.created',
                 level: 'success',
               });
               void load().then(() => setActiveSyllabusId(syllabusId));
@@ -503,7 +523,12 @@ export default function SyllabusView({
                         isActive ? 'font-semibold text-slate-900' : 'font-medium text-slate-500'
                       }`}
                     >
-                      {localizedSubjectName(syllabus, language)}
+                      {subjectNameMissing(syllabus, language) &&
+                      syllabusTranslationState(syllabus.id, language) === 'pending' ? (
+                        <TranslatingText width="w-32" />
+                      ) : (
+                        localizedSubjectName(syllabus, language)
+                      )}
                       {sel.is_own && (
                         <span className="ml-1.5 whitespace-nowrap rounded bg-emerald-50 px-1 py-px align-middle text-[9.5px] font-semibold text-emerald-700">
                           {t('ownSubjects.ownBadge')}
@@ -590,7 +615,12 @@ export default function SyllabusView({
                       {/* Ekran keng bo'lsa ham sarlavha 60ch dan oshmaydi:
                           bir metrlik satrni o'qib bo'lmaydi. */}
                       <h2 className="mt-1 line-clamp-2 max-w-[60ch] text-[16px] font-semibold leading-snug tracking-tight text-slate-900">
-                        {localizedTopicTitle(activeSyllabus, selectedTopic.title, language)}
+                        {topicTitleMissing(activeSyllabus, selectedTopic.title, language) &&
+                        syllabusTranslationState(activeSyllabus?.id, language) === 'pending' ? (
+                          <TranslatingText width="w-72" />
+                        ) : (
+                          localizedTopicTitle(activeSyllabus, selectedTopic.title, language)
+                        )}
                       </h2>
                     </div>
                     <button
@@ -608,6 +638,32 @@ export default function SyllabusView({
                 </div>
               )}
 
+              {activeSyllabus && syllabusTranslationState(activeSyllabus.id, language) === 'pending' && (
+                <p role="status" className="mb-6 flex items-center gap-2 text-[12.5px] font-medium text-sky-700">
+                  <Loader2 size={14} className="animate-spin" />
+                  {t('syllabus.titlesTranslating', {
+                    lang: t(`common.languageName.${language}` as 'common.languageName.uz'),
+                  })}
+                </p>
+              )}
+              {activeSyllabus && syllabusTranslationState(activeSyllabus.id, language) === 'failed' && (
+                <p role="alert" className="mb-6 flex flex-wrap items-center gap-3 text-[12.5px] font-medium text-rose-600">
+                  {t('syllabus.titlesTranslateFailed', {
+                    lang: t(`common.languageName.${language}` as 'common.languageName.uz'),
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void retrySyllabusTranslation(activeSyllabus.id, language).then((ok) => {
+                        if (ok) void load();
+                      });
+                    }}
+                    className="font-semibold text-sky-700 underline-offset-2 hover:underline"
+                  >
+                    {t('common.retry')}
+                  </button>
+                </p>
+              )}
               {activeSyllabus && topicGroups.length > 0 ? (
                 <div className="space-y-10">
                   {topicGroups.map((group) => (
@@ -634,6 +690,21 @@ export default function SyllabusView({
       </div>
       {subjectDialog}
     </div>
+  );
+}
+
+/**
+ * Tarjimasi kelayotgan nom o'rnidagi belgi — asl tildagi nom ko'rsatilmaydi.
+ */
+function TranslatingText({ width = 'w-40' }: { width?: string }) {
+  const { t } = useUiText();
+  return (
+    <span
+      role="status"
+      aria-label={t('common.translating')}
+      title={t('common.translating')}
+      className={`inline-block h-[0.9em] ${width} max-w-full animate-pulse rounded bg-slate-200 align-middle`}
+    />
   );
 }
 
@@ -685,10 +756,18 @@ function TopicColumn({
   const totalPages = Math.max(1, Math.ceil(topics.length / TOPICS_PER_PAGE));
   const listKey = `${syllabus.id}-${variantLabel}-${topics.length}`;
 
+  // Tanlangan mavzu turgan sahifa ochiladi. Ilgari har tanlovda 1-sahifaga
+  // qaytardi va 2-sahifadagi tanlangan mavzu ko'rinmay qolardi.
+  const selectedIndex = topics.findIndex(
+    (topic) =>
+      selectedTopic != null &&
+      selectedTopic.syllabusId === syllabus.id &&
+      topic.id === selectedTopic.id &&
+      topic.type === selectedTopic.type,
+  );
   React.useEffect(() => {
-    setPage(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- topics listKey bilan birga yangilanadi
-  }, [selectedTopic, listKey]);
+    setPage(selectedIndex >= 0 ? Math.floor(selectedIndex / TOPICS_PER_PAGE) : 0);
+  }, [selectedIndex, listKey]);
 
   const pageStart = page * TOPICS_PER_PAGE;
   const visibleTopics = topics.slice(pageStart, pageStart + TOPICS_PER_PAGE);
@@ -728,12 +807,15 @@ function TopicColumn({
               );
               const isSelected = topicsMatch(selectedTopic, ctx);
               const fullTitle = localizedTopicTitle(syllabus, topic.title, language);
+              const titlePending =
+                topicTitleMissing(syllabus, topic.title, language) &&
+                syllabusTranslationState(syllabus.id, language) === 'pending';
               return (
                 <motion.button
                   key={`${syllabus.id}-${variantLabel}-${topic.id}-${topic.title}`}
                   type="button"
                   onClick={() => onPickTopic(topic, syllabus, variantLabel)}
-                  title={fullTitle}
+                  title={titlePending ? undefined : fullTitle}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.22, delay: Math.min(index * 0.018, 0.2) }}
@@ -766,7 +848,7 @@ function TopicColumn({
                         : 'text-slate-700 group-hover:text-slate-900'
                     }`}
                   >
-                    {fullTitle}
+                    {titlePending ? <TranslatingText width="w-4/5" /> : fullTitle}
                   </span>
                   <MaterialDots
                     ready={coveredKinds(coverage, syllabus.id, topic.id)}

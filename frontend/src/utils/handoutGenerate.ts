@@ -8,6 +8,9 @@ import {
 } from './handoutInfographic';
 import { uploadAdminHandout, uploadHandout, type TopicHandoutItem } from './handoutApi';
 import type { SyllabusTopicContext } from './syllabusTopicContext';
+import { translate } from '../i18n/translations';
+import { getCachedSyllabusRow } from './syllabusRowCache';
+import { localizedTopicTitle, subjectNameMissing } from './syllabusI18n';
 
 const LANGS: AppLanguage[] = ['uz', 'ru', 'en'];
 const W = 1400;
@@ -66,7 +69,8 @@ function rasterizePack(params: {
 
   ctx.fillStyle = '#fbbf24';
   ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
-  const kicker = pickHandoutText(pack.kicker, lang) || "O'quv posteri";
+  // Har til posteri o'z tilida — zaxira yozuvlar ham (ilgari ru/en posterda o'zbekcha turardi).
+  const kicker = pickHandoutText(pack.kicker, lang) || translate(lang, 'handout.posterKicker');
   ctx.fillText(`${kicker}  ·  ${lang.toUpperCase()}`, 28, 32);
 
   ctx.fillStyle = '#ffffff';
@@ -147,7 +151,7 @@ function rasterizePack(params: {
 
   ctx.fillStyle = '#64748b';
   ctx.font = 'bold 12px Segoe UI, Arial, sans-serif';
-  ctx.fillText('iMentor · FJSTI · o‘quv posteri', 28, H - 14);
+  ctx.fillText(`iMentor · FJSTI · ${translate(lang, 'handout.posterFooter')}`, 28, H - 14);
   ctx.fillText(lang.toUpperCase(), W - 48, H - 14);
 
   return canvasToPngBlob(canvas);
@@ -197,13 +201,25 @@ export async function generateAndUploadTopicHandouts(params: {
   const saved: TopicHandoutItem[] = [];
   for (const lang of LANGS) {
     params.onProgress?.('render', lang);
+    // Fan nomi va zaxira sarlavha POSTER tilida: tarjimasi bo'lmasa fan nomi
+    // umuman yozilmaydi (boshqa tildagi nom poster o'rtasida chiqmasin).
+    const row = typeof params.topic === 'object' && params.topic?.syllabusId != null
+      ? getCachedSyllabusRow(params.topic.syllabusId)
+      : null;
+    const subjectForLang = row
+      ? subjectNameMissing(row, lang)
+        ? ''
+        : (row.name_i18n?.[lang] || '').trim() || row.subject_name
+      : params.subjectName;
     const blob = await rasterizePack({
       pack,
       lang,
-      subjectName: params.subjectName,
+      subjectName: subjectForLang,
       topicId: params.topicId,
     });
-    const title = (pickHandoutText(pack.title, lang) || params.topicTitle).slice(0, 240);
+    const title = (
+      pickHandoutText(pack.title, lang) || localizedTopicTitle(row, params.topicTitle, lang)
+    ).slice(0, 240);
     const topicLabel = params.topicTitle.slice(0, 240);
     const safeCode = (params.topicId || 'mavzu').replace(/[^\w.-]+/g, '_').slice(0, 24);
     const file = await blobToPngFile(blob, `tarqatma-${safeCode}-${lang}.png`);

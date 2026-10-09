@@ -147,6 +147,97 @@ def syllabus_catalog(
     return paginate(out, request, default_page_size=200, max_page_size=1000)
 
 
+@router.post("/course-syllabuses/translate-names/")
+def translate_syllabus_and_department_names(
+    payload: dict,
+    db: Session = Depends(get_db),
+    auth=Depends(require_roles(*STAFF_ROLES)),
+) -> dict:
+    """Fan va kafedra NOMLARINI interfeys tiliga o'giradi (mavzularsiz — arzon).
+
+    Fan tanlash ro'yxati va sozlamalardagi kafedra ro'yxati shu bilan to'liq
+    tarjima qilinadi: butun sillabusni (yuzlab mavzu) o'girish shart emas.
+    Idempotent: tarjima bir marta bazaga yoziladi, keyingi so'rovlar AI'siz.
+
+    Kutiladi: {"lang": "ru", "syllabus_ids": [1, 2], "departments": true}
+    Qaytadi:  {"syllabi": {"1": "..."}, "departments": {"<asl nom>": "..."}}
+    """
+    from app.core.config import get_settings
+    from app.services.syllabus_i18n import (
+        SUPPORTED_LANGS,
+        _BATCH,
+        _translate_batch,
+        looks_wrong_language,
+    )
+
+    lang = str(payload.get("lang") or "").strip().lower()
+    if lang not in SUPPORTED_LANGS:
+        raise HTTPException(status_code=400, detail="lang must be uz, ru or en.")
+    raw_ids = payload.get("syllabus_ids") or []
+    ids = [int(x) for x in raw_ids[:300] if str(x).strip().isdigit()] if isinstance(raw_ids, list) else []
+    username = auth.user.username
+
+    syllabi = []
+    if ids:
+        syllabi = [
+            obj
+            for obj in db.execute(select(CourseSyllabus).where(CourseSyllabus.id.in_(ids))).scalars().all()
+            if _visible_to(obj.allowed_owner_keys, username, auth.role)
+        ]
+    departments = []
+    if payload.get("departments"):
+        departments = (
+            db.execute(select(AcademicDepartment).where(AcademicDepartment.is_active.is_(True))).scalars().all()
+        )
+
+    def needs(name: str, i18n: dict | None, source: str) -> bool:
+        if not (name or "").strip() or str((i18n or {}).get(lang) or "").strip():
+            return False
+        # Asl tilda bo'lsa tarjima kerak emas — lekin asl til xato belgilangan
+        # bo'lishi mumkin, shuning uchun matnning o'zi ham tekshiriladi.
+        return source != lang or looks_wrong_language(name, lang)
+
+    todo_s = [r for r in syllabi if needs(r.subject_name, r.name_i18n, (r.instruction_language or "uz").lower())]
+    todo_d = [d for d in departments if needs(d.name, d.name_i18n, "uz")]
+    texts = list(dict.fromkeys([r.subject_name for r in todo_s] + [d.name for d in todo_d]))
+
+    settings = get_settings()
+    api_key = (settings.openai_api_key or "").strip()
+    got: dict[str, str] = {}
+    if api_key and texts:
+        for i in range(0, len(texts), _BATCH):
+            got.update(_translate_batch(api_key, settings.openai_fast_model, texts[i : i + _BATCH], lang))
+
+    def apply(obj, name: str) -> None:
+        value = str(got.get(name) or "").strip()
+        if value and not looks_wrong_language(value, lang):
+            obj.name_i18n = {**(obj.name_i18n or {}), lang: value}
+
+    for r in todo_s:
+        apply(r, r.subject_name)
+    for d in todo_d:
+        apply(d, d.name)
+    if todo_s or todo_d:
+        db.commit()
+
+    def shown(name: str, i18n: dict | None, source: str) -> str | None:
+        value = str((i18n or {}).get(lang) or "").strip()
+        if value:
+            return value
+        return None if needs(name, i18n, source) else name
+
+    return {
+        "syllabi": {
+            str(r.id): v
+            for r in syllabi
+            if (v := shown(r.subject_name, r.name_i18n, (r.instruction_language or "uz").lower())) is not None
+        },
+        "departments": {
+            d.name: v for d in departments if (v := shown(d.name, d.name_i18n, "uz")) is not None
+        },
+    }
+
+
 @router.post("/course-syllabuses/{pk}/translate/")
 def translate_syllabus(
     pk: int,

@@ -163,11 +163,11 @@ export default function OwnSubjectUpload({
   const nameAndLang = (
     <div className="space-y-3">
     <div className="space-y-1">
-      <span className={staffLabel}>Guruh turi</span>
+      <span className={staffLabel}>{t('teachingSubjects.groupType')}</span>
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:max-w-md" role="radiogroup">
         {([
-          [false, 'O‘zbek guruhlari'],
-          [true, 'Xalqaro (xorijiy)'],
+          [false, t('teachingSubjects.groupUz')],
+          [true, t('teachingSubjects.groupIntl')],
         ] as const).map(([value, label]) => (
           <button
             key={label}
