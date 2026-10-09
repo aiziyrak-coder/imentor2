@@ -345,6 +345,9 @@ export default function TestQuestions() {
   const [joinQrDataUrl, setJoinQrDataUrl] = useState('');
   const [submissions, setSubmissions] = useState<TestSubmissionDoc[]>([]);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  /** Jonli sessiya ochiq paytda to'g'ri javoblar ekranda YASHIRIN. O'qituvchi
+   *  ogohlantirishni tasdiqlab ochsagina ko'rinadi (sessiya almashsa qayta yopiladi). */
+  const [revealDuringSession, setRevealDuringSession] = useState(false);
   const [downloadingKeyPdf, setDownloadingKeyPdf] = useState(false);
   const [downloadingResultsPdf, setDownloadingResultsPdf] = useState(false);
   const [sessionClosed, setSessionClosed] = useState(false);
@@ -1002,6 +1005,19 @@ export default function TestQuestions() {
     }
   };
 
+  // Sinfdagi katta ekran: QR ko'rsatilib, talabalar test yechayotgan paytda
+  // to'g'ri javob, variant izohlari va tahlil ko'rinmasligi kerak (2026-10-09:
+  // monitorda javoblari ochiq test rasmi kelgan). Sessiya yakunlangach — ochiq.
+  const sessionRunning = Boolean(teacherSessionId) && !sessionClosed;
+  const hideAnswers = sessionRunning && !revealDuringSession;
+  useEffect(() => {
+    setRevealDuringSession(false);
+  }, [teacherSessionId]);
+
+  const staffTopic = useLocalizedTopic(
+    globalTopic && isTopicContextComplete(globalTopic) ? globalTopic : null,
+  );
+
   if (isStudentMode) {
     return (
       <div className="h-full flex flex-col bg-[#f2f2f7] p-3 sm:p-5 lg:p-6 overflow-y-auto">
@@ -1143,9 +1159,6 @@ export default function TestQuestions() {
     );
   }
 
-  const staffTopic = useLocalizedTopic(
-    globalTopic && isTopicContextComplete(globalTopic) ? globalTopic : null,
-  );
 
   return (
     <StaffPageLayout
@@ -1340,7 +1353,9 @@ export default function TestQuestions() {
               )}
             </StaffPanel>
 
-            {!showAnalysis ? (
+            {/* Natijalar jadvali faqat jonli sessiya bo'lganda: sessiyasiz saqlangan
+                test ochilganda ilgari bo'sh jadval chiqib, savollar yashirinib qolardi. */}
+            {!showAnalysis && teacherSessionId ? (
               <StaffPanel className="overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-900/[0.07] px-4 py-3">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -1412,6 +1427,31 @@ export default function TestQuestions() {
                 {/* Kartochka Keys/Ma'ruza bo'limlari bilan bir xil `StaffPanel` —
                     ilgari bu yerda o'ziga xos oq `rounded-3xl` kartochkalar bo'lib,
                     Test bo'limi boshqa ilovadek ko'rinardi. */}
+                {sessionRunning && (
+                  <div
+                    role="status"
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-[13px] ${
+                      hideAnswers
+                        ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+                        : 'border-rose-200 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Lock size={15} className="shrink-0" />
+                      {hideAnswers ? t('test.answersHiddenDuringSession') : t('test.answersShownDuringSession')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hideAnswers && !window.confirm(t('test.revealAnswersConfirm'))) return;
+                        setRevealDuringSession(hideAnswers);
+                      }}
+                      className={staffBtnGhost}
+                    >
+                      {hideAnswers ? t('test.revealAnswers') : t('test.hideAnswers')}
+                    </button>
+                  </div>
+                )}
                 {displayedTest.questions.map((q, i) => (
                   <StaffPanel key={i} large className="p-5 sm:p-7 space-y-5">
                     <div className="flex items-start gap-4">
@@ -1420,8 +1460,9 @@ export default function TestQuestions() {
                     </div>
                     <div className="space-y-2">
                       {q.options.map((option, optIdx) => {
-                        const optionExplanation = q.optionExplanations?.[optIdx]?.trim();
-                        const isCorrect = optIdx === q.correctOptionIndex;
+                        const optionExplanation = hideAnswers ? '' : q.optionExplanations?.[optIdx]?.trim();
+                        // Sessiya ketayotganda to'g'ri variant ajratib ko'rsatilmaydi.
+                        const isCorrect = !hideAnswers && optIdx === q.correctOptionIndex;
                         return (
                           <div
                             key={optIdx}
@@ -1445,6 +1486,7 @@ export default function TestQuestions() {
                         );
                       })}
                     </div>
+                    {!hideAnswers && (
                     <div className={staffExplainBox}>
                       <h4 className={staffExplainTitle}>
                         <Brain size={14} className="shrink-0" /> {t('test.correctAnalysis')}
@@ -1459,6 +1501,7 @@ export default function TestQuestions() {
                         />
                       )}
                     </div>
+                    )}
                   </StaffPanel>
                 ))}
                 {displayedTest.references && displayedTest.references.length > 0 && (
