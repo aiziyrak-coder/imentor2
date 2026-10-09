@@ -37,9 +37,13 @@ AFTER = dt.timedelta(minutes=5)
 #: Ilgari chegara umuman yo'q edi: bir sahifaga 3-4 daqiqa kirgan o'qituvchi
 #: ham "ishlatdi" bo'lib chiqardi va hisobot aldardi.
 #:
+#: Talab 2026-10-09 da 50 dan 40 daqiqaga tushirildi: dars juftligi 80
+#: daqiqa, tanaffus va davomat olishni hisobga olsa, 40 daqiqa "darsning
+#: asosiy qismi iMentor'da o'tildi" degani uchun yetarli.
+#:
 #: `IMENTOR_MIN_LESSON_MINUTES` bilan o'zgartiriladi — talab o'zgarsa
 #: yangi versiya chiqarish shart emas.
-MIN_LESSON_MINUTES = int(os.environ.get("IMENTOR_MIN_LESSON_MINUTES") or 50)
+MIN_LESSON_MINUTES = int(os.environ.get("IMENTOR_MIN_LESSON_MINUTES") or 40)
 
 
 def _worked_seconds(spans: list[tuple[dt.datetime, dt.datetime]],
