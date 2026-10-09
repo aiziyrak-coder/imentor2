@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Check, GraduationCap, Loader2, Save, Search } from 'lucide-react';
 import { useUiText } from '../../i18n/useUiText';
+import { useLocalizedNames } from '../../utils/nameI18n';
 import {
   fetchCourseSyllabusCatalog,
   fetchDepartmentCourseSyllabuses,
@@ -44,7 +45,7 @@ export default function StaffTeachingSubjectsPicker({
   onSaved,
   showHeader = true,
 }: StaffTeachingSubjectsPickerProps) {
-  const { t } = useUiText();
+  const { t, language } = useUiText();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +136,28 @@ export default function StaffTeachingSubjectsPicker({
     if (mine.length > 0 && mine.every(isInternationalSyllabus)) setScope('intl');
   }, [catalog, courses, selected, scopeTouched]);
 
+  // Fan va kafedra nomlari interfeys tilida. So'raladiganlari: o'z kafedrasi
+  // fanlari, tanlanganlar va joriy qidiruv natijalari (butun katalog emas).
+  const qNow = query.trim().toLowerCase();
+  const searchHitIds = qNow
+    ? catalog
+        .filter((c) => `${c.subject_name} ${c.department_name || ''} ${c.subject_code}`.toLowerCase().includes(qNow))
+        .slice(0, 60)
+        .map((c) => c.id)
+    : [];
+  const names = useLocalizedNames(
+    language,
+    [...courses.map((c) => c.id), ...selected, ...searchHitIds],
+    true,
+  );
+  const subjectLabel = (syllabus: CourseSyllabusRow) => {
+    const name = names.subjectName(syllabus.id, syllabus.subject_name);
+    return name ?? <span className="inline-block h-[0.9em] w-24 animate-pulse rounded bg-slate-200 align-middle" aria-label={t('common.translating')} />;
+  };
+  const subjectTitle = (syllabus: CourseSyllabusRow) =>
+    names.subjectName(syllabus.id, syllabus.subject_name) ?? t('common.translating');
+  const departmentLabel = (name: string) => names.departmentName(name) ?? '…';
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-500">
@@ -183,8 +206,8 @@ export default function StaffTeachingSubjectsPicker({
 
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist">
         {([
-          ['uz', 'O‘zbek guruhlari', courses.length - intlTotal, pickedIn(false)],
-          ['intl', 'Xalqaro (xorijiy)', intlTotal, pickedIn(true)],
+          ['uz', t('teachingSubjects.groupUz'), courses.length - intlTotal, pickedIn(false)],
+          ['intl', t('teachingSubjects.groupIntl'), intlTotal, pickedIn(true)],
         ] as const).map(([key, label, total, picked]) => (
           <button
             key={key}
@@ -243,7 +266,10 @@ export default function StaffTeachingSubjectsPicker({
           .filter((c) => !own.has(c.id))
           .filter(inScope)
           .filter((c) => {
-            const hay = `${c.subject_name} ${c.department_name || ''} ${c.subject_code}`;
+            // Asl va tarjima qilingan nom bo'yicha — o'qituvchi o'z tilida qidiradi.
+            const hay = `${c.subject_name} ${names.subjectName(c.id, '') || ''} ${c.department_name || ''} ${
+              names.departmentName(c.department_name || '') || ''
+            } ${c.subject_code}`;
             return hay.toLowerCase().includes(q);
           })
           .slice(0, 60);
@@ -264,7 +290,11 @@ export default function StaffTeachingSubjectsPicker({
                       key={syllabus.id}
                       type="button"
                       onClick={() => toggle(syllabus.id)}
-                      title={syllabus.department_name ? `${syllabus.subject_name} — ${syllabus.department_name}` : syllabus.subject_name}
+                      title={
+                        syllabus.department_name
+                          ? `${subjectTitle(syllabus)} — ${departmentLabel(syllabus.department_name)}`
+                          : subjectTitle(syllabus)
+                      }
                       className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] transition ${
                         isActive
                           ? 'border-blue-400 bg-blue-50'
@@ -273,11 +303,11 @@ export default function StaffTeachingSubjectsPicker({
                     >
                       {isActive && <Check size={14} className="shrink-0 text-blue-600" />}
                       <span className="max-w-[160px] truncate font-semibold text-slate-900 sm:max-w-[220px]">
-                        {syllabus.subject_name}
+                        {subjectLabel(syllabus)}
                       </span>
                       {syllabus.department_name && (
                         <span className="max-w-[120px] shrink-0 truncate text-[9px] text-slate-400">
-                          {syllabus.department_name}
+                          {departmentLabel(syllabus.department_name)}
                         </span>
                       )}
                       <span className="shrink-0 text-[9px] text-slate-400">
@@ -315,12 +345,12 @@ export default function StaffTeachingSubjectsPicker({
                   key={syllabus.id}
                   type="button"
                   onClick={() => toggle(syllabus.id)}
-                  title={syllabus.subject_name}
+                  title={subjectTitle(syllabus)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-blue-400 bg-blue-50 px-2.5 py-1.5 text-[12px] transition hover:border-rose-300 hover:bg-rose-50"
                 >
                   <Check size={14} className="shrink-0 text-blue-600" />
                   <span className="max-w-[160px] truncate font-semibold text-slate-900 sm:max-w-[220px]">
-                    {syllabus.subject_name}
+                    {subjectLabel(syllabus)}
                   </span>
                   <span className="shrink-0 text-[9px] text-slate-400">
                     {syllabusTopicCount(syllabus)} {t('syllabus.topics')}
@@ -334,9 +364,7 @@ export default function StaffTeachingSubjectsPicker({
 
       {courses.length > 0 && scopedCourses.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-600">
-          {scope === 'intl'
-            ? 'Kafedrangizda xalqaro guruhlar uchun fan yo‘q. Boshqa kafedra fanini yuqoridagi qidiruvdan toping.'
-            : 'Kafedrangizda o‘zbek guruhlari uchun fan yo‘q. Boshqa kafedra fanini yuqoridagi qidiruvdan toping.'}
+          {scope === 'intl' ? t('teachingSubjects.noIntlInDept') : t('teachingSubjects.noUzInDept')}
         </div>
       ) : courses.length === 0 ? (
         <div className="space-y-1 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-4">
@@ -376,7 +404,7 @@ export default function StaffTeachingSubjectsPicker({
                         key={syllabus.id}
                         type="button"
                         onClick={() => toggle(syllabus.id)}
-                        title={syllabus.subject_name}
+                        title={subjectTitle(syllabus)}
                         className={`inline-flex items-center gap-1.5 pl-2.5 pr-2.5 py-1.5 rounded-lg border text-[12px] transition ${
                           isActive
                             ? 'border-blue-400 bg-blue-50'
@@ -385,7 +413,7 @@ export default function StaffTeachingSubjectsPicker({
                       >
                         {isActive && <Check size={14} className="text-blue-600 shrink-0" />}
                         <span className="font-semibold text-slate-900 truncate max-w-[160px] sm:max-w-[220px]">
-                          {syllabus.subject_name}
+                          {subjectLabel(syllabus)}
                         </span>
                         <span className="text-[9px] text-slate-500 shrink-0">
                           {instructionLanguageBadge(resolveSyllabusInstructionLanguage(syllabus))}

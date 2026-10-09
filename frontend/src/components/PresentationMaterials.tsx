@@ -15,6 +15,8 @@ import {
   X,
   ZoomIn,
   MonitorPlay,
+  RefreshCw,
+  Languages,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GlobalTopicContext, AppNavigationContext, AppLanguageContext } from '../App';
@@ -26,9 +28,19 @@ import PdfSlideViewer from './PdfSlideViewer';
 import { apiErrorMessage } from '../utils/apiErrorMessage';
 import { outputLanguageLooksWrong } from '../utils/outputLanguage';
 import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
-import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
+import { isTopicContextComplete, resolveTopicNorm, topicContextKey } from '../utils/syllabusTopicContext';
+import { activeLectureVersion } from '../utils/lectureLocalCache';
+import { translatedView } from '../i18n/useTranslatedPayload';
+import {
+  deckMarker,
+  ensureDeckVariant,
+  parseDeckMarker,
+  presentationItemLanguage,
+  withDeckMarker,
+} from '../utils/presentationDeckVariants';
 import {
   loadLatestPreparedContent,
+  loadPreparedByIdSynced,
   savePreparedContent,
   preparedContentNumericId,
 } from '../utils/preparedContentStore';
@@ -38,6 +50,7 @@ import {
   getPresentationFileBlobUrl,
   getPresentationPreviewBlobUrl,
   isAllowedPresentationFile,
+  prunePresentationBlobCache,
   uploadPresentation,
   type TopicPresentationItem,
 } from '../utils/presentationUploadApi';
@@ -54,22 +67,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
- * Prepared_content yozuvi bilan serverdagi PPTX faylni bog'lovchi belgi.
- */
-function deckFileMarker(preparedId: string): string | null {
-  const numeric = preparedContentNumericId(preparedId);
-  return numeric ? `--pc${numeric}` : null;
-}
-
-/** Fayl nomiga bog'lanish belgisini qo'shadi (kengaytmasi saqlanadi). */
-function withDeckMarker(file: File, marker: string): File {
-  const dot = file.name.lastIndexOf('.');
-  const base = dot > 0 ? file.name.slice(0, dot) : file.name;
-  const ext = dot > 0 ? file.name.slice(dot) : '';
-  return new File([file], `${base.slice(0, 120)}${marker}${ext}`, { type: file.type });
 }
 
 function kindLabel(kind: TopicPresentationItem['kind']): string {
@@ -149,7 +146,8 @@ function PresentationLightbox({ items, index, onClose, onIndexChange }: Lightbox
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      // Slayd ko'ruvchi Esc'ni o'zi ishlatgan bo'lsa (qora ekrandan chiqish) — yopilmaydi.
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose();
       // ←/→ endi slaydlarni almashtiradi (PdfSlideViewer ichida) — bu yerda
       // ular boshqa TAQDIMOTGA o'tkazsa, dars paytida bir tugma ikki ishni
       // bajarib chalkashlik tug'dirardi. Taqdimotlar orasida o'tish uchun
@@ -268,6 +266,12 @@ export default function PresentationMaterials() {
   /** Xato emas — ogohlantirish (ma'ruza tili joriy tilga mos kelmasa). */
   const [languageWarning, setLanguageWarning] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  /** AI taqdimotning joriy tildagi nusxasi tayyorlanmoqda / yiqildi (kalit: `pcId:til`). */
+  const [variantState, setVariantState] = useState<Record<string, 'working' | 'failed'>>({});
+  /** Deck asosiy tili aniqlangach qayta chizish uchun. */
+  const [, setPrimaryTick] = useState(0);
+  /** "Qayta urinish" bosilganda nusxa tayyorlash effekti qayta ishga tushadi. */
+  const [variantAttempt, setVariantAttempt] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const topicTitle = globalTopic?.title?.trim() ?? '';
@@ -276,19 +280,21 @@ export default function PresentationMaterials() {
   const topicKey = topicContextKey(globalTopic);
   const requestSeq = useRef(0);
 
-  const loadItems = useCallback(async (): Promise<TopicPresentationItem[]> => {
+  const loadItems = useCallback(async (opts?: { silent?: boolean }): Promise<TopicPresentationItem[]> => {
     if (!topicReady || !globalTopic || !topicKey) {
       setItems([]);
       setLoading(false);
       return [];
     }
     const seq = ++requestSeq.current;
-    setLoading(true);
+    // Fonda tayyorlangan til nusxasidan keyin ro'yxat jim yangilanadi.
+    if (!opts?.silent) setLoading(true);
     setError(null);
     try {
       const rows = await fetchPresentationsForTopic(globalTopic);
       if (seq !== requestSeq.current) return [];
       setItems(rows);
+      prunePresentationBlobCache(rows.map((r) => r.id));
       return rows;
     } catch (e) {
       if (seq !== requestSeq.current) return [];
@@ -310,7 +316,75 @@ export default function PresentationMaterials() {
 
   useEffect(() => {
     setLightboxIndex(null);
-  }, [topicKey]);
+    setLanguageWarning(null);
+  }, [topicKey, language]);
+
+  /**
+   * Ko'rinadigan ro'yxat.
+   *
+   * O'qituvchi o'zi yuklagan fayllar — o'zgarishsiz (ularni tarjima qilib
+   * bo'lmaydi). AI taqdimotlari esa FAQAT interfeys tilidagi nusxasi bilan
+   * ko'rsatiladi; nusxa hali yo'q bo'lsa — o'rnida "Tarjima qilinmoqda…".
+   */
+  type DeckGroup = { pcId: string; files: TopicPresentationItem[]; current: TopicPresentationItem | null };
+  const deckGroups = new Map<string, DeckGroup>();
+  const plainItems: TopicPresentationItem[] = [];
+  for (const item of items) {
+    const marker = parseDeckMarker(item.file_name);
+    if (!marker) {
+      plainItems.push(item);
+      continue;
+    }
+    const group = deckGroups.get(marker.pcId) ?? { pcId: marker.pcId, files: [], current: null };
+    group.files.push(item);
+    if (!group.current && presentationItemLanguage(item) === language) group.current = item;
+    deckGroups.set(marker.pcId, group);
+  }
+  const groups = [...deckGroups.values()];
+  const visibleItems = [...groups.flatMap((g) => (g.current ? [g.current] : [])), ...plainItems].sort(
+    (a, b) => items.indexOf(a) - items.indexOf(b),
+  );
+  const pendingGroups = groups.filter((g) => !g.current);
+  const pendingKey = pendingGroups.map((g) => g.pcId).join(',');
+
+  // Joriy tildagi nusxasi yo'q AI taqdimotlar uchun nusxa tayyorlanadi.
+  useEffect(() => {
+    if (!globalTopic || !topicReady) return;
+    for (const group of pendingGroups) {
+      const key = `${group.pcId}:${language}`;
+      if (variantState[key]) continue;
+      setVariantState((prev) => ({ ...prev, [key]: 'working' }));
+      void ensureDeckVariant({
+        pcId: group.pcId,
+        lang: language,
+        context: globalTopic,
+        hasUnmarkedFile: group.files.some((f) => !parseDeckMarker(f.file_name)?.lang),
+      })
+        .then(async () => {
+          setPrimaryTick((n) => n + 1);
+          await loadItems({ silent: true });
+          setVariantState((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        })
+        .catch((err) => {
+          console.warn('Presentation language variant failed', err);
+          setVariantState((prev) => ({ ...prev, [key]: 'failed' }));
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKey, language, topicReady, variantAttempt]);
+
+  const retryVariant = (pcId: string) => {
+    setVariantState((prev) => {
+      const next = { ...prev };
+      delete next[`${pcId}:${language}`];
+      return next;
+    });
+    setVariantAttempt((n) => n + 1);
+  };
 
   const hasPdfSource = items.some((i) => i.kind === 'pdf');
 
@@ -345,10 +419,16 @@ export default function PresentationMaterials() {
       // bo'yicha saqlaydi, sillabus-kontekst kaliti bilan emas. Shuning uchun
       // avval kontekst bo'yicha, topilmasa sarlavha bo'yicha qidiramiz —
       // shunda eski va yangi formatda saqlangan ma'ruzalar ham topiladi.
+      // Avval o'qituvchi "Ma'ruza matni"da ochib turgan versiya, bo'lmasa eng oxirgisi.
+      const chosenId = activeLectureVersion(resolveTopicNorm(globalTopic));
       const lecture =
+        (chosenId ? await loadPreparedByIdSynced<LectureNote>('lecture', chosenId) : null) ??
         (await loadLatestPreparedContent<LectureNote>('lecture', globalTopic)) ??
         (await loadLatestPreparedContent<LectureNote>('lecture', globalTopic.title));
-      const lectureText = (lecture?.content || '').trim();
+      // Ma'ruzaning taqdimot tilidagi matni (tarjima tayyor bo'lsa) — slaydlar
+      // boshqa tildagi manbadan aralash chiqmasin.
+      const lectureForDeck = lecture ? translatedView(lecture, contentLanguageFor(globalTopic, language)) ?? lecture : null;
+      const lectureText = (lectureForDeck?.content || '').trim();
       if (!lectureText) {
         setError(t('presentation.errorNoLecture'));
         return;
@@ -402,7 +482,8 @@ export default function PresentationMaterials() {
         savedDeckId = await savePreparedContent(
           'presentation',
           globalTopic.title,
-          deck,
+          // Asosiy til belgilanadi — server slayd matnini qolgan tillarga fonda o'giradi.
+          { ...deck, primaryLanguage: contentLanguage },
           buildPreparedContentMeta(globalTopic),
         );
         pushAppNotification({
@@ -435,8 +516,8 @@ export default function PresentationMaterials() {
       if (!built.size) {
         throw new Error('empty-pptx');
       }
-      const deckMarker = savedDeckId ? deckFileMarker(savedDeckId) : null;
-      const file = deckMarker ? withDeckMarker(built, deckMarker) : built;
+      const pcId = savedDeckId ? preparedContentNumericId(savedDeckId) : null;
+      const file = pcId ? withDeckMarker(built, deckMarker(pcId, contentLanguage)) : built;
 
       const shortTopic =
         [globalTopic.id, globalTopic.title].filter(Boolean).join(' — ').slice(0, 240) || topicTitle;
@@ -447,7 +528,12 @@ export default function PresentationMaterials() {
         context: globalTopic,
       });
       const rows = await loadItems();
-      const newIdx = created?.id != null ? rows.findIndex((r) => r.id === created.id) : 0;
+      // Lightbox ko'rinadigan ro'yxat bo'yicha ishlaydi (tilsiz nusxalar chiqarilgan).
+      const shown = rows.filter((r) => {
+        const marker = parseDeckMarker(r.file_name);
+        return !marker || presentationItemLanguage(r) === language;
+      });
+      const newIdx = created?.id != null ? shown.findIndex((r) => r.id === created.id) : 0;
       if (newIdx >= 0) setLightboxIndex(newIdx);
     } catch (e) {
       const detail = apiErrorMessage(e, t('presentation.errorAiHint'), language);
@@ -461,6 +547,14 @@ export default function PresentationMaterials() {
   const handleDelete = async (id: number) => {
     if (!window.confirm(t('presentation.confirmDelete'))) return;
     try {
+      // AI taqdimot o'chirilsa — uning barcha til nusxalari ham o'chadi,
+      // aks holda qolgan nusxadan shu tilda qaytadan yasalib qolardi.
+      const target = items.find((i) => i.id === id);
+      const marker = target ? parseDeckMarker(target.file_name) : null;
+      const siblings = marker
+        ? items.filter((i) => parseDeckMarker(i.file_name)?.pcId === marker.pcId && i.id !== id && i.can_delete)
+        : [];
+      for (const sibling of siblings) await deletePresentation(sibling.id);
       await deletePresentation(id);
       await loadItems();
       setLightboxIndex(null);
@@ -573,19 +667,50 @@ export default function PresentationMaterials() {
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-slate-300" size={36} />
         </div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length + pendingGroups.length === 0 ? (
         <div className="mx-auto max-w-sm px-4 py-16 text-center">
           <Presentation size={22} className="mx-auto mb-3 text-slate-300" />
           <p className="text-[13px] leading-relaxed text-slate-500">{t('presentation.empty')}</p>
         </div>
       ) : (
         <div className="space-y-2">
-          <StaffSectionLabel count={items.length}>
+          <StaffSectionLabel count={visibleItems.length + pendingGroups.length}>
             {t('presentation.topicVersions')}
           </StaffSectionLabel>
           <p className="text-[12.5px] text-slate-400">{t('presentation.topicVersionsHint')}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-          {items.map((item, idx) => (
+          {pendingGroups.map((group) => {
+            const failed = variantState[`${group.pcId}:${language}`] === 'failed';
+            return (
+              <div
+                key={`pending-${group.pcId}`}
+                role="status"
+                className="relative flex flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.06]"
+              >
+                <div className="relative flex aspect-video flex-col items-center justify-center gap-2 bg-sky-50/60 text-sky-700">
+                  {failed ? <Languages size={28} className="text-slate-300" /> : <Loader2 size={26} className="animate-spin" />}
+                  <span className="px-3 text-center text-[12px] font-semibold">
+                    {failed ? t('presentation.variantFailed') : t('common.translating')}
+                  </span>
+                </div>
+                <div className="p-3">
+                  {failed ? (
+                    <button
+                      type="button"
+                      onClick={() => retryVariant(group.pcId)}
+                      className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-sky-700 hover:text-sky-900"
+                    >
+                      <RefreshCw size={13} />
+                      {t('common.retry')}
+                    </button>
+                  ) : (
+                    <p className="text-[11px] leading-relaxed text-slate-400">{t('presentation.variantPreparing')}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {visibleItems.map((item, idx) => (
             <motion.div
               key={item.id}
               layout
@@ -625,9 +750,9 @@ export default function PresentationMaterials() {
       )}
 
       <AnimatePresence>
-        {lightboxIndex !== null && items[lightboxIndex] && (
+        {lightboxIndex !== null && visibleItems[lightboxIndex] && (
           <PresentationLightbox
-            items={items}
+            items={visibleItems}
             index={lightboxIndex}
             onClose={() => setLightboxIndex(null)}
             onIndexChange={setLightboxIndex}

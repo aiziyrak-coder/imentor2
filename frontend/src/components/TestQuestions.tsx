@@ -1,4 +1,3 @@
-import { translatePreparedContent } from '../utils/preparedContentStore';
 import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
 import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import {
@@ -42,7 +41,10 @@ import StaffPageLayout from './staff/StaffPageLayout';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffLoading from './staff/StaffLoading';
 import StaffPanel from './staff/StaffPanel';
-import { isTopicContextComplete } from '../utils/syllabusTopicContext';
+import TranslationGate from './staff/TranslationGate';
+import { useTranslatedPayload } from '../i18n/useTranslatedPayload';
+import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
+import { pushAppNotification } from '../utils/notifications';
 import {
   STAFF_HEADING,
   staffBtnGhost,
@@ -144,6 +146,29 @@ function writeStoredTeacherSid(topic: string, sid: string): void {
   }
 }
 
+/** Jonli sessiya qaysi Baza versiyasidan boshlangan — mavzuga qaytilganda
+ * sessiya shu versiya bilan tiklanadi. */
+function teacherSidVersionKey(sid: string): string {
+  return `${TEACHER_SID_BY_TOPIC}:ver:${sid}`;
+}
+
+function readStoredSidVersion(sid: string): string | null {
+  try {
+    return sessionStorage.getItem(teacherSidVersionKey(sid));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSidVersion(sid: string, versionId: string | null): void {
+  try {
+    if (versionId) sessionStorage.setItem(teacherSidVersionKey(sid), versionId);
+    else sessionStorage.removeItem(teacherSidVersionKey(sid));
+  } catch {
+    /* ignore */
+  }
+}
+
 function clearStoredTeacherSid(topic: string): void {
   try {
     sessionStorage.removeItem(teacherSidStorageKey(topic));
@@ -181,15 +206,10 @@ function tryReuseTeacherSessionId(data: TestSession): string | null {
   if (doc.questions.length !== data.questions.length) return null;
   // Saqlangan sessiya talabalar ko'rinishida bo'lishi mumkin (to'g'ri javobsiz) —
   // shuning uchun savol/variant matnlari bo'yicha solishtiramiz.
-  const storedFp = questionsFingerprint(
-    (doc.questions as Array<TestQuestion | StudentTestQuestion>).map((q) => ({
-      question: q.question,
-      options: q.options,
-    })),
-  );
-  const freshFp = questionsFingerprint(
-    data.questions.map((q) => ({ question: q.question, options: q.options })),
-  );
+  // To'g'ri javob indeksi ham solishtiriladi — kalit o'zgargan bo'lsa eski
+  // sessiya qayta ishlatilmaydi (ilgari indeks olib tashlanib solishtirilardi).
+  const storedFp = questionsFingerprint(doc.questions as Array<TestQuestion | StudentTestQuestion>);
+  const freshFp = questionsFingerprint(data.questions);
   if (storedFp !== freshFp) return null;
   return stored;
 }
@@ -233,11 +253,17 @@ export default function TestQuestions() {
   const studentSessionId = (queryParams.get('sid') || queryParams.get('id') || '').trim();
 
   const [topic, setTopic] = useState(globalTopic ? globalTopic.title : '');
-  const [loading, setLoading] = useState(false);
+  /** Qaysi mavzu uchun test yaratilmoqda — mavzu almashsa natija o'z
+   *  mavzusiga saqlanadi, boshqa mavzu sahifasiga tushmaydi. */
+  const [generatingKey, setGeneratingKey] = useState<string | null>(null);
+  const topicKey = topicContextKey(globalTopic) || topic.trim();
+  const topicKeyRef = useRef(topicKey);
+  topicKeyRef.current = topicKey;
+  const loading = generatingKey !== null && generatingKey === topicKey;
+  const busyElsewhere = generatingKey !== null && generatingKey !== topicKey;
   const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [versions, setVersions] = useState<PreparedContentSummary[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
-  const [translating, setTranslating] = useState(false);
   const [viewLang, setViewLang] = useState<AppLanguage>(language);
 
   const generationDomain = useMemo(
@@ -255,35 +281,7 @@ export default function TestQuestions() {
     setViewLang(language);
   }, [language]);
 
-  const availableTestLangs = useMemo<AppLanguage[]>(() => {
-    if (!testSession) return [];
-    const primary = testSession.primaryLanguage || language;
-    const langs: AppLanguage[] = ['uz', 'ru', 'en'];
-    return langs;
-  }, [testSession, language]);
-
-  const selectTestLanguage = async (target: AppLanguage) => {
-    if (!testSession || translating) return;
-    if (target === (testSession.primaryLanguage || language) || testSession.translations?.[target]) {
-      setViewLang(target); return;
-    }
-    if (!activeVersionId) return;
-    setTranslating(true);
-    try {
-      const translated = await translatePreparedContent<TestSession>(activeVersionId, target);
-      setTestSession(translated);
-      setViewLang(target);
-    } catch (err) { setError(messageFromAiError(err, t('test.errorGenerate'), language)); }
-    finally { setTranslating(false); }
-  };
-
-  const displayedTest = useMemo(() => {
-    if (!testSession) return null;
-    const primary = testSession.primaryLanguage || language;
-    if (viewLang === primary) return testSession;
-    const translated = testSession.translations?.[viewLang];
-    return translated ? { ...testSession, ...translated } : testSession;
-  }, [testSession, viewLang, language]);
+  const availableTestLangs: AppLanguage[] = ['uz', 'ru', 'en'];
 
   const refreshVersions = React.useCallback(() => {
     const lookup = globalTopic ?? topic;
@@ -333,8 +331,9 @@ export default function TestQuestions() {
       `${window.location.origin}${window.location.pathname}?mode=student&sid=${encodeURIComponent(sid)}`
     );
     setSubmissions([]);
-    setShowAnalysis(false);
+    setShowQuestions(true);
     writeStoredTeacherSid(data.topic, sid);
+    writeStoredSidVersion(sid, activeVersionId);
     return sid;
   };
 
@@ -343,7 +342,8 @@ export default function TestQuestions() {
   const [joinUrl, setJoinUrl] = useState('');
   const [joinQrDataUrl, setJoinQrDataUrl] = useState('');
   const [submissions, setSubmissions] = useState<TestSubmissionDoc[]>([]);
-  const [showAnalysis, setShowAnalysis] = useState(false);
+  /** true — savollar (tahlil bilan), false — talabalar natijalari jadvali. */
+  const [showQuestions, setShowQuestions] = useState(true);
   const [downloadingKeyPdf, setDownloadingKeyPdf] = useState(false);
   const [downloadingResultsPdf, setDownloadingResultsPdf] = useState(false);
   const [sessionClosed, setSessionClosed] = useState(false);
@@ -376,6 +376,25 @@ export default function TestQuestions() {
   // Bu ko'rsatkichsiz o'qituvchi bo'sh izohlarni ko'rib "ishlamayapti" deb
   // o'ylaydi — aslida hali tayyorlanayotgan bo'ladi.
   const [enriching, setEnriching] = useState(false);
+
+  // Test interfeys tilida (yoki til tugmasida tanlangan tilda) ko'rsatiladi.
+  // Tarjima tayyor bo'lmasa savollar o'rnida "Tarjima qilinmoqda…" turadi —
+  // ilgari bunday holda asl tildagi savollar indamay ko'rsatilardi.
+  // Fon "enrich" (variant izohlari) tugaguncha tarjima so'ralmaydi: u matnni
+  // o'zgartiradi va server tarjimani baribir qaytadan qiladi.
+  const {
+    view: displayedTest,
+    status: rawTestStatus,
+    retry: retryTestTranslation,
+  } = useTranslatedPayload(testSession, enriching ? null : activeVersionId, viewLang, (next) =>
+    setTestSession(next),
+  );
+  const testStatus = rawTestStatus === 'unsaved' && enriching ? 'translating' : rawTestStatus;
+  const teacherSessionIdRef = useRef('');
+  const sessionClosedRef = useRef(false);
+
+  teacherSessionIdRef.current = teacherSessionId;
+  sessionClosedRef.current = sessionClosed;
 
   const mapServerSubmissions = React.useCallback(
     (rows: Array<{ firstName: string; lastName: string; answers: number[]; submittedAt: number }>) =>
@@ -575,16 +594,51 @@ export default function TestQuestions() {
     if (isStudentMode || !topic.trim()) return;
     const lookup = globalTopic ?? topic;
     let mounted = true;
-    // Sahifa TOZA ochiladi — avval yaratilgan test avtomatik ochilmaydi
-    // (QR sessiyasi ham qayta tiklanmaydi). Bazadan tanlab ochiladi.
+    setTestSession(null);
+    setTeacherSessionId('');
+    setJoinUrl('');
+    setSubmissions([]);
+    setSessionClosed(false);
+    setClosedAtMs(null);
+    setActiveVersionId(null);
+    setShowQuestions(true);
+    setEnriching(false);
+    setError(null);
+    // Sahifa toza ochiladi — avval yaratilgan test avtomatik ochilmaydi.
+    // ISTISNO: shu mavzuda hali ochiq (yoki yaqinda yopilgan) jonli sessiya
+    // bo'lsa, u tiklanadi. Ilgari mavzu almashtirilsa QR va natijalar
+    // butunlay yo'qolardi va o'qituvchi sessiyani yakunlay olmasdi.
     (async () => {
       const list = await listPreparedForTopicSynced('test', lookup);
       if (!mounted) return;
       setVersions(list);
-      setTestSession(null);
-      setTeacherSessionId('');
-      setJoinUrl('');
-      setActiveVersionId(null);
+
+      const sid = readStoredTeacherSid(topic);
+      const doc = sid ? loadLocalSession(sid) : null;
+      if (!sid || !doc) return;
+      const remote = await fetchLiveTestSessionFromServer(sid).catch(() => null);
+      if (!mounted || !remote) return;
+      const closedAt = remote.closedAtMs ?? null;
+      if (remote.isClosed && (!closedAt || Date.now() - closedAt >= TEACHER_SESSION_AUTO_HIDE_MS)) {
+        clearStoredTeacherSid(topic);
+        return;
+      }
+      const versionId = readStoredSidVersion(sid);
+      const fromDb = versionId ? await loadPreparedByIdSynced<TestSession>('test', versionId) : null;
+      if (!mounted) return;
+      const restored: TestSession =
+        fromDb ?? ({ topic: doc.topic, questions: doc.questions as TestQuestion[] } as TestSession);
+      setTestSession(restored);
+      setViewLang(language);
+      setActiveVersionId(fromDb ? versionId : null);
+      setTeacherSessionId(sid);
+      setSessionClosed(Boolean(remote.isClosed));
+      setClosedAtMs(closedAt);
+      setJoinUrl(
+        `${window.location.origin}${window.location.pathname}?mode=student&sid=${encodeURIComponent(sid)}`,
+      );
+      // Ochiq sessiyaga qaytildi — o'qituvchi odatda natijalarni kuzatadi.
+      setShowQuestions(false);
     })();
     return () => {
       mounted = false;
@@ -681,7 +735,7 @@ export default function TestQuestions() {
   };
 
   const handleBackToQuestions = () => {
-    setShowAnalysis(true);
+    setShowQuestions(true);
   };
 
   /** Yagona, izchil joylashgan almashtirish tugmasi — avval bu tugma faqat
@@ -692,7 +746,7 @@ export default function TestQuestions() {
    * tugma ikkala yo'nalishda ham ishlaydi va holatga qarab yorlig'i
    * o'zgaradi. */
   const handleToggleResultsView = () => {
-    setShowAnalysis((prev) => !prev);
+    setShowQuestions((prev) => !prev);
   };
 
   useEffect(() => {
@@ -704,6 +758,10 @@ export default function TestQuestions() {
    * shunchaki savollarni ko'rmoqchi bo'lganda ham serverda sessiya paydo
    * bo'lardi. Endi sessiya alohida tugma bilan boshlanadi. */
   const handleSelectVersion = (id: string) => {
+    if (teacherSessionId && !sessionClosed && id !== activeVersionId) {
+      if (!window.confirm(t('test.regenerateConfirm'))) return;
+      clearStoredTeacherSid(topic);
+    }
     void (async () => {
       const data = await loadPreparedByIdSynced<TestSession>('test', id);
       if (!data) {
@@ -711,14 +769,14 @@ export default function TestQuestions() {
         return;
       }
       setTestSession(data);
-      setViewLang(data.primaryLanguage || language);
+      setViewLang(language);
       setTeacherSessionId('');
       setJoinUrl('');
       setSubmissions([]);
       setSessionClosed(false);
       setClosedAtMs(null);
       setActiveVersionId(id);
-      setShowAnalysis(false);
+      setShowQuestions(true);
       setError(null);
     })();
   };
@@ -759,7 +817,7 @@ export default function TestQuestions() {
 
   const handleGenerate = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!topic.trim()) return;
+    if (!topic.trim() || generatingKey !== null) return;
 
     // Test fanga bog'lanishi shart — fan/mavzu tanlanmagan bo'lsa yaratishga yo'l qo'ymaymiz
     if (!globalTopic?.subjectCode?.trim()) {
@@ -767,30 +825,38 @@ export default function TestQuestions() {
       return;
     }
 
-    if (testSession && teacherSessionId) {
+    if (testSession && teacherSessionId && !sessionClosed) {
       const ok = window.confirm(t('test.regenerateConfirm'));
       if (!ok) return;
     }
 
-    setLoading(true);
+    // Generatsiya boshlangan mavzu konteksti qotiriladi.
+    const startKey = topicKey;
+    const startTopic = topic;
+    const startContext = globalTopic;
+    const subjectCode = startContext.subjectCode;
+    const meta = buildPreparedContentMeta(startContext);
+    const stillHere = () => topicKeyRef.current === startKey;
+
+    setGeneratingKey(startKey);
     setError(null);
     const enrichToken = Symbol('test-enrich');
     enrichTokenRef.current = enrichToken;
     try {
       const count = DEFAULT_TEST_QUESTION_COUNT;
       // Asosiy til = UI tili (header dagi uz/ru/en). Qolgan 2 til — fonda tarjima.
-      const contentLanguage = contentLanguageFor(globalTopic, language);
-      const lectureText = await loadLatestLectureText(globalTopic ?? topic);
+      const contentLanguage = contentLanguageFor(startContext, language);
+      const lectureText = await loadLatestLectureText(startContext ?? startTopic);
       const scope = await hydrateGenerationScope({
-        topic,
-        context: globalTopic,
+        topic: startTopic,
+        context: startContext,
         lectureText,
       });
       const data = await aiService.generateTests(
-        topic,
+        startTopic,
         count,
         contentLanguage,
-        globalTopic.subjectCode,
+        subjectCode,
         DEFAULT_TEST_DIFFICULTY,
         scope,
         undefined,
@@ -798,57 +864,95 @@ export default function TestQuestions() {
         // bu izohni almashtiradi — shuning uchun bu yerda qisqasi yetadi.
         true,
       );
-      setTestSession(data);
-      setViewLang(data.primaryLanguage || contentLanguage);
-      const sid = await setupTeacherLiveSession(data);
-      if (!sid) throw new Error('live-session-missing');
-      setLoading(false);
+      const here = stillHere();
+      if (here) {
+        // Yangi test — jonli sessiya AVTOMATIK boshlanmaydi (Bazadan ochilgan
+        // versiyadagidek "Sessiyani boshlash" tugmasi bilan). Ilgari har
+        // generatsiya serverda QR sessiya ochardi.
+        if (teacherSessionId && !sessionClosed) clearStoredTeacherSid(startTopic);
+        setTestSession(data);
+        setViewLang(data.primaryLanguage || contentLanguage);
+        setTeacherSessionId('');
+        setJoinUrl('');
+        setSubmissions([]);
+        setSessionClosed(false);
+        setClosedAtMs(null);
+        setShowQuestions(true);
+        setActiveVersionId(null);
+      }
+      setGeneratingKey(null);
 
-      const meta = buildPreparedContentMeta(globalTopic);
       // Asosiy tildagi test DARHOL bazaga yoziladi. Avval saqlash faqat fon
       // "enrich" (tarjima + manbalar) tugagach bo'lardi — o'qituvchi shu orada
       // sahifadan chiqsa test Bazada umuman qolmasdi.
       let savedId: string | null = null;
       try {
-        savedId = await savePreparedContent('test', topic, data, meta);
-        const firstList = await listPreparedForTopicSynced('test', globalTopic ?? topic);
-        setVersions(firstList);
-        setActiveVersionId(savedId ?? firstList[0]?.id ?? null);
+        savedId = await savePreparedContent('test', startTopic, data, meta);
+        if (stillHere()) {
+          const firstList = await listPreparedForTopicSynced('test', startContext ?? startTopic);
+          if (stillHere() && enrichTokenRef.current === enrichToken) {
+            setVersions(firstList);
+            setActiveVersionId(savedId ?? firstList[0]?.id ?? null);
+          }
+        } else {
+          pushAppNotification({
+            title: t('common.doneTitle'),
+            body: t('common.readyOtherTopic', { title: startTopic }),
+            titleKey: 'common.doneTitle',
+            bodyKey: 'common.readyOtherTopic',
+            bodyParams: { title: startTopic },
+            topicSyllabusId: startContext?.syllabusId,
+            level: 'success',
+          });
+        }
       } catch (saveErr) {
         console.error('Test save failed', saveErr);
-        setError(t('common.saveFailedKeepWork'));
+        if (stillHere()) setError(t('common.saveFailedKeepWork'));
       }
 
-      setEnriching(true);
+      if (stillHere()) setEnriching(true);
       void (async () => {
         try {
           // Fonda: qolgan 2 tilga tarjima + kitob manbalari
-          const enriched = await aiService.enrichTestSession(
-            data,
-            contentLanguage,
-            globalTopic.subjectCode,
-          );
-          if (enrichTokenRef.current !== enrichToken) return;
-          setTestSession(enriched);
+          const enriched = await aiService.enrichTestSession(data, contentLanguage, subjectCode);
           // Bazada NUSXA ko'paymasligi uchun yangi yozuv emas, mavjudi yangilanadi.
+          // Bu mavzu almashtirilgan bo'lsa ham bajariladi — test o'z mavzusiga yoziladi.
           const patched = savedId ? await updatePreparedContentPayload(savedId, enriched) : false;
           if (!patched) {
-            await savePreparedContent('test', topic, enriched, meta);
+            savedId = await savePreparedContent('test', startTopic, enriched, meta);
           }
-          await setupTeacherLiveSession(enriched, sid);
+          // Ekran faqat shu test hali ochiq bo'lsa yangilanadi.
+          if (enrichTokenRef.current !== enrichToken || !stillHere()) return;
+          setTestSession(enriched);
+          // O'qituvchi orada jonli sessiyani boshlagan bo'lsa — savollar
+          // matni (izohlar/tarjimalar) yangilanadi, LEKIN sessiya qayta
+          // ochilmaydi va natijalar tozalanmaydi. Yopilgan sessiyaga tegilmaydi.
+          const liveSid = teacherSessionIdRef.current;
+          if (liveSid && !sessionClosedRef.current) {
+            const localDoc = loadLocalSession(liveSid);
+            const createdAt = localDoc?.createdAt ?? Date.now();
+            saveLocalSession(liveSid, { topic: enriched.topic, questions: enriched.questions, createdAt });
+            await syncLiveTestSessionToServer(liveSid, {
+              topic: enriched.topic,
+              questions: enriched.questions,
+              createdAt,
+              subjectCode,
+            });
+          }
         } catch (enrichErr) {
           console.warn('Test enrich failed — primary-language test already saved', enrichErr);
         }
-        if (enrichTokenRef.current !== enrichToken) return;
+        if (enrichTokenRef.current !== enrichToken || !stillHere()) return;
         setEnriching(false);
-        const nextList = await listPreparedForTopicSynced('test', globalTopic ?? topic);
+        const nextList = await listPreparedForTopicSynced('test', startContext ?? startTopic);
+        if (enrichTokenRef.current !== enrichToken || !stillHere()) return;
         setVersions(nextList);
         setActiveVersionId(savedId ?? nextList[0]?.id ?? null);
       })();
     } catch (err) {
       console.error('Test generation error:', err);
-      setError(messageFromAiError(err, t('test.errorGenerate'), language));
-      setLoading(false);
+      if (stillHere()) setError(messageFromAiError(err, t('test.errorGenerate'), language));
+      setGeneratingKey(null);
     }
   };
 
@@ -878,10 +982,10 @@ export default function TestQuestions() {
   };
 
   const handleDownloadKeyPdf = async () => {
-    if (!testSession) return;
+    if (!displayedTest || testStatus !== 'ready') return;
     setDownloadingKeyPdf(true);
     try {
-      await downloadTestAnswerKeyPdf(testSession, language);
+      await downloadTestAnswerKeyPdf(displayedTest, viewLang);
     } catch (err) {
       console.error('Answer key PDF error:', err);
       setError(t('test.errorPdf'));
@@ -894,15 +998,16 @@ export default function TestQuestions() {
     if (!testSession || submissions.length === 0) return;
     setDownloadingResultsPdf(true);
     try {
+      // Savollar va sarlavha ekrandagi tilda (tarjima tayyor bo'lsa).
       await downloadTestResultsPdf(
-        testSession,
+        displayedTest && testStatus === 'ready' ? displayedTest : testSession,
         submissions.map((s) => ({
           firstName: s.firstName,
           lastName: s.lastName,
           answers: s.answers,
           submittedAt: s.submittedAt,
         })),
-        language,
+        displayedTest && testStatus === 'ready' ? viewLang : language,
       );
     } catch (err) {
       console.error('Results PDF error:', err);
@@ -1014,6 +1119,11 @@ export default function TestQuestions() {
       setStudentLoading(false);
     }
   };
+
+  // Hook shartli `return`dan OLDIN chaqiriladi (React hook qoidasi).
+  const staffTopic = useLocalizedTopic(
+    globalTopic && isTopicContextComplete(globalTopic) ? globalTopic : null,
+  );
 
   if (isStudentMode) {
     return (
@@ -1185,10 +1295,6 @@ export default function TestQuestions() {
     );
   }
 
-  const staffTopic = useLocalizedTopic(
-    globalTopic && isTopicContextComplete(globalTopic) ? globalTopic : null,
-  );
-
   return (
     <StaffPageLayout
       title={t('nav.tests')}
@@ -1204,7 +1310,7 @@ export default function TestQuestions() {
         topicLabel={t('test.topicLabel')}
         topicPlaceholder={t('test.topicPlaceholder')}
         createLabel={t('test.create', { count: DEFAULT_TEST_QUESTION_COUNT })}
-        loading={loading}
+        loading={loading || busyElsewhere}
         onCreate={() => void handleGenerate()}
         lockTopicFromSyllabus={Boolean(staffTopic)}
         hint={`${t('test.heroSubtitle')} ${t(
@@ -1222,6 +1328,9 @@ export default function TestQuestions() {
         hasUnsavedActiveContent={Boolean(testSession)}
       />
 
+      {busyElsewhere && (
+        <p className="text-[12.5px] font-medium text-slate-500">{t('common.busyOtherTopic')}</p>
+      )}
       {error && <StaffErrorAlert message={error} />}
       {loading && (
         <StaffLoading
@@ -1233,7 +1342,7 @@ export default function TestQuestions() {
         />
       )}
 
-        {testSession && displayedTest && !loading && (
+        {testSession && !loading && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1243,9 +1352,11 @@ export default function TestQuestions() {
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 {/* Sarlavha interfeys tilida — sessiyada asl (o'zbekcha) matn turadi. */}
                 <h2 className={`text-xl font-bold ${STAFF_HEADING}`}>
-                  {staffTopic && staffTopic.title && displayedTest.topic === globalTopic?.title
+                  {staffTopic?.translating
+                    ? t('common.translating')
+                    : staffTopic && staffTopic.title
                     ? staffTopic.title
-                    : displayedTest.topic}
+                    : displayedTest?.topic || testSession.topic}
                 </h2>
                 <div className="flex flex-wrap gap-2 shrink-0">
                   {availableTestLangs.length > 1 && (
@@ -1254,18 +1365,21 @@ export default function TestQuestions() {
                         <button
                           key={l}
                           type="button"
-                          disabled={translating || !activeVersionId}
-                          onClick={() => void selectTestLanguage(l)}
+                          aria-pressed={viewLang === l}
+                          onClick={() => setViewLang(l)}
                           className={`px-3 py-1.5 text-xs font-semibold uppercase ${
                             viewLang === l ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 hover:text-slate-900'
                           }`}
                         >
-                          {translating ? "…" : l}
+                          {l}
                         </button>
                       ))}
                     </div>
                   )}
-                  <StaffToolbarButton onClick={() => void handleDownloadKeyPdf()} disabled={downloadingKeyPdf}>
+                  <StaffToolbarButton
+                    onClick={() => void handleDownloadKeyPdf()}
+                    disabled={downloadingKeyPdf || testStatus !== 'ready'}
+                  >
                     {downloadingKeyPdf ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
                     {t('test.downloadKeyPdf')}
                   </StaffToolbarButton>
@@ -1358,14 +1472,14 @@ export default function TestQuestions() {
                   <button
                     type="button"
                     onClick={handleToggleResultsView}
-                    className={`rounded-lg px-4 py-2 text-[13.5px] font-semibold transition-colors ${!showAnalysis ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.08] hover:text-slate-900'}`}
+                    className={`rounded-lg px-4 py-2 text-[13.5px] font-semibold transition-colors ${!showQuestions ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.08] hover:text-slate-900'}`}
                   >
-                    {!showAnalysis ? (
+                    {!showQuestions ? (
                       <Brain size={16} className="inline mr-1" />
                     ) : (
                       <Users size={16} className="inline mr-1" />
                     )}
-                    {!showAnalysis ? t('test.viewAnalysis') : t('test.viewResults')}
+                    {!showQuestions ? t('test.viewAnalysis') : t('test.viewResults')}
                   </button>
                   {!sessionClosed && (
                     <button
@@ -1382,7 +1496,7 @@ export default function TestQuestions() {
               )}
             </StaffPanel>
 
-            {!showAnalysis ? (
+            {!showQuestions && teacherSessionId ? (
               <StaffPanel className="overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-900/[0.07] px-4 py-3">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -1454,7 +1568,9 @@ export default function TestQuestions() {
                 {/* Kartochka Keys/Ma'ruza bo'limlari bilan bir xil `StaffPanel` —
                     ilgari bu yerda o'ziga xos oq `rounded-3xl` kartochkalar bo'lib,
                     Test bo'limi boshqa ilovadek ko'rinardi. */}
-                {displayedTest.questions.map((q, i) => (
+                <TranslationGate status={testStatus} onRetry={retryTestTranslation}>
+                <div className="space-y-6">
+                {(displayedTest?.questions || []).map((q, i) => (
                   <StaffPanel key={i} large className="p-5 sm:p-7 space-y-5">
                     <div className="flex items-start gap-4">
                       <div className={staffIndexBadge}>{i + 1}</div>
@@ -1503,9 +1619,11 @@ export default function TestQuestions() {
                     </div>
                   </StaffPanel>
                 ))}
-                {displayedTest.references && displayedTest.references.length > 0 && (
+                {displayedTest?.references && displayedTest.references.length > 0 && (
                   <MedicalReferencesList references={displayedTest.references} />
                 )}
+                </div>
+                </TranslationGate>
               </div>
             )}
 
@@ -1514,7 +1632,7 @@ export default function TestQuestions() {
                 <button
                   type="button"
                   onClick={() => void handleGenerate()}
-                  disabled={loading}
+                  disabled={loading || busyElsewhere}
                   className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2.5 text-[13.5px]"
                 >
                   {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
@@ -1524,7 +1642,7 @@ export default function TestQuestions() {
                 <button
                   type="button"
                   onClick={() => void handleGenerate()}
-                  disabled={loading}
+                  disabled={loading || busyElsewhere}
                   className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 px-4 py-2.5 text-[13.5px]"
                 >
                   {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}

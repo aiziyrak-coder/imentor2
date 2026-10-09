@@ -12,6 +12,8 @@ export type StaffTopicInfo = {
   type: SyllabusTopicType;
   subjectName?: string;
   variantLabel?: string;
+  /** Mavzu/fan nomi interfeys tiliga o'girilmoqda — asl nom ko'rsatilmaydi. */
+  translating?: boolean;
 };
 
 type Props = {
@@ -45,7 +47,7 @@ export default function StaffTopicHeader({ topic, hint, actions, children }: Pro
   const { openSyllabus } = useContext(AppNavigationContext);
   const lessonLabel = topic ? formatTopicLessonLabel(topic.type, topic.id, t) : '';
 
-  const crumbs = [topic?.subjectName, lessonLabel].filter(Boolean) as string[];
+  const crumbs = [topic?.translating ? '' : topic?.subjectName, lessonLabel].filter(Boolean) as string[];
 
   return (
     <div className="space-y-4 border-b border-slate-900/10 pb-5">
@@ -64,7 +66,14 @@ export default function StaffTopicHeader({ topic, hint, actions, children }: Pro
               sarlavhasidan ham qalinroq ko'rinardi. */}
           {topic && (
             <h2 className="mt-1.5 max-w-[78ch] text-[15px] font-semibold leading-snug text-slate-800 sm:text-[16px]">
-              {stripRedundantTopicNumber(topic.title, topic.id)}
+              {topic.translating ? (
+                <span role="status" className="inline-flex items-center gap-2 text-[13px] font-medium text-sky-700">
+                  <span className="inline-block h-[0.9em] w-72 max-w-full animate-pulse rounded bg-slate-200" />
+                  {t('common.translating')}
+                </span>
+              ) : (
+                stripRedundantTopicNumber(topic.title, topic.id)
+              )}
             </h2>
           )}
           {/* Mavzu tanlangach o'qituvchi yana SHU bo'limga qaytadi (App: lastModuleRef). */}

@@ -214,6 +214,9 @@ export default function PdfSlideViewer({ fileUrl }: { fileUrl: string }) {
       if (blackout) {
         if (k === 'b' || e.key === 'Escape') {
           e.preventDefault();
+          // Esc faqat qora ekranni o'chirsin — taqdimot oynasini yopib
+          // yubormasin (u ham window'da Esc'ni kutadi).
+          e.stopPropagation();
           setBlackout(false);
         }
         return;
@@ -235,8 +238,9 @@ export default function PdfSlideViewer({ fileUrl }: { fileUrl: string }) {
         clearDrawing();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Capture fazasi: slayd ko'ruvchi tugmalarni ota oynadan OLDIN oladi.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [blackout, goPrev, goNext, clearDrawing]);
 
   const toggleFullscreen = () => {

@@ -10,7 +10,10 @@ savollardan qisqa bo'lishi mumkin. Shu holatlarda ham 500 emas, mantiqiy
 natija chiqishi kerak.
 """
 
+from types import SimpleNamespace
+
 from app.services.live_test_service import (
+    answer_key_locked,
     build_wrong_answers,
     is_complete_draft,
     score_submission,
@@ -133,3 +136,26 @@ class TestIsCompleteDraft:
 
     def test_butun_son_emas(self):
         assert is_complete_draft(["0", 1, 2], 3) is False
+
+
+class TestAnswerKeyLocked:
+    """Topshiriq bor yoki yopilgan sessiyada javob kaliti o'zgarmasligi kerak."""
+
+    def session(self, questions, closed=False, submissions=()):
+        return SimpleNamespace(
+            is_closed=closed, submissions=list(submissions), payload={"questions": questions}
+        )
+
+    def test_bosh_sessiyada_ozgartirish_mumkin(self):
+        assert answer_key_locked(self.session([q(0)]), [q(1)]) is False
+
+    def test_topshiriq_bor_kalit_ozgarsa_taqiqlanadi(self):
+        assert answer_key_locked(self.session([q(0)], submissions=[object()]), [q(1)]) is True
+
+    def test_yopilgan_sessiyada_variant_ozgarsa_taqiqlanadi(self):
+        changed = q(0, options=("a", "b", "c", "X"))
+        assert answer_key_locked(self.session([q(0)], closed=True), [changed]) is True
+
+    def test_faqat_izoh_qoshilsa_ruxsat(self):
+        enriched = {**q(0), "explanation": "Tahlil", "translations": {"ru": {}}}
+        assert answer_key_locked(self.session([q(0)], submissions=[object()]), [enriched]) is False

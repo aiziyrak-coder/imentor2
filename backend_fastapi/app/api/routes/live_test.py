@@ -71,6 +71,11 @@ def upsert_live_test(
     existing = _get_session(db, key)
     if existing and existing.owner_key != owner:
         raise HTTPException(status_code=409, detail="Session key already in use.")
+    if existing is not None and svc.answer_key_locked(existing, payload.questions):
+        raise HTTPException(
+            status_code=409,
+            detail="Answer key is locked: the session is closed or already has submissions.",
+        )
 
     created_ms = payload.created_at_ms
     if created_ms is None:

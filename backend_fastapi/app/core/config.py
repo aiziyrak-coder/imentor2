@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     django_allow_legacy_prepared_content_api: bool = False
 
     django_ai_education_rate: str = "60/hour"
+    # Tarjima: til almashganda bir necha material birdan so'raladi; tayyor tarjima AI'siz qaytadi.
+    django_ai_translate_rate: str = "300/hour"
     django_ai_startup_rate: str = "40/hour"
     django_login_rate: str = "20/minute"
     django_live_test_anon_rate: str = "120/minute"

@@ -13,6 +13,10 @@ export interface AppNotificationEventDetail {
    */
   titleKey?: UiTextKey;
   bodyKey?: UiTextKey;
+  /** `bodyKey` matnidagi o'rinlar ({title}, {subject}...). */
+  bodyParams?: Record<string, string | number>;
+  /** Berilsa — `{title}`/`{subject}` shu fanning tarjimasi bilan JORIY tilda ko'rsatiladi. */
+  topicSyllabusId?: number;
 }
 
 export function pushAppNotification(detail: AppNotificationEventDetail): void {

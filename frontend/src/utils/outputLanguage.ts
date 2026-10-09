@@ -104,3 +104,27 @@ export function strictLanguageDirective(targetLang: AppLanguage): string {
   }
   return base;
 }
+
+const EN_WORDS = /\b(the|is|are|not|no|could|cannot|must|should|file|found|required|invalid|failed|please|too|already|only|this|your|access|denied|error|try|again|session|key|topic|subject|lang)\b/gi;
+const UZ_WORDS = /\b(va|yoki|uchun|bilan|emas|yo['‘’ʻ]q|topilmadi|kerak|mumkin|fayl\w*|ruxsat\w*|mavzu\w*|fan\w*|qayta|urinib|bo['‘’ʻ]l\w*|qil\w*|tanlang|kiring|xato\w*|hajmi|juda|katta|saqlan\w*|o['‘’ʻ]chir\w*|tizim\w*)\b/gi;
+
+/**
+ * Server xabari (`detail`) interfeys tilidami — QISQA matnlar uchun ham.
+ *
+ * Server xabarlari asosan o'zbekcha, ba'zilari inglizcha. Interfeys rus yoki
+ * ingliz tilida bo'lsa, boshqa tildagi xabar ko'rsatilmaydi — o'rniga
+ * chaqiruvchining tarjima qilingan umumiy matni chiqadi.
+ */
+export function textFitsLanguage(text: string, lang: AppLanguage): boolean {
+  const s = (text || '').trim();
+  if (!s) return false;
+  const letters = (s.match(/[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ]/g) || []).length;
+  if (letters < 3) return true; // raqam/kod — tilga bog'liq emas
+  const cyr = cyrillicCharCount(s);
+  if (cyr / letters > 0.5) return lang === 'ru' && !UZ_ONLY_CYRILLIC_LETTERS.test(s);
+  if (lang === 'ru') return false;
+  const en = (s.match(EN_WORDS) || []).length;
+  const uz = (s.match(UZ_WORDS) || []).length + (s.match(/[og]['‘’ʻ]/gi) || []).length;
+  if (lang === 'uz') return uz > 0 && uz >= en;
+  return en > uz;
+}

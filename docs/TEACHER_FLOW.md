@@ -80,6 +80,20 @@ Har bir yuklangan PDF katalogda **alohida fan** bo‘ladi. Fan nomi = fayl nomi 
 | Staff kafedra | `backend_fastapi/app/services/staff_department.py` |
 | Fan API | `backend_fastapi/app/api/routes/syllabus_catalog.py` |
 
+## Interfeys tili va tarjima
+
+O'qituvchiga **hech qachon** boshqa tildagi yoki yarim tarjima matn ko'rsatilmaydi.
+
+| Nima | Qanday |
+|------|--------|
+| Ma'ruza, taqdimot (deck), keys, test | Saqlanganda server qolgan 2 tilga **fonda** tarjima qiladi (`prepared_translation.translate_in_background`). Til almashganda tarjima tayyor bo'lmasa — `TranslationGate` "Tarjima qilinmoqda…" ko'rsatadi va `POST /prepared-content/{id}/translate/{lang}/` so'raydi (qulf: fon ishi kutiladi, AI ikki marta chaqirilmaydi). |
+| Tahrir | Asosiy tildagi matn tahrirlansa tarjimalar eskiradi va fonda qaytadan qilinadi; tarjima tahrirlansa faqat o'sha til yangilanadi (`merge_on_update`). |
+| AI taqdimot fayli (PPTX) | Fayl nomida `--pc{id}-{til}` belgisi. Joriy tildagi nusxa yo'q bo'lsa — deck tarjimasidan brauzerda quriladi va yuklanadi (`presentationDeckVariants.ts`). |
+| AI tarqatma | Har doim 3 tilda; ekranda faqat joriy tildagisi. |
+| Fan / mavzu nomlari | `topics_i18n` / `name_i18n`; tarjima kelguncha nom o'rnida belgi. Fan tanlash va kafedra ro'yxati — `POST /course-syllabuses/translate-names/`. |
+| Server xato xabarlari | Faqat interfeys tilida bo'lsa ko'rsatiladi (`textFitsLanguage`), aks holda tarjima qilingan umumiy matn. |
+| O'qituvchi o'zi yuklagan fayl, YouTube nomi, adabiyot nomlari | O'zgarishsiz (tarjima qilinmaydi). |
+
 ## Qoidalar (qisqa)
 
 1. Yangi UI da **yo‘nalish** bosqichi / select qo‘shmang.

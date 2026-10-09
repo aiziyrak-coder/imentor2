@@ -151,3 +151,8 @@ def throttle_staff_ping(auth: AuthContext = Depends(get_current_auth)) -> None:
 
 def throttle_education_ai(auth: AuthContext = Depends(get_current_auth)) -> None:
     enforce(f"throttle:education_ai:{auth.user.id}", get_settings().django_ai_education_rate)
+
+
+def throttle_translate(auth: AuthContext = Depends(get_current_auth)) -> None:
+    """Material tarjimasi — umumiy AI limitidan alohida (til almashtirish uni yeb qo'ymasin)."""
+    enforce(f"throttle:translate:{auth.user.id}", get_settings().django_ai_translate_rate)

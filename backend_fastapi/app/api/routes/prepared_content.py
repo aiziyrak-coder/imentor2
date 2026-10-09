@@ -11,10 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, require_roles
 from app.core.db import get_db
-from app.core.throttling import throttle_education_ai
-from app.services.case_i18n import invalidate_stale_translations
+from app.core.throttling import throttle_translate
+from app.services.prepared_translation import (
+    TRANSLATABLE_KINDS,
+    merge_on_update,
+    missing_languages,
+    translate_in_background,
+    translate_saved_content,
+)
 from app.models.content import CourseSyllabus, StaffCourseSelection
-from app.models.prepared_content import KIND_CASE, KIND_TEST, PreparedContent
+from app.models.prepared_content import PreparedContent
 from app.schemas.prepared_content import (
     PreparedContentIn,
     PreparedContentLatestOut,
@@ -379,7 +385,10 @@ def create_prepared_content(
     db.commit()
     db.refresh(obj)
 
-    # Translations are generated only when a reader requests a language.
+    # Qolgan tillarga darhol FONDA tarjima — o'qituvchi interfeys tilini
+    # almashtirganda material odatda allaqachon tarjima qilingan bo'ladi.
+    if obj.kind in TRANSLATABLE_KINDS:
+        background.add_task(translate_in_background, obj.id)
     return _out(obj)
 
 
@@ -389,14 +398,13 @@ def translate_prepared_content(
     lang: Literal["uz", "ru", "en"],
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
-    _: None = Depends(throttle_education_ai),
+    _: None = Depends(throttle_translate),
 ) -> PreparedContentOut:
     item = db.get(PreparedContent, pk)
     if item is None or not _can_view_item(item, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
-    if item.kind not in (KIND_CASE, KIND_TEST):
-        raise HTTPException(status_code=400, detail="Only tests and cases can be translated here.")
-    from app.services.prepared_translation import translate_saved_content
+    if item.kind not in TRANSLATABLE_KINDS:
+        raise HTTPException(status_code=400, detail="This material type cannot be translated.")
     translated = translate_saved_content(db, item, lang)
     if not _can_view_item(translated, db, auth):
         raise HTTPException(status_code=404, detail="Topilmadi.")
@@ -423,10 +431,12 @@ def update_prepared_content_payload(
         raise HTTPException(status_code=404, detail="Topilmadi.")
     # Asosiy matn tahrirlangan-u, tarjimalar o'shaligicha qolgan bo'lsa — ular eskirgan:
     # olib tashlanadi; kerakli til tanlanganda qayta tarjima qilinadi (aks holda ruscha nusxa eski matnni ko'rsatardi).
-    refreshed = invalidate_stale_translations(item.kind, item.payload, body.payload)
-    item.payload = refreshed if refreshed is not None else body.payload
+    item.payload = merge_on_update(item.kind, item.payload, body.payload)
     db.commit()
     db.refresh(item)
+    # Matn o'zgargan bo'lsa yetishmay qolgan tillar fonda qayta tarjima qilinadi.
+    if missing_languages(item):
+        background.add_task(translate_in_background, item.id)
     return _out(item)
 
 

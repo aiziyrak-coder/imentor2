@@ -291,6 +291,11 @@ export interface CaseStudySession {
   references?: MedicalReference[];
   keywords?: string[];
   domain?: SubjectDomain;
+  /** Asosiy (yaratilgan) til — `questions` shu tilda. */
+  primaryLanguage?: AppLanguage;
+  /** Server fonda yaratadigan tarjimalar. */
+  translations?: Partial<Record<AppLanguage, { questions?: CaseStudyQuestion[]; topic?: string }>>;
+  i18nSourceHash?: string;
 }
 
 export interface TestQuestion {
@@ -335,6 +340,11 @@ export interface LectureNote {
   /** Server belgilaydi: matn AI javob chegarasida kesilib, chala saqlangan
    * (2026-09-16 dagi 1200 tokenlik cheklov davri). O'qituvchiga ogohlantirish chiqadi. */
   incomplete?: boolean;
+  /** Asosiy (yaratilgan) til — `content` shu tilda. */
+  primaryLanguage?: AppLanguage;
+  /** Server fonda yaratadigan tarjimalar (uz/ru/en). */
+  translations?: Partial<Record<AppLanguage, { topic?: string; content?: string }>>;
+  i18nSourceHash?: string;
 }
 
 
