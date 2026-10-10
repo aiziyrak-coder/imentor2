@@ -523,9 +523,16 @@ def import_rows(
 
 
 def _load_schedule(db: Session) -> list:
+    """Hisobot uchun jadval. Admin hisobotdan chiqargan fanlarning darslari kirmaydi:
+    faqat shunday fan o'tadigan o'qituvchi rektor ro'yxatida 0 bilan qolmasin."""
     from app.models.monitor_schedule import MonitorScheduleEntry
+    from app.services import report_exclusion
 
-    return db.execute(select(MonitorScheduleEntry)).scalars().all()
+    rows = db.execute(select(MonitorScheduleEntry)).scalars().all()
+    excluded = report_exclusion.load(db)
+    if not excluded.subject_names:
+        return rows
+    return [e for e in rows if not excluded.subject_excluded(getattr(e, "subject", ""))]
 
 
 def _effective_from(entry) -> dt.date | None:

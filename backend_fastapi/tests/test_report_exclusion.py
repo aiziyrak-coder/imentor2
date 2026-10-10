@@ -52,3 +52,17 @@ def test_rector_scope_drops_excluded_departments_only():
 def test_no_exclusions_keeps_the_rector_unrestricted():
     with patch("app.services.report_exclusion.load", return_value=rx.Exclusions()):
         assert dean_access.allowed_departments({"departments": []}, db=object()) == []
+
+
+def test_schedule_drops_lessons_of_excluded_subjects():
+    """Faqat chiqarilgan fanni o'tadigan o'qituvchi monitor jadvalidan ham tushadi."""
+    from app.services import monitor_schedule_service as ms
+
+    rows = [SimpleNamespace(teacher_username="a", subject="Jismoniy tarbiya"),
+            SimpleNamespace(teacher_username="b", subject="Anatomiya"),
+            SimpleNamespace(teacher_username="c", subject="")]
+    db = MagicMock()
+    db.execute.return_value.scalars.return_value.all.return_value = rows
+    ex = rx.Exclusions(subject_names={rx.norm_subject("Jismoniy tarbiya")})
+    with patch.object(rx, "load", return_value=ex):
+        assert [e.teacher_username for e in ms._load_schedule(db)] == ["b", "c"]
