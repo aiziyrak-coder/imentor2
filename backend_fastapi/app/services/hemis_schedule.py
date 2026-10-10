@@ -74,10 +74,69 @@ def _norm(value: Any) -> str:
     return s.replace("ʻ", "'").replace("‘", "'").replace("’", "'").replace("`", "'")
 
 
+#: Raqamdan keyin kelsa, bu raqam XONA raqami emas: qavat, bino, kurs yoki
+#: muassasa nomining bo'lagi. Ilgari shunday raqamlar xona deb olinardi va
+#: "Fjsti klinikasi 2 etaj" 2-xonaning doskasiga, "9 oilaviy poliklinika"
+#: esa 9-xonaning doskasiga bog'lanib ketardi (2026-10-09).
+_NOT_A_ROOM = re.compile(
+    r"^(bino|binosi|qavat|qavati|etaj|etaji|kurs|para|sonli|oshp|oilaviy|"
+    r"poliklinika|poliklinikasi|klinika|klinikasi|shifoxona|shifoxonasi|"
+    r"markaz|markazi|dispanser|dispanseri|filial|filiali|guruh|guruhi)\b"
+)
+
+#: Xona raqami ekanini tasdiqlaydigan so'zlar.
+_IS_A_ROOM = re.compile(r"^(xona|xonasi|auditoriya|auditoriyasi|aud|laboratoriya)\b")
+
+
+def _room_key(value: Any) -> tuple[str, str]:
+    """Xona kaliti: (yopishgan harf, raqam).
+
+    Raqamga YOPISHGAN harf xonaning bir qismi: 3-binoda "S" qatori
+    ("S29-xona") 29-xona bilan BOSHQA xona, 2-binoda "46S-xona" 46-xona
+    bilan, YuKSHQO'B da "D108" 108 bilan. Buni jadvalning o'zi isbotlaydi:
+    ikkisi bir sana va bir parada BIR VAQTDA band bo'ladi (2026-10-09 da
+    har bir bino uchun tekshirildi). Ilgari harf tashlab yuborilar va ikki
+    xil fizik xona bitta doska deb hisoblanardi — 1461 dars yolg'on
+    "monitorli" bo'lib, 102 o'qituvchi boshqa xonaning doskasi bo'yicha
+    baholanardi.
+
+    "108 laboratoriya" ham alohida xona (1-binoda 107/108 bilan bir vaqtda
+    band bo'ladi), shuning uchun "l" harfi bilan belgilanadi.
+    """
+    text = _norm(value)
+    best: tuple[str, str] | None = None
+    fallback: tuple[str, str] | None = None
+    for m in re.finditer(r"(?<![0-9])(\d{1,4})", text):
+        after = text[m.end():].lstrip(" -.,:;()")
+        if _NOT_A_ROOM.match(after):
+            continue
+        # Harf xona belgisi bo'lishi uchun YAKKA turishi kerak. Inventarda
+        # "3-qavat28 xona" kabi qo'shilib ketgan yozuv bor — undagi "t"
+        # so'zning oxiri, xona belgisi emas (2026-10-09: shu sababli 3-binodagi
+        # 28-xona doskasi yo'qolib turgandi).
+        letter = ""
+        before = text[max(0, m.start() - 2):m.start()]
+        after_two = text[m.end():m.end() + 2]
+        if (len(before) and before[-1].isascii() and before[-1].isalpha()
+                and not (len(before) > 1 and before[0].isalpha())):
+            letter = before[-1]
+        elif (after_two and after_two[0].isascii() and after_two[0].isalpha()
+                and not (len(after_two) > 1 and after_two[1].isalpha())):
+            letter = after_two[0]
+        word = _IS_A_ROOM.match(after)
+        if word and word.group(1).startswith("laboratoriya"):
+            letter = letter or "l"
+        candidate = (letter, m.group(1))
+        if word:
+            best = candidate
+        fallback = candidate
+    chosen = best or fallback
+    return chosen or ("", "")
+
+
 def _room_number(value: Any) -> str:
-    """Xona nomidagi oxirgi raqam — ikkala tomonda ham eng barqaror belgi."""
-    found = re.findall(r"\d{1,4}", str(value or ""))
-    return found[-1] if found else ""
+    """Faqat raqam — eski chaqiruvlar uchun."""
+    return _room_key(value)[1]
 
 
 def _inventory_building(room_full: str) -> str:
@@ -106,17 +165,18 @@ def room_map(auditoriums: Iterable[dict]) -> dict[Any, list[dict]]:
     kafedraga yozilgan (3-bino 26-xona — Fiziologiya va Patologik fiziologiya).
     Shuning uchun ro'yxat qaytariladi, kimga tegishlisini dars kafedrasi hal qiladi.
     """
-    by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    by_key: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for a in auditoriums:
         building = BUILDINGS.get(_norm((a.get("building") or {}).get("name")), "")
-        number = _room_number(a.get("name"))
+        letter, number = _room_key(a.get("name"))
         if building and number:
-            by_key[(building, number)].append(a)
+            by_key[(building, letter, number)].append(a)
 
     out: dict[Any, list[dict]] = defaultdict(list)
     for mon in ms.monitors():
-        key = (_inventory_building(mon.get("room_full", "")), _room_number(mon.get("room_full", "")))
-        if not all(key):
+        letter, number = _room_key(mon.get("room_full", ""))
+        key = (_inventory_building(mon.get("room_full", "")), letter, number)
+        if not (key[0] and key[2]):
             continue
         for a in by_key.get(key, []):
             code = a.get("code")

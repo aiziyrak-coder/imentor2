@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import time
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models.hemis_lesson import HemisLesson
@@ -45,6 +46,22 @@ AFTER = dt.timedelta(minutes=5)
 #: `IMENTOR_MIN_LESSON_MINUTES` bilan o'zgartiriladi — talab o'zgarsa
 #: yangi versiya chiqarish shart emas.
 MIN_LESSON_MINUTES = int(os.environ.get("IMENTOR_MIN_LESSON_MINUTES") or 40)
+
+#: IKKINCHI o'lchov: dars davomida qaydlar qanchalik teng tarqalgani.
+#:
+#: Birinchi o'lchov (sof ishlangan daqiqa) ma'ruzani kam ko'rsatadi: slaydni
+#: ko'rsatib turgan o'qituvchi sichqonchaga tegmaydi, 5 daqiqadan keyin
+#: hisoblagich to'xtaydi, boshqa oynaga o'tsa ham to'xtaydi. 2026-10-09 da
+#: dars oynasida birinchi va oxirgi qaydi 50+ daqiqa uzoqlikda bo'lgan 217
+#: darsdan 132 tasi shu sababli "o'tilmagan" bo'lib chiqdi.
+#:
+#: Shuning uchun dars BO'LAKLARGA bo'linadi va har bo'lakda qayd bormi
+#: deb qaraladi. Dars bo'laklarining kamida `MIN_COVER` ulushi qoplangan
+#: VA kamida `MIN_COVER_MINUTES` daqiqa sof ish bo'lsa — dars o'tilgan.
+#: Ikkinchi shart muhim: ikki marta bosib qo'yish qoplama bermasligi kerak.
+COVER_BUCKET = dt.timedelta(minutes=5)
+MIN_COVER = 0.6
+MIN_COVER_MINUTES = 15
 
 
 def _merge_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
@@ -198,8 +215,151 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     return rows
 
 
+def _scheduled(lesson: HemisLesson) -> tuple[dt.datetime, dt.datetime]:
+    """Darsning JADVALDAGI vaqti — oldin/keyin qo'shilgan muhlatsiz.
+
+    Qoplama aynan dars vaqtida o'lchanadi: darsdan 15 daqiqa oldin ishlagani
+    qoplama bermasligi kerak.
+    """
+    start, end = _window(lesson)
+    return start + BEFORE, end - AFTER
+
+
+def _covered(moments: list[dt.datetime], start: dt.datetime, end: dt.datetime) -> tuple[int, int]:
+    """(qoplangan bo'lak, jami bo'lak) — dars necha bo'lagida qayd bor."""
+    total = max(1, int((end - start) / COVER_BUCKET))
+    if not moments:
+        return 0, total
+    covered = 0
+    edge = start
+    first = bisect_left(moments, start)
+    for i in range(total):
+        nxt = edge + COVER_BUCKET
+        j = bisect_left(moments, nxt, first)
+        if j > first:
+            covered += 1
+            first = j
+        edge = nxt
+    return covered, total
+
+
+#: Dars o'tilganini TALABALAR tomonidan tasdiqlash uchun kerak bo'lgan
+#: eng kam faol talaba soni. Bitta talaba telefonida ochib qo'ygan bo'lishi
+#: mumkin; guruhning uchdan ko'pi aynan o'sha slotda iMentor'da ishlagan
+#: bo'lsa — dars iMentor'da o'tilgan.
+MIN_ACTIVE_STUDENTS = 3
+
+
+def _student_rows(db: Session, groups: list[str], lo: dt.datetime,
+                  hi: dt.datetime) -> list[tuple]:
+    """Talaba faolligi: (guruh, hisob, vaqt). Alohida funksiya — testda almashtirish uchun."""
+    return db.execute(text(
+        "select c.group_name, e.owner_key, e.occurred_at "
+        "from core_useractivityevent e "
+        "join core_studentcontingent c "
+        "  on c.student_id = regexp_replace(e.owner_key, '^ot_', '') "
+        "where e.role = 'student' and e.occurred_at >= :lo and e.occurred_at < :hi "
+        "  and c.group_name = any(:groups)"
+    ), {"lo": lo, "hi": hi, "groups": groups}).all()
+
+
+def _student_proof(db: Session, lessons: list[HemisLesson]) -> set[int]:
+    """Guruh TALABALARI dars vaqtida iMentor'da ishlagan darslar.
+
+    Nega kerak: o'qituvchi hisobida qayd bo'lmasligi mumkin (doskadagi
+    brauzer boshqa hisobda, yoki u o'z telefonidan kirmagan), lekin guruh
+    talabalari aynan o'sha slotda iMentor'da ishlayotgan bo'lsa — dars
+    iMentor'da o'tilgani shubhasiz. 2026-10-09 kuni shunday 14 dars bor
+    edi: masalan 13 talabadan 10 tasi faol, o'qituvchida 0 daqiqa.
+    """
+    wanted: dict[str, list[HemisLesson]] = defaultdict(list)
+    for lesson in lessons:
+        names = getattr(lesson, "merged_groups", None)
+        if not names:
+            one = getattr(lesson, "group_name", "")
+            names = [one] if one else []
+        for group in names:
+            if group:
+                wanted[group].append(lesson)
+    if not wanted:
+        return set()
+    days = [x.lesson_date for x in lessons]
+    lo = dt.datetime.combine(min(days), dt.time(0, 0), tzinfo=ms.TASHKENT)
+    hi = dt.datetime.combine(max(days) + dt.timedelta(days=1), dt.time(0, 0), tzinfo=ms.TASHKENT)
+    rows = _student_rows(db, list(wanted), lo, hi)
+    seen: dict[str, list[tuple[dt.datetime, str]]] = defaultdict(list)
+    for group, owner, when in rows:
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.timezone.utc)
+        seen[group].append((when, str(owner)))
+    for values in seen.values():
+        values.sort()
+
+    out: set[int] = set()
+    for group, group_lessons in wanted.items():
+        values = seen.get(group)
+        if not values:
+            continue
+        times = [w for w, _ in values]
+        for lesson in group_lessons:
+            if lesson.id in out:
+                continue
+            start, end = _scheduled(lesson)
+            a = bisect_left(times, start)
+            b = bisect_right(times, end)
+            if len({owner for _, owner in values[a:b]}) >= MIN_ACTIVE_STUDENTS:
+                out.add(lesson.id)
+    return out
+
+
+def measure_map(db: Session, lessons: list[HemisLesson]) -> dict[int, dict]:
+    """Har dars uchun XOM o'lchovlar: soniya, talaba, qoplama, dalil.
+
+    Qaror `is_taught` da — shunda o'lchov va qaror bir-biridan ajralgan
+    bo'ladi va hisobot "nega" degan savolga javob berolsin.
+    """
+    raw = _work_map_raw(db, lessons)
+    undecided = [x for x in lessons
+                 if x.id not in raw or not is_taught(raw[x.id])]
+    for lesson_id in _student_proof(db, undecided):
+        row = raw.setdefault(lesson_id, {"seconds": 0, "students": 0, "signin": False,
+                                         "covered": 0, "buckets": 0})
+        row["student_proof"] = True
+    return raw
+
+
 def work_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[int, int]]:
-    """Har dars uchun (ishlangan soniya, talaba soni) — chegarasiz, xom o'lchov."""
+    """Eski shakl: (ishlangan soniya, talaba soni)."""
+    return {k: (m["seconds"], m["students"]) for k, m in measure_map(db, lessons).items()}
+
+
+def is_taught(m: dict) -> bool:
+    """Dars iMentor'da o'tilganmi.
+
+    Uch yo'ldan biri yetarli:
+      1. aniq dalil — dars vaqtida jonli test ochilgan yoki xona
+         kompyuteriga QR bilan kirilgan;
+      2. sof ish vaqti chegaradan o'tgan;
+      3. dars bo'laklarining kamida 60% ida qayd bor va sof ish kamida
+         15 daqiqa — ma'ruza shunday ko'rinadi.
+    """
+    # Talabalar ishlagani — shartsiz dalil: jonli testga javob bergan
+    # bo'lsalar, dars aynan iMentor'da o'tilgan.
+    if m.get("student_proof") or m.get("students"):
+        return True
+    # XONA KOMPYUTERIGA QR bilan kirish yoki hech kim javob bermagan jonli
+    # test O'ZI yetarli EMAS: u o'qituvchi xonada bo'lganini ko'rsatadi,
+    # darsni iMentor'da o'tganini emas. 2026-10-09 da shu teshik sababli
+    # 36 dars "to'liq o'tilgan" bo'lib chiqqandi — biri 0 daqiqa, beshtasi
+    # 1 daqiqa ishlab. Bu rektor shikoyat qilgan "kirib chiqib ishlatyapman
+    # deyish" ning aynan o'zi, shuning uchun qaror ishga qaraydi.
+    if m["seconds"] >= MIN_LESSON_MINUTES * 60:
+        return True
+    return (m["buckets"] and m["covered"] / m["buckets"] >= MIN_COVER
+            and m["seconds"] >= MIN_COVER_MINUTES * 60)
+
+
+def _work_map_raw(db: Session, lessons: list[HemisLesson]) -> dict[int, dict]:
     usernames = {x.teacher_username for x in lessons if x.teacher_username}
     if not usernames or not lessons:
         return {}
@@ -209,11 +369,12 @@ def work_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[int, in
     spans = {k: _merge_spans(v) for k, v in ms._work_spans(db, usernames, lo_day, hi_day).items()}
     span_ends = {k: [b for _, b in v] for k, v in spans.items()}
     events = ms._usage_events(db, usernames, lo_day, hi_day)
+    beats = ms._activity_moments(db, usernames, lo_day, hi_day)
 
     ordered = {k: sorted(v) for k, v in events.items() if v}
     moments = {k: [w for w, _ in v] for k, v in ordered.items()}
 
-    out: dict[int, tuple[int, int]] = {}
+    out: dict[int, dict] = {}
     for lesson in lessons:
         owner = lesson.teacher_username or ""
         if not owner:
@@ -221,14 +382,23 @@ def work_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[int, in
         start, end = _window(lesson)
         seconds = _worked_seconds(spans.get(owner, []), span_ends.get(owner, []), start, end)
         students = 0
+        signin = False
         rows = ordered.get(owner)
         if rows:
             times = moments[owner]
             a = bisect_left(times, start)
             b = bisect_right(times, end)
-            students = sum(count for _, count in rows[a:b])
-        if seconds or students:
-            out[lesson.id] = (seconds, students)
+            if b > a:
+                students = sum(count for _, count in rows[a:b])
+                # Talaba soni yo'q qayd — xona kompyuteriga QR bilan kirish
+                # yoki hech kim javob bermagan jonli test. Dalil sifatida
+                # ko'rsatiladi, lekin o'zi darsni "o'tilgan" qilmaydi.
+                signin = students == 0
+        lo, hi = _scheduled(lesson)
+        covered, buckets = _covered(beats.get(owner, []), lo, hi)
+        if seconds or students or signin or covered:
+            out[lesson.id] = {"seconds": seconds, "students": students, "signin": signin,
+                              "covered": covered, "buckets": buckets}
     return out
 
 
@@ -238,9 +408,8 @@ def _used_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[bool, 
     "Ishlatildi" — dars vaqtida kamida `MIN_LESSON_MINUTES` daqiqa ishlangan.
     Qisqa kirib chiqish hisoblanmaydi: maqsad darsni iMentor'da O'TISH.
     """
-    need = MIN_LESSON_MINUTES * 60
-    return {k: (True, students) for k, (seconds, students) in work_map(db, lessons).items()
-            if seconds >= need}
+    return {k: (True, m["students"]) for k, m in measure_map(db, lessons).items()
+            if is_taught(m)}
 
 
 def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
@@ -399,3 +568,68 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
         if len(out) >= limit:
             break
     return out
+
+
+#: Xona "o'lik" deb belgilanishi uchun shart: shu muddatda hech bir dars
+#: iMentor'da o'tilmagan, lekin dars ham, o'qituvchi ham yetarlicha bo'lgan.
+#: Bitta o'qituvchining ikki darsi yetmaydi — bu uning o'z ishi bo'lishi
+#: mumkin; to'rt o'qituvchi 18 darsda ham ochmagan bo'lsa, muammo xonada.
+#: 7 kun: 14 kun bilan natija bir xil chiqdi (2026-10-09 da ikkisi ham
+#: bitta xona topdi), lekin o'lchov ikki barobar arzon (5,1s / 8,6s) va
+#: yaqinda tuzatilgan doska "o'lik" bo'lib qolmaydi.
+DEAD_ROOM_DAYS = 7
+DEAD_ROOM_LESSONS = 8
+DEAD_ROOM_TEACHERS = 3
+
+#: Natija 30 daqiqa saqlanadi: 14 kunlik o'lchov og'ir, sahifa esa har
+#: daqiqada qayta so'raydi.
+_DEAD_TTL = 30 * 60
+_dead_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def dead_room_details(db: Session, end_day: dt.date, *,
+                      back_days: int = DEAD_ROOM_DAYS) -> dict[str, dict]:
+    """Doskasi ishlamayotgani KO'RINIB turgan xonalar — DALILI bilan.
+
+    Bunday xonadagi dars uchun o'qituvchini ayblash mumkin emas: texnik
+    muammo. 2026-10-09 da shunday 7 xona bor edi (eng og'iri: 22 darsda
+    3 o'qituvchi, birortasi ham ochmagan).
+
+    Dalil (nechta dars, nechta o'qituvchi, necha kun) QAYTARILADI va
+    sahifada ko'rsatiladi. Bu shart: istisno ko'rinmasa, u sekin-asta
+    foizni chiroyli ko'rsatadigan yashirin chiqarib tashlashga aylanadi —
+    haqiqatan ishlayotgan, lekin hech kim ishlatmayotgan xona ham
+    "buzuq" bo'lib o'lchovdan butunlay chiqib ketardi.
+    """
+    key = (end_day, back_days)
+    hit = _dead_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _DEAD_TTL:
+        return hit[1]
+    lessons = [x for x in _lessons(db, end_day - dt.timedelta(days=back_days - 1), end_day)
+               if x.monitor_id]
+    measures = measure_map(db, lessons)
+    rooms: dict[str, dict] = defaultdict(lambda: {"lessons": 0, "teachers": set(), "used": 0})
+    for x in lessons:
+        row = rooms[x.monitor_id]
+        row["lessons"] += 1
+        row["teachers"].add(x.teacher_username or x.teacher_name)
+        if x.id in measures and is_taught(measures[x.id]):
+            row["used"] += 1
+    out = {
+        monitor: {"monitor_id": monitor, "lessons": row["lessons"],
+                  "teachers": len(row["teachers"]), "days": back_days}
+        for monitor, row in rooms.items()
+        if row["used"] == 0 and row["lessons"] >= DEAD_ROOM_LESSONS
+        and len(row["teachers"]) >= DEAD_ROOM_TEACHERS
+    }
+    _dead_cache[key] = (now, out)
+    for old in [k for k, (t, _) in _dead_cache.items() if now - t >= _DEAD_TTL]:
+        _dead_cache.pop(old, None)
+    return out
+
+
+def dead_rooms(db: Session, end_day: dt.date, *,
+               back_days: int = DEAD_ROOM_DAYS) -> frozenset[str]:
+    """Faqat ID lar — dalili `dead_room_details` da."""
+    return frozenset(dead_room_details(db, end_day, back_days=back_days))

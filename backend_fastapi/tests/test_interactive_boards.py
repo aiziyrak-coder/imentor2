@@ -33,7 +33,7 @@ def test_faulty_room_excluded_and_reason_has_source():
     assert len(info['unavailable_rooms'])==1
     assert all('Nosoz' not in r for r in info['rooms'])
     assert info['source_url'].startswith('https://docs.google.com/')
-    assert info['checked_on']=='2026-09-14'
+    assert info['checked_on']=='2026-10-09'
 
 @pytest.mark.parametrize('department', ['Pediatriya','Akusherlik va ginekologiya','', 'Unknown department'])
 def test_unavailable_or_unknown_never_lesson_failure(department):

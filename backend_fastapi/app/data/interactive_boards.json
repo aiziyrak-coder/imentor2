@@ -1,7 +1,7 @@
 {
   "source_url": "https://docs.google.com/spreadsheets/d/14w0hQC3jladFEJnObvWXiZA-5QXeJ1-KGu6puNjCqsw/edit?usp=sharing",
   "source_sheet": "auditoriyalar",
-  "checked_on": "2026-09-14",
+  "checked_on": "2026-10-09",
   "departments": [
     {
       "row": 1,
@@ -244,6 +244,48 @@
       "aliases": [
         "Stomatologiya va otorinolaringologiya",
         "Stomatologiya va otorinolaringologiya kafedrasi"
+      ],
+      "extra_rooms": [
+        {
+          "monitor_id": "MON-201",
+          "room": "Asosiy (1-bino) 101-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-202",
+          "room": "Asosiy (1-bino) 102-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-203",
+          "room": "Asosiy (1-bino) 104-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-204",
+          "room": "Asosiy (1-bino) 105-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-205",
+          "room": "Asosiy (1-bino) 106-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-206",
+          "room": "Asosiy (1-bino) 108 laboratoriya",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-207",
+          "room": "Asosiy (1-bino) 109-xona",
+          "added_on": "2026-10-09"
+        },
+        {
+          "monitor_id": "MON-208",
+          "room": "Asosiy (1-bino) 110-xona",
+          "added_on": "2026-10-09"
+        }
       ]
     },
     {
@@ -326,10 +368,11 @@
       "row": 26,
       "department": "Gistologiya va biologiya kafedrasi",
       "rooms": [
-        "9-sonli oilaviy poliklinika 9-xona"
+        "9-xona Ma'ruza (binosi aniqlanmagan)"
       ],
-      "unavailable_rooms": [],
-      "aliases": []
+      "aliases": [],
+      "needs_clarification": "Doska qaysi binoda ekani aniqlanmagan. Aniqlanmaguncha hisobga olinmaydi — noto'g'ri bino 89 darsni yolg'on 'monitorli' qilgandi.",
+      "unavailable_rooms": []
     },
     {
       "row": 27,
@@ -364,5 +407,6 @@
       "unavailable_rooms": [],
       "aliases": []
     }
-  ]
+  ],
+  "source_note": "Telegram orqali yuborilgan \"Interaktiv doska (1).xlsx\" nusxasi bilan solishtirildi (2026-10-09)."
 }
