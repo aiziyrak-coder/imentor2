@@ -198,6 +198,7 @@ services:
     # shu IP:443 ga NAT loopback yo'q — faqat LAN IP orqali nginx ishlaydi.
     extra_hosts:
       - "appi.online-imtixon.uz:192.168.0.101"
+      - "camapi.fermi.uz:192.168.0.101"
     volumes:
       - media_data:/app/media
     depends_on:

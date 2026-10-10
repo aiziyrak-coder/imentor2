@@ -35,6 +35,7 @@ from app.services import rector_coverage_service as cov
 from app.services import rector_detail_service as detail
 from app.services import control_report_service as control
 from app.services import lesson_report_service as lessons
+from app.services import monitor_day_service as monitor_day
 from app.services import platform_overview as platforms_svc
 from app.services import rector_report_service as svc
 from app.services import monitor_schedule_service as monitor_svc
@@ -210,6 +211,47 @@ def rector_platforms(
     """
     start, end = _range(date_from, date_to)
     return platforms_svc.overview(db, start, end, names_only=names_only)
+
+
+@router.get("/rector/monitor-day/")
+def rector_monitor_day(
+    day: str | None = Query(default=None),
+    faculty: str = Query(default=""),
+    department: str = Query(default=""),
+    monitor_id: str = Query(default="", alias="monitor"),
+    teacher: str = Query(default="", max_length=128),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Bitta kun: monitorli xonalardagi HAR BIR dars bo'yicha alohida javob.
+
+    Umumiy ko'rsatkich emas: har dars qator bo'lib chiqadi — qaysi xona,
+    qaysi vaqt, qaysi o'qituvchi, qaysi fan, sillabus bo'yicha qaysi mavzu,
+    qancha ishlagan va "nega" degan savolga aniq sabab. Fakultet, kafedra,
+    monitor va o'qituvchi bo'yicha filtrlanadi (2026-10-09 talabi).
+    """
+    try:
+        target = dt.date.fromisoformat(day) if day else lessons.current_time().date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Sana YYYY-MM-DD ko'rinishida bo'lishi kerak.") from exc
+    allowed = allowed_departments(ctx, db)
+    if allowed and not department:
+        # Dekan uchun: kafedra tanlanmagan bo'lsa ham o'z kafedralaridan tashqarisi chiqmasin.
+        out = monitor_day.day_report(db, target, faculty=faculty, monitor_id=monitor_id,
+                                     teacher=teacher, groups=allowed_groups(ctx))
+        keys = {monitor_svc._norm(d) for d in allowed}
+
+        def ok(name: str) -> bool:
+            value = monitor_svc._norm(name)
+            return any(k in value or value in k for k in keys)
+
+        out["lessons"] = [r for r in out["lessons"] if ok(r["department"])]
+        out["teachers"] = [r for r in out["teachers"] if ok(r["department"])]
+        out["filters"]["departments"] = [d for d in out["filters"]["departments"] if ok(d)]
+        return out
+    return monitor_day.day_report(db, target, faculty=faculty, department=department,
+                                  monitor_id=monitor_id, teacher=teacher,
+                                  groups=allowed_groups(ctx))
 
 
 @router.get("/rector/control/students/")

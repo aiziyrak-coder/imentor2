@@ -632,7 +632,7 @@ function query(filters: Record<string, string | number | boolean | undefined>): 
   return q.toString();
 }
 
-function get<T>(path: string): Promise<T> {
+export function get<T>(path: string): Promise<T> {
   // `retryOnUnauthorized: false` MUHIM (2026-09-26): rektor seansi tugaganda
   // umumiy httpClient shu brauzerdagi O'QITUVCHI tokenini yangilab qayta
   // urinardi — u rektor huquqiga ega emas, natijada parol oynasi o'rniga

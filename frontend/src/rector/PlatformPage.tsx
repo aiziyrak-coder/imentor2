@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import ControlReport from './ControlReport';
+import MonitorDay from './MonitorDay';
 import { fetchPlatforms, type PlatformsReport, type ReportFilters } from './rectorApi';
 
 /**
@@ -22,6 +23,7 @@ export default function PlatformPage({
 }) {
   const [data, setData] = useState<PlatformsReport | null>(null);
   const [error, setError] = useState('');
+  const [view, setView] = useState<'umumiy' | 'kun'>('umumiy');
 
   useEffect(() => {
     let alive = true;
@@ -68,9 +70,33 @@ export default function PlatformPage({
         )}
       </div>
 
-      {/* iMentor — to'liq nazorat hisoboti; u o'z ma'lumotini o'zi oladi. */}
+      {/* iMentor ikki ko'rinishda: umumiy hisobot va KUN bo'yicha individual
+          tahlil (har dars alohida qator, sababi bilan) — rektor talabi
+          (2026-10-09): "umumiy ma'lumotlar emas, individual yondashuv". */}
       {platform === 'imentor' ? (
-        <ControlReport filters={filters} onUnauthorized={onUnauthorized} />
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            {([['umumiy', 'Umumiy hisobot'], ['kun', 'Kun bo‘yicha (har dars alohida)']] as const).map(
+              ([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setView(key)}
+                  className={`rounded-lg px-3 py-1.5 text-[12.5px] font-semibold ${
+                    view === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.07]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ),
+            )}
+          </div>
+          {view === 'umumiy' ? (
+            <ControlReport filters={filters} onUnauthorized={onUnauthorized} />
+          ) : (
+            <MonitorDay day={filters.to} onUnauthorized={onUnauthorized} />
+          )}
+        </div>
       ) : error ? (
         <p className="rounded-2xl bg-rose-50 px-4 py-3 text-[13px] text-rose-700 ring-1 ring-rose-200">
           Ma’lumot kelmadi: {error}

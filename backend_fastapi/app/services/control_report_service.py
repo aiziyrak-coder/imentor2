@@ -277,9 +277,14 @@ def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, de
     # Xom o'lchov: har darsda qancha ishlangan. `used` shundan chegaradan
     # o'tganlarini oladi, qolgani "kirgan, lekin dars o'tilmagan" bo'ladi —
     # rektor aynan shu farqni ko'rishni so'radi (2026-10-08).
-    work = lr.work_map(db, lessons)
+    # Qaror `lr.is_taught` da: sof vaqt YOKI dars qoplamasi YOKI aniq dalil
+    # (jonli test / xona kompyuteriga QR bilan kirish). Faqat sof vaqtga
+    # tayanish ma'ruzani kam ko'rsatardi — 2026-10-09 da dars boshidan
+    # oxirigacha iMentor'da ko'ringan 132 dars "o'tilmagan" bo'lib chiqqandi.
+    measures = lr.measure_map(db, lessons)
+    work = {k: (m["seconds"], m["students"]) for k, m in measures.items()}
     need = lr.MIN_LESSON_MINUTES * 60
-    used = {k: (True, students) for k, (seconds, students) in work.items() if seconds >= need}
+    used = {k: (True, m["students"]) for k, m in measures.items() if lr.is_taught(m)}
     # Avval XONALAR: qaysi monitor ishlayotgani isbotlangan, qaysi biri shubhali.
     rooms = mr.room_stats(lessons, used)
     stats = _teacher_stats(lessons, used, rooms)
@@ -298,7 +303,7 @@ def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, de
         key = lesson.teacher_username or f"name:{lesson.teacher_name}"
         seconds = work.get(lesson.id, (0, 0))[0]
         worked[key] += seconds
-        if 0 < seconds < need:
+        if lesson.id not in used and seconds > 0:
             short[key] += 1
             short_seconds[key] += seconds
             if seconds >= near_need:

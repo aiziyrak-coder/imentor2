@@ -647,23 +647,56 @@ def _work_spans(db: Session, usernames: set[str], start: dt.datetime,
     return out
 
 
+def _activity_moments(db: Session, usernames: set[str], start: dt.datetime,
+                      end: dt.datetime) -> dict[str, list[dt.datetime]]:
+    """Faollik qaydlarining VAQTLARI (davomiyligi emas) — qoplama uchun.
+
+    `_work_spans` faqat `duration_sec` bor `heartbeat` larni oladi, ya'ni
+    o'qituvchi 5 daqiqa sichqonchaga tegmasa yoki boshqa oynaga o'tsa o'sha
+    vaqt umuman sanalmaydi. Shu sababli darsni boshdan oxir iMentor'da
+    o'tgan o'qituvchi ham chegaradan o'tmay qolardi: 2026-10-09 kuni dars
+    oynasida birinchi va oxirgi qaydi 50+ daqiqa uzoqlikda bo'lgan 217
+    darsdan 132 tasi "o'tilmagan" bo'lib chiqdi.
+
+    Shuning uchun ikkinchi o'lchov kerak: dars davomida qaydlar QANCHALIK
+    teng tarqalgani. Buning uchun davomiylik emas, faqat vaqt kerak.
+    """
+    from app.models.analytics import UserActivityEvent
+
+    out: dict[str, list[dt.datetime]] = {u: [] for u in usernames}
+    if not usernames:
+        return out
+    for owner, when in db.execute(
+        select(UserActivityEvent.owner_key, UserActivityEvent.occurred_at).where(
+            UserActivityEvent.owner_key.in_(usernames),
+            UserActivityEvent.event_type.in_(WORKING_EVENTS),
+            UserActivityEvent.occurred_at >= start,
+            UserActivityEvent.occurred_at < end,
+        )
+    ).all():
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.timezone.utc)
+        out[owner].append(when)
+    for rows in out.values():
+        rows.sort()
+    return out
+
+
 def _usage_events(db: Session, usernames: set[str], start: dt.datetime, end: dt.datetime) -> dict[str, list]:
-    """O'qituvchi iMentor'ni darsda ishlatgan paytlar. Har biri (vaqt, talabalar soni).
+    """O'qituvchining DALIL bo'ladigan paytlari. Har biri (vaqt, talabalar soni).
 
-    Uch manba:
+    Ikki manba:
       * jonli test ochilgani — talabalar soni shundan keladi;
-      * kompyuterga QR orqali kirgani;
-      * platformadagi HAQIQIY ish — sahifa ochish, material ko'rish, ekran
-        ochiq turgani (`heartbeat`).
+      * xona kompyuteriga QR orqali kirgani (talaba soni 0).
 
-    Uchinchisi 2026-10-08 da qo'shildi. Ilgari faqat jonli test va QR
-    hisoblanardi, shuning uchun ma'ruzani iMentor'dan ko'rsatgan o'qituvchi
-    "ishlatmagan" deb chiqardi — jonli ma'lumotda bunday 275 ta dars va
-    qizil ro'yxatga noto'g'ri tushgan 11 ta o'qituvchi bor edi.
+    Platformadagi oddiy ish (sahifa ochish, material ko'rish, `heartbeat`)
+    BU YERDA EMAS: u `_work_spans` (sof vaqt) va `_activity_moments`
+    (qoplama) orqali o'lchanadi. Ilgari izohda "uchinchi manba heartbeat"
+    deb yozilgan edi, lekin kodda u yo'q — izoh eskirgandi (2026-10-09).
 
-    Bu qayd o'qituvchi XONADA bo'lganini isbotlamaydi, faqat o'sha vaqtda
-    iMentor'da ishlaganini — monitor hisobotining boshqa o'lchovlari ham
-    shunday (qarang `lesson_evidence.summarize`).
+    Talaba javob bergan jonli test darsning iMentor'da o'tilganini
+    isbotlaydi; QR esa faqat o'qituvchi xona kompyuterida bo'lganini —
+    qaror uchun o'zi yetarli emas (qarang `lesson_report_service.is_taught`).
     """
     from app.models.device_pairing import DevicePairingSession
     from app.services.rector_report_service import student_key_expr
