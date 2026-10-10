@@ -39,6 +39,9 @@ class AcademicDepartment(Base):
     # AI material shu bayroqqa qarab klinik yoki klinik emas deb yoziladi
     # (`app/data/clinical_departments.json`, 2026-09-25).
     is_clinical: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    #: Rektor hisobotidan chiqarilgan kafedra: uning o'qituvchilari, darslari
+    #: va fanlari hisobotga tushmaydi (`app/services/report_exclusion.py`).
+    report_excluded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
@@ -79,6 +82,9 @@ class CourseSyllabus(Base):
     created_by: Mapped[str] = mapped_column(String(128), default="", server_default="")
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Rektor hisobotidan chiqarilgan fan: shu fan bo'yicha darslar va testlar
+    #: hech bir o'qituvchining hisobotiga tushmaydi.
+    report_excluded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 

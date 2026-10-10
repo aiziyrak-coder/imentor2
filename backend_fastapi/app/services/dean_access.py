@@ -232,13 +232,47 @@ def known_departments(db) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _all_department_spellings(db) -> list[str]:
+    from sqlalchemy import text
+
+    rows = db.execute(text(
+        "select department from core_staffprofile where coalesce(department,'') <> '' "
+        "union "
+        "select department from core_monitorschedule where coalesce(department,'') <> ''"
+    )).all()
+    return [r[0] for r in rows]
+
+
+class ExclusionScope(list):
+    """Dekan cheklovi YO'Q, lekin admin ba'zi kafedralarni hisobotdan chiqargan.
+
+    Ro'yxat "chiqarilmagan hamma kafedra" — hisobot uni oddiy ruxsat ro'yxati
+    kabi ishlatadi. Alohida tur kerak, chunki kafedrasi belgilanmagan fanlar
+    dekan uchun yashiriladi, rektor uchun esa ko'rinishi kerak.
+    """
+
+
 def allowed_departments(ctx: dict | None, db=None) -> list[str]:
     """Dekanga ruxsat etilgan kafedralar — MA'LUMOTDAGI yozilishida.
 
     `db` berilsa, sozlamadagi nomlar haqiqiy nomlarga o'giriladi. Busiz
     ro'yxat sozlamadagidek qaytadi (eski chaqiruvlar buzilmasin).
+
+    Admin hisobotdan chiqargan kafedralar (`report_exclusion`) bu ro'yxatga
+    hech qachon kirmaydi — rektorga ham, dekanga ham.
     """
     wanted = [str(x).strip() for x in ((ctx or {}).get("departments") or []) if str(x).strip()]
-    if db is None or not wanted:
+    if db is None:
         return wanted
-    return match_departments(wanted, known_departments(db))
+    from app.services import report_exclusion
+
+    excluded = report_exclusion.load(db)
+    if not wanted and not excluded.departments:
+        return wanted
+    known = known_departments(db)
+    if not wanted:
+        # Hisobotlar kafedrani turli manbadan oladi va ro'yxatni AYNAN nom bilan
+        # solishtiradi — shuning uchun hamma manbadagi yozilishlar kerak.
+        names = set(known) | set(_all_department_spellings(db))
+        return ExclusionScope(sorted(d for d in names if not excluded.department_excluded(d)))
+    return [d for d in match_departments(wanted, known) if not excluded.department_excluded(d)]

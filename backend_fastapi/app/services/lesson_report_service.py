@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models.hemis_lesson import HemisLesson
 from app.services import monitor_schedule_service as ms
+from app.services import report_exclusion
 from app.services.dean_access import in_groups
 
 # Dars boshlanishidan oldin va tugagandan keyin qancha vaqt "shu darsniki" hisoblanadi.
@@ -178,6 +179,10 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     if teacher:
         q = q.where(HemisLesson.teacher_username == teacher)
     rows = list(db.execute(q).scalars())
+    excluded = report_exclusion.load(db)
+    if excluded:
+        # Admin hisobotdan chiqargan kafedra va fanlar (Kafedralar bo'limi).
+        rows = [r for r in rows if not excluded.lesson_excluded(r)]
     if groups:
         # Xalqaro fakultet dekani: faqat o'z guruhlariga o'tilgan darslar.
         rows = [r for r in rows if in_groups(r.group_name, groups)]

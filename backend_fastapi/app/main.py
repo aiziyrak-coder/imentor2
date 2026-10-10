@@ -19,6 +19,7 @@ from app.api.routes import (
     clinic_admin,
     clinical_group,
     content_catalog,
+    department_admin,
     device_pairing,
     face_login,
     education_ai,
@@ -101,6 +102,7 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(face_login.router, prefix="/api/v1", tags=["face-login"])
 app.include_router(syllabus_catalog.router, prefix="/api/v1", tags=["syllabus"])
+app.include_router(department_admin.router, prefix="/api/v1", tags=["departments"])
 app.include_router(live_test.router, prefix="/api/v1", tags=["live-test"])
 app.include_router(online_admin.router, prefix="/api/v1", tags=["online-admin"])
 app.include_router(online_teacher.router, prefix="/api/v1", tags=["online-teacher"])
