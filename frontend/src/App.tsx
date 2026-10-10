@@ -46,7 +46,8 @@ import {
   type UserRole,
 } from './utils/localStaffAuth';
 import { clearBackendAuthTokens, getBackendAccessToken, setUnauthorizedHandler, syncSessionRoleFromServer, syncStaffPhotoFromServer } from './utils/backendAuth';
-import { clearSyllabusRowCache } from './utils/syllabusRowCache';
+import { clearSyllabusRowCache, getCachedSyllabusRow } from './utils/syllabusRowCache';
+import { localizedSubjectName, localizedTopicTitle } from './utils/syllabusI18n';
 import { resolveProfilePhotoUrl } from './utils/profilePhotoApi';
 import {
   type AppLanguage,
@@ -306,6 +307,8 @@ type AppNotification = {
   /** Tarjima kalitlari — bo'lsa, tarix JORIY tilda ko'rsatiladi. */
   titleKey?: UiTextKey;
   bodyKey?: UiTextKey;
+  bodyParams?: Record<string, string | number>;
+  topicSyllabusId?: number;
 };
 
 const NOTIFICATIONS_STORAGE_KEY = 'imentor-notifications-v1';
@@ -329,6 +332,21 @@ function persistActiveView(view: View): void {
   } catch {
     /* quota */
   }
+}
+
+/** Bildirishnoma parametrlaridagi fan/mavzu nomini joriy tilga o'giradi (tarjima bo'lsa). */
+function localizeNotificationParams(
+  n: Pick<AppNotification, 'bodyParams' | 'topicSyllabusId'>,
+  lang: AppLanguage,
+): Record<string, string | number> | undefined {
+  const params = n.bodyParams;
+  if (!params || n.topicSyllabusId == null) return params;
+  const row = getCachedSyllabusRow(n.topicSyllabusId);
+  if (!row) return params;
+  const out = { ...params };
+  if (typeof out.title === 'string') out.title = localizedTopicTitle(row, out.title, lang);
+  if (typeof out.subject === 'string') out.subject = localizedSubjectName(row, lang);
+  return out;
 }
 
 function readStoredNotifications(): AppNotification[] {
@@ -408,6 +426,8 @@ export default function App() {
       level: detail.level ?? 'info',
       ...(detail.titleKey ? { titleKey: detail.titleKey } : {}),
       ...(detail.bodyKey ? { bodyKey: detail.bodyKey } : {}),
+      ...(detail.bodyParams ? { bodyParams: detail.bodyParams } : {}),
+      ...(detail.topicSyllabusId != null ? { topicSyllabusId: detail.topicSyllabusId } : {}),
     };
     setNotifications((prev) => [next, ...prev].slice(0, 80));
   }, []);
@@ -480,6 +500,9 @@ export default function App() {
         name: user.displayName || translate(language, 'shell.staffDefaultName'),
       }),
       titleKey: 'shell.welcomeTitle',
+      // Ism parametr sifatida saqlanadi — tarix joriy tilda qayta yoziladi.
+      bodyKey: 'shell.welcomeBody',
+      bodyParams: { name: user.displayName || translate(language, 'shell.staffDefaultName') },
       level: 'success',
     });
   }, [user?.uid, user?.displayName, addNotification]);
@@ -616,9 +639,10 @@ export default function App() {
     setActiveView('syllabus');
   }, []);
 
-  const handleSelectTopic = (topic: SyllabusTopicContext) => {
+  const handleSelectTopic = (topic: SyllabusTopicContext, opts?: { silent?: boolean }) => {
     setSelectedTopic(topic);
     persistSelectedTopic(topic);
+    if (opts?.silent) return;
     addNotification({
       title: translate(language, 'shell.topicSelectedTitle'),
       // Mavzu nomi ichida — kalit bilan qayta tarjima qilinmaydi.
@@ -628,6 +652,10 @@ export default function App() {
         title: topic.title,
       }),
       titleKey: 'shell.topicSelectedTitle',
+      // Mavzu va fan nomi tarixda JORIY tilda ko'rsatiladi (sillabus tarjimasidan).
+      bodyKey: 'shell.topicSelectedBody',
+      bodyParams: { subject: topic.subjectName, id: topic.id, title: topic.title },
+      topicSyllabusId: topic.syllabusId,
     });
   };
 
@@ -1075,7 +1103,9 @@ export default function App() {
                             {n.titleKey ? translate(language, n.titleKey) : n.title}
                           </p>
                           <p className="text-[12px] text-black/60 mt-0.5 break-words">
-                            {n.bodyKey ? translate(language, n.bodyKey) : n.body}
+                            {n.bodyKey
+                              ? translate(language, n.bodyKey, localizeNotificationParams(n, language))
+                              : n.body}
                           </p>
                           <p className="text-[10px] text-black/35 mt-1">
                             {new Date(n.createdAt).toLocaleString(localeForLanguage(language))}

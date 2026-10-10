@@ -43,6 +43,38 @@ def questions_of(session: LiveTestSession) -> list[dict]:
     return raw if isinstance(raw, list) else []
 
 
+def answer_key_signature(questions: list) -> list[tuple]:
+    """Savol matni, variantlar va to'g'ri javob — baholashga ta'sir qiladigan hamma narsa.
+
+    Izoh, tarjima va manbalar kirmaydi: ular sessiya davomida yangilanishi
+    mumkin (fondagi "enrich"), baholash esa o'zgarmaydi.
+    """
+    out: list[tuple] = []
+    for q in questions if isinstance(questions, list) else []:
+        if not isinstance(q, dict):
+            out.append(("", (), -1))
+            continue
+        options = q.get("options") if isinstance(q.get("options"), list) else []
+        try:
+            correct = int(q.get("correctOptionIndex", -1))
+        except (TypeError, ValueError):
+            correct = -1
+        out.append((str(q.get("question", "")).strip(), tuple(str(o) for o in options), correct))
+    return out
+
+
+def answer_key_locked(session, new_questions: list) -> bool:
+    """Talaba topshirgan yoki yopilgan sessiyada javob kalitini almashtirish taqiqlanadi.
+
+    Aks holda server ballni yangi kalit bo'yicha hisoblab, allaqachon
+    topshirganlarning natijasi orqaga qarab o'zgarib ketardi.
+    """
+    if not (session.is_closed or session.submissions):
+        return False
+    payload = session.payload if isinstance(session.payload, dict) else {}
+    return answer_key_signature(payload.get("questions", [])) != answer_key_signature(new_questions)
+
+
 def strip_questions_for_student(questions: list[dict]) -> list[dict]:
     stripped: list[dict] = []
     for q in questions:

@@ -191,11 +191,27 @@ export async function deletePresentation(id: number): Promise<void> {
   if (!res.ok && res.status !== 204) {
     throw new HttpError(`HTTP ${res.status}`, res.status, null);
   }
-  const cached = blobCache.get(id);
-  if (cached) {
-    URL.revokeObjectURL(cached);
-    blobCache.delete(id);
+  pruneBlobs(blobCache, (key) => key !== id);
+  pruneBlobs(previewBlobCache, (key) => key !== id);
+}
+
+function pruneBlobs(cache: Map<number, string>, keep: (id: number) => boolean): void {
+  for (const [key, url] of [...cache]) {
+    if (keep(key)) continue;
+    URL.revokeObjectURL(url);
+    cache.delete(key);
   }
+}
+
+/**
+ * Joriy mavzuda yo'q taqdimotlarning fayllarini xotiradan bo'shatadi.
+ * Ilgari ochilgan har PPTX/PDF sessiya oxirigacha xotirada qolardi va uzoq
+ * ishlaganda brauzer og'irlashardi.
+ */
+export function prunePresentationBlobCache(keepIds: number[]): void {
+  const keep = new Set(keepIds);
+  pruneBlobs(blobCache, (id) => keep.has(id));
+  pruneBlobs(previewBlobCache, (id) => keep.has(id));
 }
 
 export function isAllowedPresentationFile(file: File): boolean {

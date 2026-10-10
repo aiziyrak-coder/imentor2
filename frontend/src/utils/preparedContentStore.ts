@@ -129,6 +129,19 @@ async function postWithRetry(
   }
 }
 
+/** Material saqlandi/yangilandi/o'chirildi — "Mening fanlarim"dagi
+ * tayyorlik nuqtalari shu hodisa bilan yangilanadi (sahifa fonda ochiq
+ * turadi, aks holda nuqtalar eskiligicha qolardi). */
+export const PREPARED_CONTENT_CHANGED_EVENT = 'imentor:prepared-content-changed';
+
+function notifyPreparedContentChanged(): void {
+  try {
+    window.dispatchEvent(new Event(PREPARED_CONTENT_CHANGED_EVENT));
+  } catch {
+    /* SSR / test muhiti */
+  }
+}
+
 /** Asosiy saqlash — FastAPI `/v1/prepared-content/` (Postgres). localStorage ishlatilmaydi.
  * Qaytaradi: yaratilgan yozuvning Baza id'si (`cloud_<n>`) — chaqiruvchi uni
  * keyinroq yangilashi (PATCH) yoki fayl bilan bog'lashi mumkin. Server id
@@ -159,6 +172,7 @@ export async function savePreparedContent(
       topic_code: meta?.topicCode?.trim() || '',
       payload: lightPayload,
   });
+  notifyPreparedContentChanged();
   return created?.id != null ? cloudId(created.id) : null;
 }
 
@@ -180,6 +194,7 @@ export async function updatePreparedContentPayload(
       body: { payload: stripHeavyMediaFromPayload(payload) },
       timeoutMs: 60_000,
     });
+    notifyPreparedContentChanged();
     return true;
   } catch {
     return false;
@@ -354,6 +369,7 @@ export async function deletePreparedContent(kind: PreparedContentKind, id: strin
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
+  notifyPreparedContentChanged();
   void kind;
 }
 

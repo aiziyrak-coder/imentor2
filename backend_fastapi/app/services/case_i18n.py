@@ -322,7 +322,12 @@ def _split_long(text: str) -> list[str]:
 def _system_prompt(kind: str, source: str, target: str, strict_note: str = "") -> str:
     # "CLINICAL" emas: keys klinik bo'lmagan fanda ham bor (IT, til, gigiyena) va
     # tarjimon "klinik" deb bilgan matnga tibbiy atamalar qo'shardi (2026-09-26).
-    what = "CASE STUDIES" if kind == KIND_CASE else "MULTIPLE-CHOICE TEST QUESTIONS"
+    what = {
+        KIND_CASE: "CASE STUDIES",
+        KIND_TEST: "MULTIPLE-CHOICE TEST QUESTIONS",
+        "lecture": "UNIVERSITY LECTURE NOTES (Markdown)",
+        "presentation": "PRESENTATION SLIDE TEXTS",
+    }.get(kind, "EDUCATIONAL TEXTS")
     rules = (
         f"You translate {what} for a medical institute from {LANG_NAMES.get(source, source)} "
         f"into {LANG_NAMES.get(target, target)}. Translate the MEANING into natural, professional "

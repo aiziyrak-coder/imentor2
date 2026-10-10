@@ -27,6 +27,7 @@ import {
   uploadHandout,
   HANDOUT_FILE_ACCEPT,
   isAllowedHandoutFile,
+  pruneHandoutBlobCache,
   type TopicHandoutItem,
 } from '../utils/handoutApi';
 import { generateAndUploadTopicHandouts } from '../utils/handoutGenerate';
@@ -36,6 +37,10 @@ import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import { staffBtnGhost, staffBtnPrimary, staffBtnSecondary } from './staff/staffUi';
 import { isTopicContextComplete, topicContextKey } from '../utils/syllabusTopicContext';
+import { contentLanguageFor } from '../utils/syllabusInstructionLanguage';
+
+/** `generateAndUploadTopicHandouts` fayl nomi: `tarqatma-<kod>-<til>.png`. */
+const AI_HANDOUT_FILE_RE = /^tarqatma-.+-(uz|ru|en)\.png$/i;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -252,13 +257,9 @@ export default function HandoutMaterials() {
     try {
       const list = await fetchHandoutsForTopic(globalTopic);
       if (seq !== requestSeq.current) return;
-      const prefer = language;
-      list.sort((a, b) => {
-        const ap = handoutLanguage(a) === prefer ? 0 : 1;
-        const bp = handoutLanguage(b) === prefer ? 0 : 1;
-        return ap - bp;
-      });
       setItems(list);
+      // Boshqa mavzularning rasm/PDF fayllari xotirada to'planib qolmasin.
+      pruneHandoutBlobCache(list.map((x) => x.id));
     } catch (e) {
       if (seq !== requestSeq.current) return;
       setError(
@@ -275,12 +276,45 @@ export default function HandoutMaterials() {
     void loadHandouts();
   }, [loadHandouts]);
 
+  useEffect(() => {
+    setLightboxIndex(null);
+  }, [topicKey, language]);
+
+  /**
+   * Ko'rinadigan tarqatmalar.
+   *
+   * AI infografika har doim uch tilda (uz/ru/en) yaratiladi — ekranda faqat
+   * interfeys tilidagisi chiqadi (ilgari uchala til aralash ko'rsatilardi).
+   * O'qituvchi o'zi yuklagan fayllar o'zgarishsiz qoladi.
+   */
+  const isAiHandout = (item: TopicHandoutItem) => AI_HANDOUT_FILE_RE.test(item.file_name || '');
+  const hasAiInLanguage = items.some((item) => isAiHandout(item) && handoutLanguage(item) === language);
+  const visibleItems = items.filter(
+    (item) => !isAiHandout(item) || !hasAiInLanguage || handoutLanguage(item) === language,
+  );
+
   /** O'chirish: o'zi yuklagani yoki o'z fanidagi tarqatma (server `can_delete` beradi). */
   const handleDelete = async (item: TopicHandoutItem) => {
     if (!window.confirm(t('handout.deleteConfirm'))) return;
     setDeletingId(item.id);
     setError(null);
     try {
+      // AI infografika uch tilda bir vaqtda yaratiladi — o'chirilganda uning
+      // boshqa tildagi nusxalari ham o'chadi (aks holda til almashganda
+      // "o'chirilgan" tarqatma qaytib chiqardi).
+      if (AI_HANDOUT_FILE_RE.test(item.file_name || '')) {
+        const base = item.file_name.replace(/-(uz|ru|en)\.png$/i, '');
+        const created = Date.parse(item.created_at);
+        const siblings = items.filter(
+          (other) =>
+            other.id !== item.id &&
+            other.can_delete === true &&
+            AI_HANDOUT_FILE_RE.test(other.file_name || '') &&
+            other.file_name.replace(/-(uz|ru|en)\.png$/i, '') === base &&
+            Math.abs(Date.parse(other.created_at) - created) < 10 * 60 * 1000,
+        );
+        for (const sibling of siblings) await deleteHandout(sibling.id);
+      }
       await deleteHandout(item.id);
       setLightboxIndex(null);
       await loadHandouts();
@@ -293,17 +327,50 @@ export default function HandoutMaterials() {
 
   const handleUploadFiles = async (list: FileList | null) => {
     if (!globalTopic || !isTopicContextComplete(globalTopic)) return;
-    const picked = Array.from(list || []).filter(isAllowedHandoutFile);
-    if (picked.length === 0) return;
+    const all = Array.from(list || []);
+    const picked = all.filter(isAllowedHandoutFile);
+    const rejected = all.filter((f) => !isAllowedHandoutFile(f)).map((f) => f.name);
+    // Ruxsat etilmagan fayl indamay tashlab yuborilmaydi — nomi aytiladi.
+    const rejectedMsg = rejected.length
+      ? t('handout.errorFileTypeSkipped', { names: rejected.join(', ') })
+      : '';
+    if (picked.length === 0) {
+      setError(rejectedMsg || null);
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     setBusy('upload');
     setError(null);
+    // Fayl FAN tilida belgilanadi (interfeys tilida emas) — ma'ruza/test bilan bir xil qoida.
+    const fileLanguage = contentLanguageFor(globalTopic, language);
+    const failed: string[] = [];
+    let lastErr: unknown = null;
     try {
+      // Bittasi yiqilsa qolganlari to'xtab qolmaydi; oxirida qaysilari
+      // yuklanmagani aytiladi.
       for (const file of picked) {
-        await uploadHandout({ topic: globalTopic, file, language });
+        try {
+          await uploadHandout({ topic: globalTopic, file, language: fileLanguage });
+        } catch (err) {
+          failed.push(file.name);
+          lastErr = err;
+        }
       }
       await loadHandouts();
-    } catch (err) {
-      setError(backendErrorMessage(err) || t('handout.errorUpload'));
+      const parts: string[] = [];
+      if (failed.length) {
+        parts.push(
+          picked.length > 1
+            ? t('handout.uploadPartial', {
+                done: picked.length - failed.length,
+                failed: failed.length,
+                names: failed.join(', '),
+              })
+            : backendErrorMessage(lastErr) || t('handout.errorUpload'),
+        );
+      }
+      if (rejectedMsg) parts.push(rejectedMsg);
+      if (parts.length) setError(parts.join(' '));
     } finally {
       setBusy(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -418,14 +485,14 @@ export default function HandoutMaterials() {
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-slate-300" size={36} />
         </div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="mx-auto max-w-sm px-4 py-16 text-center">
           <FileText size={22} className="mx-auto mb-3 text-slate-300" />
           <p className="text-[13px] leading-relaxed text-slate-500">{t('handout.empty')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-          {items.map((item, idx) => (
+          {visibleItems.map((item, idx) => (
             <motion.div
               key={item.id}
               layout
@@ -478,16 +545,16 @@ export default function HandoutMaterials() {
         </div>
       )}
 
-      {items.length > 0 && (
+      {visibleItems.length > 0 && (
         <p className="text-center text-[12px] text-slate-400">
-          {t('handout.totalCount', { count: items.length })}
+          {t('handout.totalCount', { count: visibleItems.length })}
         </p>
       )}
 
       <AnimatePresence>
-        {lightboxIndex !== null && items[lightboxIndex] && (
+        {lightboxIndex !== null && visibleItems[lightboxIndex] && (
           <HandoutLightbox
-            items={items}
+            items={visibleItems}
             index={lightboxIndex}
             onClose={() => setLightboxIndex(null)}
             onIndexChange={setLightboxIndex}
