@@ -51,7 +51,7 @@ describe('DesktopHodimQrLogin', () => {
 
   it("muddati tugagan QR tugma bosilmasdan o'zi yangilanadi", async () => {
     pollMock.mockResolvedValue({ status: 'expired' });
-    renderWithProviders(<DesktopHodimQrLogin onOtherRoles={() => {}} />);
+    renderWithProviders(<DesktopHodimQrLogin />);
     await tick(0);
     expect(createMock).toHaveBeenCalledTimes(1);
 
@@ -63,7 +63,7 @@ describe('DesktopHodimQrLogin', () => {
 
   it("oyna ochiq qolib ketsa cheksiz yangilanmaydi — xabar chiqadi", async () => {
     pollMock.mockResolvedValue({ status: 'expired' });
-    renderWithProviders(<DesktopHodimQrLogin onOtherRoles={() => {}} />);
+    renderWithProviders(<DesktopHodimQrLogin />);
     await tick(0);
     for (let i = 0; i < 10; i += 1) await tick(2100);
 

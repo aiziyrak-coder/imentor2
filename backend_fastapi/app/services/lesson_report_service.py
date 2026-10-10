@@ -6,13 +6,17 @@ o'qituvchilar hisobga olinardi. Ya'ni ko'pchilik nazoratdan chetda qolardi.
 
 Endi manba — HEMIS jadvalining to'liq nusxasi (`core_hemislesson`). Har bir
 dars uchun bitta savolga javob beriladi: o'qituvchi shu dars vaqtida iMentor'ni
-ishlatdimi? "Ishlatdi" degani — o'sha oynada jonli test ochgani yoki QR bilan
-kompyuterga kirgani (monitor hisobotidagi bilan bir xil o'lchov).
+ishlatdimi? "Ishlatdi" degani — o'sha oynada jonli test ochgani, QR bilan
+kompyuterga kirgani YOKI platformada ishlagani (sahifa ochgani, material
+ko'rgani, ekran ochiq turgani). Oxirgisi 2026-10-08 da qo'shildi: usiz
+ma'ruzani iMentor'dan ko'rsatgan o'qituvchi "ishlatmagan" deb chiqardi.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import os
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 
 from sqlalchemy import select
@@ -20,10 +24,47 @@ from sqlalchemy.orm import Session
 
 from app.models.hemis_lesson import HemisLesson
 from app.services import monitor_schedule_service as ms
+from app.services.dean_access import in_groups
 
 # Dars boshlanishidan oldin va tugagandan keyin qancha vaqt "shu darsniki" hisoblanadi.
 BEFORE = dt.timedelta(minutes=15)
 AFTER = dt.timedelta(minutes=5)
+
+#: Dars "iMentor'da o'tilgan" deb hisoblanishi uchun kerak bo'lgan ENG KAM
+#: ish vaqti (daqiqa). Institut talabi: dars to'liq iMentor'da o'tilsin —
+#: ya'ni ~60 daqiqa, majburiy eng kami 50 (2026-10-08).
+#:
+#: Ilgari chegara umuman yo'q edi: bir sahifaga 3-4 daqiqa kirgan o'qituvchi
+#: ham "ishlatdi" bo'lib chiqardi va hisobot aldardi.
+#:
+#: `IMENTOR_MIN_LESSON_MINUTES` bilan o'zgartiriladi — talab o'zgarsa
+#: yangi versiya chiqarish shart emas.
+MIN_LESSON_MINUTES = int(os.environ.get("IMENTOR_MIN_LESSON_MINUTES") or 50)
+
+
+def _worked_seconds(spans: list[tuple[dt.datetime, dt.datetime]],
+                    ends: list[dt.datetime], start: dt.datetime, end: dt.datetime) -> int:
+    """Dars oynasi ichida HAQIQATAN ishlangan soniya.
+
+    Bir vaqtda ikki oyna (telefon + monitor) ochiq bo'lsa, o'sha daqiqa ikki
+    marta sanalmasin: oraliqlar birlashtiriladi.
+
+    `spans` oxiri bo'yicha tartiblangan, `ends` esa o'sha oxirlar — shuning
+    uchun har dars uchun butun ro'yxat emas, faqat kerakli bo'lagi ko'riladi.
+    Bunisiz hisobot 19 soniyaga cho'zilgandi (2026-10-08).
+    """
+    total = 0
+    reached = start
+    for i in range(bisect_left(ends, start), len(spans)):
+        a, b = spans[i]
+        if a >= end:
+            break
+        a, b = max(a, start), min(b, end)
+        if b <= a or b <= reached:
+            continue
+        total += int((b - max(a, reached)).total_seconds())
+        reached = max(reached, b)
+    return total
 
 
 def _window(lesson: HemisLesson) -> tuple[dt.datetime, dt.datetime]:
@@ -43,47 +84,70 @@ def _window(lesson: HemisLesson) -> tuple[dt.datetime, dt.datetime]:
 
 
 def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
-             teacher: str = "") -> list[HemisLesson]:
+             teacher: str = "", groups: tuple[str, ...] = ()) -> list[HemisLesson]:
     q = select(HemisLesson).where(HemisLesson.lesson_date >= start_day, HemisLesson.lesson_date <= end_day)
     if teacher:
         q = q.where(HemisLesson.teacher_username == teacher)
     rows = list(db.execute(q).scalars())
+    if groups:
+        # Xalqaro fakultet dekani: faqat o'z guruhlariga o'tilgan darslar.
+        rows = [r for r in rows if in_groups(r.group_name, groups)]
     if department:
         needle = ms._norm(department)
         rows = [r for r in rows if needle in ms._norm(r.department_name) or ms._norm(r.department_name) in needle]
     return rows
 
 
-def _used_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[bool, int]]:
-    """Har dars uchun (ishlatildimi, talaba soni)."""
+def work_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[int, int]]:
+    """Har dars uchun (ishlangan soniya, talaba soni) — chegarasiz, xom o'lchov."""
     usernames = {x.teacher_username for x in lessons if x.teacher_username}
     if not usernames or not lessons:
         return {}
     days = [x.lesson_date for x in lessons]
-    window_start = dt.datetime.combine(min(days), dt.time(0, 0), tzinfo=ms.TASHKENT)
-    window_end = dt.datetime.combine(max(days) + dt.timedelta(days=1), dt.time(0, 0), tzinfo=ms.TASHKENT)
-    events = ms._usage_events(db, usernames, window_start, window_end)
+    lo_day = dt.datetime.combine(min(days), dt.time(0, 0), tzinfo=ms.TASHKENT)
+    hi_day = dt.datetime.combine(max(days) + dt.timedelta(days=1), dt.time(0, 0), tzinfo=ms.TASHKENT)
+    spans = ms._work_spans(db, usernames, lo_day, hi_day)
+    span_ends = {k: [b for _, b in v] for k, v in spans.items()}
+    events = ms._usage_events(db, usernames, lo_day, hi_day)
 
-    out: dict[int, tuple[bool, int]] = {}
+    ordered = {k: sorted(v) for k, v in events.items() if v}
+    moments = {k: [w for w, _ in v] for k, v in ordered.items()}
+
+    out: dict[int, tuple[int, int]] = {}
     for lesson in lessons:
-        if not lesson.teacher_username:
+        owner = lesson.teacher_username or ""
+        if not owner:
             continue
         start, end = _window(lesson)
+        seconds = _worked_seconds(spans.get(owner, []), span_ends.get(owner, []), start, end)
         students = 0
-        used = False
-        for when, count in events.get(lesson.teacher_username, []):
-            if start <= when <= end:
-                used = True
-                students += count
-        if used:
-            out[lesson.id] = (True, students)
+        rows = ordered.get(owner)
+        if rows:
+            times = moments[owner]
+            a = bisect_left(times, start)
+            b = bisect_right(times, end)
+            students = sum(count for _, count in rows[a:b])
+        if seconds or students:
+            out[lesson.id] = (seconds, students)
     return out
 
 
+def _used_map(db: Session, lessons: list[HemisLesson]) -> dict[int, tuple[bool, int]]:
+    """Har dars uchun (ishlatildimi, talaba soni).
+
+    "Ishlatildi" — dars vaqtida kamida `MIN_LESSON_MINUTES` daqiqa ishlangan.
+    Qisqa kirib chiqish hisoblanmaydi: maqsad darsni iMentor'da O'TISH.
+    """
+    need = MIN_LESSON_MINUTES * 60
+    return {k: (True, students) for k, (seconds, students) in work_map(db, lessons).items()
+            if seconds >= need}
+
+
 def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
+                 groups: tuple[str, ...] = (),
                  query: str = "") -> dict:
     """Har o'qituvchi bo'yicha bitta qator: nechta dars, nechtasida ishlatgan."""
-    lessons = _lessons(db, start_day, end_day, department=department)
+    lessons = _lessons(db, start_day, end_day, department=department, groups=groups)
     used = _used_map(db, lessons)
 
     by_teacher: dict[str, dict] = {}
@@ -159,9 +223,10 @@ def teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departmen
     }
 
 
-def department_rows(db: Session, start_day: dt.date, end_day: dt.date) -> list[dict]:
+def department_rows(db: Session, start_day: dt.date, end_day: dt.date,
+                    *, groups: tuple[str, ...] = ()) -> list[dict]:
     """Kafedra kesimi — qaysi kafedra qanchalik ishlatyapti."""
-    lessons = _lessons(db, start_day, end_day)
+    lessons = _lessons(db, start_day, end_day, groups=groups)
     used = _used_map(db, lessons)
     agg: dict[str, dict] = defaultdict(lambda: {"lessons": 0, "used": 0, "teachers": set(), "used_teachers": set()})
     for lesson in lessons:
@@ -186,9 +251,10 @@ def department_rows(db: Session, start_day: dt.date, end_day: dt.date) -> list[d
 
 
 def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: str = "",
+                groups: tuple[str, ...] = (),
                 department: str = "", only_missed: bool = False, limit: int = 2000) -> list[dict]:
     """Darslar ro'yxati — kim, qachon, qaysi fan, ishlatildimi."""
-    lessons = _lessons(db, start_day, end_day, department=department, teacher=teacher)
+    lessons = _lessons(db, start_day, end_day, department=department, teacher=teacher, groups=groups)
     used = _used_map(db, lessons)
     lessons.sort(key=lambda x: (x.lesson_date, x.para, x.teacher_name))
     out = []
@@ -222,6 +288,8 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
             "monitor_room": getattr(lesson, "monitor_room", ""),
             "monitor_department": getattr(lesson, "monitor_department", ""),
             "synced_at": (lambda t: t.isoformat() if t else None)(getattr(lesson, "synced_at", None)),
+            "hemis_status": getattr(lesson, "hemis_status", "active"),
+            "hemis_missing_at": (lambda t: t.isoformat() if t else None)(getattr(lesson, "hemis_missing_at", None)),
         })
         if len(out) >= limit:
             break

@@ -15,6 +15,8 @@ from app.models import (  # noqa: F401
     monitor_schedule,
     online_edu,
     password_policy,
+    person_identity,
+    platform_stat,
     prepared_content,
     staff_location,
     staff_pinfl,

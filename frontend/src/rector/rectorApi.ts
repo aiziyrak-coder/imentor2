@@ -856,6 +856,15 @@ export type ScheduledLessonRow = {
   monitor_room: string;
   monitor_department: string;
   synced_at: string | null;
+  hemis_status?: string;
+  hemis_missing_at?: string | null;
+  evidence?: {
+    status: string; room_presence: string; note: string; seconds: number;
+    reported_seconds?: number; overlap_seconds?: number;
+    first_event?: string | null; last_event?: string | null;
+    pages: Array<{ page: string; seconds: number; opens: number }>;
+    events: Array<{ id: number; at: string; action: string; page: string; seconds: number }>;
+  };
 };
 
 export function fetchLessonTeachers(f: ReportFilters): Promise<LessonTeachersReport> {
@@ -969,6 +978,13 @@ export type ControlReport = {
     total_lessons: number;
     blamed_teachers: number;
     check_room_teachers: number;
+    /** Monitorli xonada darsi umuman yo'q — asosiy foizga kirmaydi. */
+    offsite_teachers: number;
+    /** Kirgan, lekin darsni iMentor'da o'tmagan (chegaradan past). */
+    short_lessons: number;
+    short_teachers: number;
+    /** Dars "o'tilgan" deyish uchun kerak bo'lgan eng kam daqiqa. */
+    min_lesson_minutes: number;
   };
   attention: ControlAttention[];
   check_room: ControlAttention[];
@@ -992,7 +1008,17 @@ export type ControlReport = {
     active_teachers: number;
     other_lessons: number;
   }>;
+  /** FAQAT monitorli xonada darsi borlar. */
   teachers: ControlTeacher[];
+  /** Klinika bazasida yoki masofadan dars o'tadiganlar — alohida. */
+  offsite: {
+    teachers: ControlTeacher[];
+    count: number;
+    lessons: number;
+    used: number;
+    places: Array<{ place: string; lessons: number; used: number; teachers: number; percent: number }>;
+    places_total: number;
+  };
   quality: {
     minutes: number;
     worked: number;
@@ -1043,6 +1069,35 @@ export type ControlStudents = {
   }>;
 };
 
+/** Institutning hamma tizimi bitta javobda. */
+export type PlatformsReport = {
+  from: string;
+  to: string;
+  platforms: Array<{
+    key: string;
+    label: string;
+    link: string;
+    /** `true` — raqamlar shu so'rovda hisoblandi; `false` — soatlik nusxadan. */
+    live: boolean;
+    /** `false` — oxirgi yig'ish o'tmagan: raqamlar eski. */
+    ok: boolean;
+    note: string;
+    collected_at: string | null;
+    cards: Array<{ metric: string; title: string; value: number | string; hint: string }>;
+  }>;
+  /** Hali ulanmagan tizimlar — sababi bilan. */
+  missing: Array<{ key: string; label: string; note: string }>;
+};
+
+export function fetchPlatforms(f: ReportFilters): Promise<PlatformsReport> {
+  return get(`/platforms/?${query({ from: f.from, to: f.to })}`);
+}
+
+/** Bosh sahifa uchun: faqat nomlar — raqamlar hisoblanmaydi, shuning uchun tez. */
+export function fetchPlatformNames(f: ReportFilters): Promise<PlatformsReport> {
+  return get(`/platforms/?${query({ from: f.from, to: f.to, names: '1' })}`);
+}
+
 export function fetchControlReport(f: ReportFilters): Promise<ControlReport> {
   return get(`/control/?${query({ from: f.from, to: f.to, department: f.department, q: f.q })}`);
 }
@@ -1080,7 +1135,14 @@ export function fetchControlStudents(f: ReportFilters): Promise<ControlStudents>
 
 export type ControlTeacherDetail = {
   teacher_key: string;
-  profile: { display_name: string; job_title: string; department: string; last_login: string | null };
+  profile: {
+    display_name: string;
+    job_title: string;
+    department: string;
+    last_login: string | null;
+    /** Tanlangan davr ichidagi oxirgi faol kun (davrdan tashqarisi hisobga olinmaydi). */
+    last_active: string | null;
+  };
   summary: ControlTeacher | null;
   materials: {
     handouts: number;

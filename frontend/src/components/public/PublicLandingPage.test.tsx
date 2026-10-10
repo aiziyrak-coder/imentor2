@@ -10,9 +10,9 @@ vi.mock('../../utils/contentCatalogApi', () => ({
 vi.mock('../auth/DesktopHodimQrLogin', () => ({ default: () => <div data-testid="qr-login" /> }));
 vi.mock('../auth/FaceLogin', () => ({ default: () => <div data-testid="face-login" /> }));
 vi.mock('../auth/LoginPage', () => ({ default: () => <div data-testid="password-login" /> }));
-vi.mock('../auth/MobileMinimalLogin', () => ({ default: () => <div data-testid="mobile-login" /> }));
-vi.mock('../auth/RegisterPage', () => ({ default: () => <div data-testid="register" /> }));
+vi.mock('../auth/IdLogin', () => ({ default: () => <div data-testid="mobile-login" /> }));
 vi.mock('../../utils/deviceDetection', () => ({ isDesktopBrowser: () => true }));
+
 
 import PublicLandingPage from './PublicLandingPage';
 
@@ -32,8 +32,6 @@ function renderPage(overrides: Partial<React.ComponentProps<typeof PublicLanding
     language: 'uz' as const,
     setLanguage: vi.fn(),
     isMobileDevice: false,
-    desktopAuthView: 'face' as 'face' | 'qr' | 'password',
-    setDesktopAuthView: vi.fn(),
     ...overrides,
   };
   render(<PublicLandingPage {...props} />);
@@ -62,26 +60,23 @@ describe('PublicLandingPage', () => {
 
   it("kompyuterda kirish tugmasi faqat QR ni ochadi (yuz skaneri telefonda)", async () => {
     const user = userEvent.setup();
-    const props = renderPage();
+    renderPage();
     await user.click(screen.getAllByRole('button', { name: /Tizimga kirish/ })[0]);
-    expect(props.setDesktopAuthView).toHaveBeenCalledWith('qr');
     expect(await screen.findByTestId('qr-login')).toBeInTheDocument();
     expect(screen.queryByTestId('face-login')).toBeNull();
   });
 
-  it("eski 'face' holati ham kompyuterda QR ni ko'rsatadi", async () => {
-    const user = userEvent.setup();
-    renderPage({ desktopAuthView: 'face' });
-    await user.click(screen.getAllByRole('button', { name: /Tizimga kirish/ })[0]);
-    expect(await screen.findByTestId('qr-login')).toBeInTheDocument();
+  it("ro'yxatdan o'tish tugmasi umuman yo'q", () => {
+    renderPage();
+    expect(screen.queryByRole('button', { name: "Ro'yxatdan o'tish" })).toBeNull();
   });
 
-  it("ro'yxatdan o'tish QR emas, ro'yxat formasini ochadi", async () => {
+  it("kompyuterda parol oynasiga o'tish yo'li qolmagan", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(screen.getByRole('button', { name: "Ro'yxatdan o'tish" }));
-    expect(await screen.findByTestId('register')).toBeInTheDocument();
-    expect(screen.queryByTestId('qr-login')).toBeNull();
+    await user.click(screen.getAllByRole('button', { name: /Tizimga kirish/ })[0]);
+    expect(await screen.findByTestId('qr-login')).toBeInTheDocument();
+    expect(screen.queryByTestId('password-login')).toBeNull();
   });
 
   it("til tugmasi tilni almashtiradi", async () => {

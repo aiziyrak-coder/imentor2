@@ -21,23 +21,15 @@ import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/rea
 import type { AppLanguage } from '../../i18n/language';
 import { languageLabel } from '../../i18n/language';
 import { translate, type UiTextKey } from '../../i18n/translations';
-import LoginPage from '../auth/LoginPage';
-import RegisterPage from '../auth/RegisterPage';
 import DesktopHodimQrLogin from '../auth/DesktopHodimQrLogin';
-import MobileMinimalLogin from '../auth/MobileMinimalLogin';
+import IdLogin from '../auth/IdLogin';
 import { isDesktopBrowser } from '../../utils/deviceDetection';
 import { fetchPublicCatalogTotals, type CatalogStatsTotals } from '../../utils/contentCatalogApi';
-
-type AuthScreen = 'login' | 'register';
-
-type DesktopAuthView = 'face' | 'qr' | 'password';
 
 type Props = {
   language: AppLanguage;
   setLanguage: (lang: AppLanguage) => void;
   isMobileDevice: boolean;
-  desktopAuthView: DesktopAuthView;
-  setDesktopAuthView: (v: DesktopAuthView) => void;
 };
 
 /** Barcha bo'limlarning umumiy kengligi va chetki bo'shlig'i. */
@@ -331,28 +323,20 @@ export default function PublicLandingPage({
   language,
   setLanguage,
   isMobileDevice,
-  desktopAuthView,
-  setDesktopAuthView,
 }: Props) {
   const tr = useCallback((key: UiTextKey) => translate(language, key), [language]);
   const reduce = useReducedMotion();
   const [authOpen, setAuthOpen] = useState(false);
-  const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [totals, setTotals] = useState<CatalogStatsTotals | null>(null);
 
-  const openAuth = useCallback(
-    (screen: AuthScreen = 'login') => {
-      setAuthScreen(screen);
-      // Kompyuterda kirish har safar QR'dan boshlanadi. Yuz skaneri faqat telefonda:
-      // telefon yuzni tekshiradi va joylashuvni ham o'sha yerdan oladi (2026-09-18).
-      if (screen === 'login') setDesktopAuthView('qr');
-      setMenuOpen(false);
-      setAuthOpen(true);
-    },
-    [setDesktopAuthView],
-  );
+  // Kompyuterda kirish FAQAT QR orqali: telefon yuzni tekshiradi va
+  // joylashuvni ham o'sha yerdan oladi (2026-09-18, 2026-10-02).
+  const openAuth = useCallback(() => {
+    setMenuOpen(false);
+    setAuthOpen(true);
+  }, []);
 
   const scrollTo = (id: string) => {
     setMenuOpen(false);
@@ -470,7 +454,7 @@ export default function PublicLandingPage({
             </div>
             <button
               type="button"
-              onClick={() => openAuth('login')}
+              onClick={() => openAuth()}
               className="lp-primary hidden h-9 items-center rounded-lg px-4 text-[14px] font-semibold text-white sm:inline-flex"
             >
               {tr('publicLanding.login')}
@@ -509,7 +493,7 @@ export default function PublicLandingPage({
                 ))}
                 <button
                   type="button"
-                  onClick={() => openAuth('login')}
+                  onClick={() => openAuth()}
                   className="lp-primary mt-2 flex h-12 items-center justify-center rounded-xl text-[15px] font-semibold text-white"
                 >
                   {tr('landing.ctaLogin')}
@@ -562,7 +546,7 @@ export default function PublicLandingPage({
               >
                 <button
                   type="button"
-                  onClick={() => openAuth('login')}
+                  onClick={() => openAuth()}
                   className="lp-primary inline-flex h-12 items-center justify-center gap-2 rounded-xl px-6 text-[15px] font-semibold text-white"
                 >
                   {tr('landing.ctaLogin')}
@@ -863,18 +847,11 @@ export default function PublicLandingPage({
               <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
                 <button
                   type="button"
-                  onClick={() => openAuth('login')}
+                  onClick={() => openAuth()}
                   className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-[15px] font-semibold text-slate-900 transition hover:bg-slate-100"
                 >
                   {tr('landing.ctaLogin')}
                   <ArrowRight size={17} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openAuth('register')}
-                  className="inline-flex h-12 items-center justify-center rounded-xl px-6 text-[15px] font-semibold text-white ring-1 ring-white/25 transition hover:bg-white/10"
-                >
-                  {tr('auth.registerLink')}
                 </button>
               </div>
             </Reveal>
@@ -903,7 +880,7 @@ export default function PublicLandingPage({
                 </li>
               ))}
               <li>
-                <button type="button" onClick={() => openAuth('login')} className="hover:text-slate-900">
+                <button type="button" onClick={() => openAuth()} className="hover:text-slate-900">
                   {tr('publicLanding.login')}
                 </button>
               </li>
@@ -963,32 +940,11 @@ export default function PublicLandingPage({
                 </button>
               </div>
               <div className="p-5 sm:p-6">
-                {isMobileDevice ? (
-                  authScreen === 'login' ? (
-                    <MobileMinimalLogin onSwitchToRegister={() => setAuthScreen('register')} />
-                  ) : (
-                    <RegisterPage onSwitchToLogin={() => setAuthScreen('login')} />
-                  )
-                ) : isDesktopBrowser() && authScreen === 'login' && desktopAuthView !== 'password' ? (
-                  <DesktopHodimQrLogin onOtherRoles={() => setDesktopAuthView('password')} />
-                ) : authScreen === 'login' ? (
-                  <LoginPage
-                    onSwitchToRegister={() => setAuthScreen('register')}
-                    onWantsHodimQr={isDesktopBrowser() ? () => setDesktopAuthView('qr') : undefined}
-                  />
-                ) : (
-                  <RegisterPage
-                    onSwitchToLogin={() => setAuthScreen('login')}
-                    onBackToQr={
-                      isDesktopBrowser()
-                        ? () => {
-                            setAuthScreen('login');
-                            setDesktopAuthView('qr');
-                          }
-                        : undefined
-                    }
-                  />
-                )}
+                {/* Kompyuterda FAQAT QR. Parol oynasiga o'tish havolasi olib
+                    tashlandi: xodim telefonda kirishi kerak, chunki joylashuv
+                    faqat telefonda qayd etiladi. Administrator uchun parol
+                    sahifasi alohida manzilda — `imentor.uz/admin`. */}
+                {isMobileDevice ? <IdLogin /> : <DesktopHodimQrLogin />}
               </div>
             </motion.div>
           </motion.div>

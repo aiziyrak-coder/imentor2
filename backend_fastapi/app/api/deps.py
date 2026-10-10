@@ -155,3 +155,19 @@ def require_external_api_key(x_api_key: str | None = Header(default=None)) -> No
     header = (x_api_key or "").strip()
     if not keys or not header or header not in keys:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Valid X-Api-Key header required.")
+
+
+def require_rector_wide(ctx: dict = Depends(require_rector)) -> dict:
+    """Faqat kafedra kesimida ishlaydigan bo'limlar.
+
+    Guruh bilan cheklangan dekan (xalqaro fakultet) uchun bu hisobotlar
+    hali ajratilmagan: kafedra bo'yicha chegara unga butun institutni
+    ko'rsatib qo'yardi. Shuning uchun ochilmaydi (2026-10-09).
+    """
+    if ctx.get("groups"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu bo'lim hozircha faqat kafedra kesimida ishlaydi — "
+                   "xalqaro fakultet uchun «Nazorat» bo'limidan foydalaning.",
+        )
+    return ctx

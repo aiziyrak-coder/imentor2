@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.content import CourseSyllabus, StaffCourseSelection
+from app.models.analytics import UserActivityEvent
 from app.models.face_template import FaceTemplate
 from app.models.live_test import LiveTestSession
 from app.models.prepared_content import PreparedContent
@@ -254,13 +255,13 @@ def _materials_map(db: Session) -> dict[str, dict]:
     return out
 
 
-def _depth(minutes: int, created_total: int) -> str:
+def _depth(minutes: int, created_total: int, visited: bool = False) -> str:
     """Kirganidan keyin nima qilgani: yaratgan / ko'rgan / kirib chiqqan / kirmagan."""
     if created_total > 0:
         return "worked"
     if minutes >= VISIT_MINUTES:
         return "viewed"
-    if minutes > 0:
+    if minutes > 0 or visited:
         return "visit"
     return "none"
 
@@ -280,9 +281,19 @@ def engagement_map(db: Session, start_day: dt.date, end_day: dt.date) -> dict[st
     start, end = range_bounds(start_day, end_day)
     activity = all_teachers_activity(db, start_day=start_day, end_day=end_day)
     created = created_map(db, start, end)
+    # Successful authentication is evidence of a visit even when the phone
+    # companion emits no module heartbeat. Never turn login counts into minutes.
+    visits = dict(db.execute(
+        select(UserActivityEvent.owner_key, func.count(UserActivityEvent.id))
+        .where(UserActivityEvent.event_type == "login",
+               UserActivityEvent.role == "hodim",
+               UserActivityEvent.occurred_at >= start,
+               UserActivityEvent.occurred_at < end)
+        .group_by(UserActivityEvent.owner_key)
+    ).all())
 
     out: dict[str, dict] = {}
-    for owner in set(activity) | set(created):
+    for owner in set(activity) | set(created) | set(visits):
         act = activity.get(owner) or {"minutes": 0, "pages": [], "active_days": 0,
                                       "videos_viewed": 0, "handouts_viewed": 0}
         made = created.get(owner) or _blank_created()
@@ -302,7 +313,9 @@ def engagement_map(db: Session, start_day: dt.date, end_day: dt.date) -> dict[st
                 "videos": int(act.get("videos_viewed", 0) or 0),
                 "handouts": int(act.get("handouts_viewed", 0) or 0),
             },
-            "depth": _depth(minutes, total),
+            "depth": _depth(minutes, total, bool(visits.get(owner)) or any(
+                p.get("opens", 0) for p in act.get("pages", [])
+            )),
         }
     return out
 

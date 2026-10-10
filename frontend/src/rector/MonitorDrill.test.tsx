@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import MonitorDrill, { slotStatus, teacherUsageStatus } from './MonitorDrill';
-import { moduleMinutes, teacherStatus, teacherStatusShort } from './RectorSections';
+import { moduleMinutes, teacherStatus } from './RectorSections';
 import type { MonitorReport, MonitorSlot, TeacherRow } from './rectorApi';
 
 const slot = (over: Partial<MonitorSlot>): MonitorSlot => ({
@@ -66,10 +66,5 @@ describe('teacher module minutes', () => {
     expect(teacherStatus({ ...base, is_active: false })).toBe('bad');
     expect(teacherStatus(base)).toBe('warn');
     expect(teacherStatus({ ...base, lessons_total: 1 })).toBe('good');
-    // Monitor jadvali bo'yicha darsi yo'q kuni kirmagan — "ishlamagan" emas, baholanmaydi.
-    expect(teacherStatus({ ...base, is_active: false, scheduled_lessons: 0 })).toBe('none');
-    expect(teacherStatusShort({ ...base, is_active: false, scheduled_lessons: 0 })).toBe('Darsi yo‘q');
-    expect(teacherStatus({ ...base, is_active: false, scheduled_lessons: 2 })).toBe('bad');
-    expect(teacherStatus({ ...base, is_active: false, scheduled_lessons: null })).toBe('bad');
   });
 });

@@ -61,7 +61,7 @@ describe('FaceLogin', () => {
     const user = userEvent.setup();
     renderWithProviders(<FaceLogin onUsePassword={onUsePassword} />);
     expect(await screen.findByText(/Kameraga ruxsat berilmadi/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Login va parol bilan kirish/ }));
+    await user.click(screen.getByRole('button', { name: /JSHSHIR yoki pasport bilan kirish/ }));
     expect(onUsePassword).toHaveBeenCalled();
     expect(faceLoginMock).not.toHaveBeenCalled();
   });

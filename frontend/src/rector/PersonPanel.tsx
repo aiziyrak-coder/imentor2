@@ -52,7 +52,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function Lesson({ l }: { l: ScheduledLessonRow }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`rounded-lg ${l.monitor_id ? (l.used ? 'bg-emerald-50' : 'bg-rose-50') : 'bg-slate-50'}`}>
+    <div className={`rounded-lg ${l.hemis_status === 'missing_from_hemis' ? 'bg-amber-50' : l.monitor_id ? (l.used ? 'bg-emerald-50' : 'bg-rose-50') : 'bg-slate-50'}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -72,9 +72,9 @@ function Lesson({ l }: { l: ScheduledLessonRow }) {
         </span>
         <span className="w-[76px] shrink-0 text-right font-medium">
           {l.used ? (
-            <span className="text-emerald-700">ishlatgan</span>
+            <span className="text-emerald-700">qayd bor</span>
           ) : l.monitor_id ? (
-            <span className="text-rose-700">yo‘q</span>
+            <span className="text-rose-700">qayd yo‘q</span>
           ) : (
             <span className="text-slate-400">—</span>
           )}
@@ -94,7 +94,7 @@ function Lesson({ l }: { l: ScheduledLessonRow }) {
               'Monitor',
               l.monitor_id
                 ? `${l.monitor_id} · ${l.monitor_room || '—'}${l.monitor_department ? ` · ${l.monitor_department}` : ''}`
-                : 'bu xonada monitor yo‘q — talab qilinmaydi',
+                : 'inventarda monitor biriktirilmagan; xona holati tasdiqlanmagan',
             ],
           ] as Array<[string, string]>).map(([k, v]) => (
             <Fragment key={k}>
@@ -102,6 +102,23 @@ function Lesson({ l }: { l: ScheduledLessonRow }) {
               <dd className="text-slate-800">{v}</dd>
             </Fragment>
           ))}
+          {l.evidence && <>
+            {l.hemis_status === 'missing_from_hemis' && <><dt>HEMIS holati</dt><dd>Keyingi sinxronlashda topilmadi; yozuv saqlandi, bekor qilinganligi tasdiqlanmagan.</dd></>}
+            <dt>Faollik dalili</dt><dd>{l.evidence.note}</dd>
+            <dt>Qurilma bildirgan vaqt</dt><dd>{(l.evidence.seconds / 60).toFixed(1)} daqiqa</dd>
+            <dt>Takroriy vaqt</dt><dd>{((l.evidence.overlap_seconds || 0) / 60).toFixed(1)} daqiqa — umumiy vaqtga qayta qo‘shilmagan</dd>
+            <dt>HEMIS yangilanishi</dt><dd>{l.synced_at ? new Date(l.synced_at).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' }) : 'Sinxronlash vaqti qayd etilmagan'}</dd>
+            <dt>Dars o‘tilganligi</dt><dd>Platforma faolligi dars o‘tilganligini mustaqil tasdiqlamaydi</dd>
+            {l.evidence.pages.map(p => <Fragment key={p.page}>
+              <dt>{p.page}</dt><dd>{(p.seconds / 60).toFixed(1)} daqiqa · {p.opens} ochilish</dd>
+            </Fragment>)}
+            <dt>Harakatlar</dt><dd>
+              {l.evidence.events.map(e => <div key={e.id}>
+                {new Date(e.at).toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent' })}
+                {' · '}{e.action}{' · '}{e.page}{' · qayd №'}{e.id}
+              </div>)}
+            </dd>
+          </>}
         </dl>
       )}
     </div>
@@ -109,6 +126,13 @@ function Lesson({ l }: { l: ScheduledLessonRow }) {
 }
 
 function TeacherBody({ data }: { data: ControlTeacherDetail }) {
+  const [lessonFilter, setLessonFilter] = useState('all');
+  const evidenceCounts = data.lessons.reduce<Record<string, number>>((counts, lesson) => {
+    const status = lesson.evidence?.status || 'unverified';
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  const visibleLessons = data.lessons.filter(l => lessonFilter === 'all' || (l.evidence?.status || 'unverified') === lessonFilter);
   const s = data.summary;
   const m = data.materials;
   const e = data.engagement;
@@ -120,7 +144,13 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
       <section className="rounded-xl bg-slate-50 p-3">
         <Row label="Kafedra" value={data.profile.department || '—'} />
         {data.profile.job_title && <Row label="Lavozim" value={data.profile.job_title} />}
-        <Row label="Oxirgi kirish" value={day(data.profile.last_login)} />
+        {/* Davr ichidagi faollik BIRINCHI: rektor kechani ochsa, kechagi holatni ko'rsin.
+            Umumiy oxirgi kirish esa alohida, "davrdan tashqari" deb belgilanadi. */}
+        <Row
+          label="Bu davrdagi oxirgi faollik"
+          value={data.profile.last_active ? day(data.profile.last_active) : 'Bu davrda faollik sanasi aniqlanmagan'}
+        />
+        <Row label="Oxirgi kirish (umuman)" value={day(data.profile.last_login)} />
         <Row
           label="Bu davrda"
           value={
@@ -141,7 +171,7 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
         <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">Bo‘limlar bo‘yicha vaqt</h3>
         {e.modules.length === 0 ? (
           <p className="rounded-xl bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">
-            Bu davrda birorta bo‘limda ishlamagan.
+            Bu davrda bo‘limlardan foydalanish qaydi topilmadi.
           </p>
         ) : (
           <div className="space-y-1">
@@ -308,10 +338,19 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
         <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
           Darslari ({data.lessons.length}) <span className="font-normal normal-case text-slate-400">— qatorni bosing, HEMIS yozuvi ochiladi</span>
         </h3>
+        <p className="mb-2 text-[12px] text-slate-600">Quyidagi holatlar HEMIS va platforma qaydlarini bildiradi. Ular intizomiy ayb yoki dars o‘tilmaganligi haqida avtomatik hukm emas.</p>
+        <div className="mb-2 flex flex-wrap gap-1">
+          {Object.entries({ all: 'Barcha darslar', recorded: 'Faollik qaydi bor', no_record: 'Qayd topilmadi', pending: 'Hali tugamagan', missing_schedule_time: 'HEMIS vaqti yetishmaydi', unlinked_teacher: 'Hisob bog‘lanmagan', unverified: 'Dalil olinmagan' }).map(([key, label]) => (
+            <button key={key} type="button" onClick={() => setLessonFilter(key)} className={`rounded-lg px-2 py-1 text-[11px] ${lessonFilter === key ? 'bg-sky-100 text-sky-900' : 'bg-slate-100 text-slate-600'}`}>
+              {label} · {key === 'all' ? data.lessons.length : evidenceCounts[key] || 0}
+            </button>
+          ))}
+        </div>
         <div className="space-y-1">
-          {data.lessons.map((l) => (
+          {visibleLessons.map((l) => (
             <Lesson key={l.id} l={l} />
           ))}
+          {!visibleLessons.length && <p className="text-[12px] text-slate-500">Bu holatga mos dars yo‘q.</p>}
         </div>
       </section>
     </div>

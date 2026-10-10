@@ -40,8 +40,8 @@ def item(pk, kind, text):
 
 
 def test_dry_run_reports_but_does_not_touch():
-    rows = [(item(1, "test", "45 yoshli erkak bemor"), "Fiziologiya"),
-            (item(2, "case", "Preparat tahlili"), "Fiziologiya")]
+    rows = [(item(1, "test", "45 yoshli erkak bemor"), "Fiziologiya", "Normal fiziologiya"),
+            (item(2, "case", "Preparat tahlili"), "Fiziologiya", "Normal fiziologiya")]
     db = _db(rows)
     out = audit.retire(db, dry_run=True)
     assert out["belgilandi"] == 1 and out["turi"] == {"test": 1}
@@ -50,8 +50,8 @@ def test_dry_run_reports_but_does_not_touch():
 
 
 def test_apply_marks_and_never_deletes():
-    rows = [(item(1, "test", "45 yoshli erkak bemor"), "Fiziologiya"),
-            (item(3, "case", "Bemor 68 yoshda, erkak"), "Normal anatomiya")]
+    rows = [(item(1, "test", "45 yoshli erkak bemor"), "Fiziologiya", "Normal fiziologiya"),
+            (item(3, "case", "Bemor 68 yoshda, erkak"), "Normal anatomiya", "Anatomiya 1-s")]
     db = _db(rows)
     out = audit.retire(db, dry_run=False)
     assert out["belgilandi"] == 2
@@ -68,3 +68,20 @@ def test_undo_restores_everything():
     out = audit.retire(db, dry_run=False, undo=True)
     assert out["qaytarildi"] == 1
     assert retired.retired_reason == "" and retired.retired_at is None
+
+
+def test_a_clinically_named_subject_keeps_its_patient_cases():
+    """"Klinik farmakologiya" klinik bo'lmagan kafedrada tursa ham tegilmaydi.
+
+    Kafedra 2026-10-05 da aytdi: "Xalq tabobati va farmakologiya" da faqat shu
+    bitta fan klinik. Uning bemor ssenariylari o'rinli — o'chirilmasin.
+    """
+    rows = [
+        (item(1, "case", "45 yoshli erkak bemor"), "Xalq tabobati va Farmakologiya",
+         "Klinik farmakologiya 9-s DI"),
+        (item(2, "case", "Bemor 68 yoshda, erkak"), "Xalq tabobati va Farmakologiya",
+         "Farmakologiya 5-s DI"),
+    ]
+    out = audit.retire(_db(rows), dry_run=True)
+    assert out["belgilandi"] == 1
+    assert out["kafedralar"] == {"Xalq tabobati va Farmakologiya": 1}

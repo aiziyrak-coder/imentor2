@@ -27,8 +27,6 @@ import HandoutMaterials from '../components/HandoutMaterials';
 import CaseStudies from '../components/CaseStudies';
 import TestQuestions from '../components/TestQuestions';
 import UserProfile from '../components/UserProfile';
-import TeacherSettings from '../components/settings/TeacherSettings';
-import ControlPreview from './controlPreview';
 import StaffTeachingSubjectsPicker from '../components/staff/StaffTeachingSubjectsPicker';
 
 /* ── Soxta server ────────────────────────────────────────────────────────
@@ -104,23 +102,6 @@ const CATALOG = {
 };
 
 const FIXTURES: Array<[RegExp, unknown]> = [
-  [/staff\/me\/profile/, {
-    login: '3442112018', first_name: 'Farog‘at', last_name: 'Melibayeva', job_title: 'assistent', faculty: '',
-    department_id: 2, department: 'Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari',
-    face_linked: false, pinfl_linked: true,
-  }],
-  [/staff\/departments/, [
-    { id: 2, name: 'Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari' },
-    { id: 5, name: 'Epidemiologiya va yuqumli kasalliklar hamshiralik ishi' },
-  ]],
-  [/staff\/library/, {
-    department: 'Epidemiologiya va yuqumli kasalliklar hamshiralik ishi',
-    items: [
-      { id: 1, title: '20. Yuqumli / Botulizm / Milliy klinik protokol 2025', kind: 'protocol', status: 'ready', status_note: '', chunk_count: 41, owner_key: '', uploader_name: '', can_delete: false, created_at: null },
-      { id: 2, title: 'Dalillarga asoslangan tibbiyot — o‘quv qo‘llanma', kind: 'book', status: 'processing', status_note: '', chunk_count: 0, owner_key: '3442112018', uploader_name: 'Melibayeva Farog‘at', can_delete: true, created_at: null },
-      { id: 3, title: '121-buyruq parazitologiya (skaner)', kind: 'protocol', status: 'failed', status_note: 'Matn topilmadi. Skanerlangan PDF bo‘lsa, matnli nusxasini yuklang.', chunk_count: 0, owner_key: '3442112018', uploader_name: 'Melibayeva Farog‘at', can_delete: true, created_at: null },
-    ],
-  }],
   [/course-syllabuses\/catalog/, CATALOG],
   [/admin\/reports\/activity\/[^/]+\//, ACTIVITY_DETAIL],
   [/admin\/reports\/activity\//, ACTIVITY_OVERVIEW],
@@ -184,8 +165,6 @@ const PAGES: Array<[string, React.ComponentType]> = [
   ['Keys yaratish', CaseStudies],
   ['Test yaratish', TestQuestions],
   ['Profil', UserProfile],
-  ['Sozlamalar (o‘qituvchi)', TeacherSettings],
-  ['Rektor nazorat paneli', ControlPreview],
   ['Fan tanlash', () => <StaffTeachingSubjectsPicker variant="onboarding" initialSelectedIds={[]} />],
 ];
 
@@ -200,7 +179,7 @@ function Harness() {
   const Page = PAGES[index][1];
 
   return (
-    <AppLanguageContext.Provider value={{ language: ((new URLSearchParams(location.search).get('lang') || 'uz') as 'uz' | 'ru' | 'en'), setLanguage: () => {} }}>
+    <AppLanguageContext.Provider value={{ language: 'uz', setLanguage: () => {} }}>
       <AppNavigationContext.Provider value={{ openSyllabus: () => {} }}>
         <GlobalTopicContext.Provider value={TOPIC}>
           <GlobalLectureContext.Provider value={{ content, setContent }}>

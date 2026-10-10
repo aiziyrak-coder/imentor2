@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { postActivityEvents } from '../utils/analyticsApi';
 
 /**
@@ -37,7 +37,15 @@ const IDLE_MS = 5 * 60_000;
 /** Bundan qisqa bo'lak yuborilmaydi (tarmoqni bo'shga band qilmaslik uchun). */
 const MIN_FLUSH_SEC = 5;
 
-export function useActivityTelemetry(enabled: boolean, page: string): void {
+export function useActivityTelemetry(enabled: boolean, page: string): boolean {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+    if (!enabled) return;
+    const status = (event: Event) => setFailed(!(event as CustomEvent<boolean>).detail);
+    window.addEventListener('imentor:telemetry-status', status);
+    return () => window.removeEventListener('imentor:telemetry-status', status);
+  }, [enabled]);
   const pageRef = useRef(page);
   // Joriy bo'limda yig'ilgan, hali yuborilmagan soniyalar.
   const pendingRef = useRef(0);
@@ -54,7 +62,8 @@ export function useActivityTelemetry(enabled: boolean, page: string): void {
     const collect = () => {
       const since = tickingSinceRef.current;
       if (since === null) return;
-      pendingRef.current += Math.max(0, Math.round((now() - since) / 1000));
+      const until = Math.min(now(), lastInputRef.current + IDLE_MS);
+      pendingRef.current += Math.max(0, Math.round((until - since) / 1000));
       tickingSinceRef.current = null;
     };
 
@@ -65,10 +74,11 @@ export function useActivityTelemetry(enabled: boolean, page: string): void {
     };
 
     /** Yig'ilganini serverga uzatadi. `beacon` — sahifa yopilayotganda. */
-    const flush = (forPage: string, beacon = false) => {
+    const flush = (forPage: string, beacon = false, leaving = false) => {
       collect();
       const sec = pendingRef.current;
-      if (sec < MIN_FLUSH_SEC) {
+      if (sec < (leaving ? 1 : MIN_FLUSH_SEC)) {
+        if (leaving) pendingRef.current = 0;
         if (!beacon) resume();
         return;
       }
@@ -92,7 +102,7 @@ export function useActivityTelemetry(enabled: boolean, page: string): void {
       }
     };
 
-    const onUnload = () => flush(pageRef.current, true);
+    const onUnload = () => flush(pageRef.current, true, true);
 
     // Bo'limga kirilgani — vaqtdan qat'i nazar yoziladi, chunki hisobotda
     // "ochdimi" degan savol "qancha turdi" dan alohida.
@@ -123,9 +133,11 @@ export function useActivityTelemetry(enabled: boolean, page: string): void {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onUnload);
       // Bo'lim almashyapti: qolgan vaqt ESKI bo'lim hisobiga yozilsin.
-      flush(leavingPage);
+      flush(leavingPage, false, true);
+      tickingSinceRef.current = null;
     };
   }, [enabled, page]);
 
   pageRef.current = page;
+  return failed;
 }

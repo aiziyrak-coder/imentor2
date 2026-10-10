@@ -31,12 +31,20 @@ fi
 
 WORKERS="${GUNICORN_WORKERS:-3}"
 TIMEOUT="${GUNICORN_TIMEOUT:-300}"
+# Ishchi jarayon shuncha so'rovdan keyin qayta tug'iladi (xotira oqishiga qarshi).
+# 1000 juda kam edi: gavjum soatda to'rtala ishchi soatiga 40 marta qayta
+# tug'ilib, o'sha lahzada kelgan so'rov 502 olardi — bir kunda 3170 ta
+# (2026-10-09). Xotira 94 GB dan 2.4 GB ishlatiladi, ya'ni tez-tez
+# yangilashning hojati yo'q. Jitter katta: hammasi BIR VAQTDA qayta
+# tug'ilmasin.
+MAX_REQ="${GUNICORN_MAX_REQUESTS:-20000}"
+MAX_REQ_JITTER="${GUNICORN_MAX_REQUESTS_JITTER:-5000}"
 
 exec gunicorn app.main:app \
   --bind 0.0.0.0:8000 \
   --worker-class uvicorn.workers.UvicornWorker \
   --workers "$WORKERS" \
   --timeout "$TIMEOUT" \
-  --max-requests 1000 \
-  --max-requests-jitter 100 \
+  --max-requests "$MAX_REQ" \
+  --max-requests-jitter "$MAX_REQ_JITTER" \
   --graceful-timeout 30

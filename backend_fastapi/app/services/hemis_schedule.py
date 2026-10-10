@@ -164,6 +164,24 @@ def used_logins(db: Session) -> set[str]:
     return out
 
 
+def _person_key(t: dict) -> tuple[str, str] | None:
+    """Bir odamni ikkinchisidan ajratadigan kalit: to'liq ism + tug'ilgan sana.
+
+    Sana bo'sh bo'lsa None — bunday yozuv boshqasi bilan birlashtirilmaydi.
+    """
+    name = " ".join(str(t.get("full_name") or "").casefold().split())
+    birth = str(t.get("birth_date") or "").strip()
+    return (name, birth) if name and birth else None
+
+
+def _people_in(group: list[dict]) -> set:
+    """Yozuvlar nechta ODAMGA tegishli. Aniqlab bo'lmasa har biri alohida."""
+    out = set()
+    for i, t in enumerate(group):
+        out.add(_person_key(t) or ("?", str(i)))
+    return out
+
+
 def teacher_map(db: Session, teachers: Iterable[dict], *, stats: dict | None = None,
                 used: set[str] | None = None) -> dict[Any, str]:
     """HEMIS xodim id → iMentor login.
@@ -213,8 +231,20 @@ def teacher_map(db: Session, teachers: Iterable[dict], *, stats: dict | None = N
     by_name_linked = 0
     for key, group in hemis_by_name.items():
         candidates = by_name.get(key, set())
-        if len(group) == 1 and len(candidates) == 1:
-            out[group[0]["id"]] = next(iter(candidates))
+        # HEMIS bitta odamni bir necha marta yozadi (har lavozim uchun alohida
+        # yozuv). Ilgari shunday takror "ikki xil odam" deb qaralib, bog'lash
+        # bekor qilinardi — hisobi o'chirilgan 35 o'qituvchi shu sababli
+        # "hisobi yo'q" bo'lib qolgandi (2026-10-08).
+        #
+        # Shuning uchun avval yozuvlar ODAM bo'yicha birlashtiriladi: to'liq
+        # ism (otasining ismi bilan) VA tug'ilgan sana bir xil bo'lsa — bir
+        # odam. Jonli ma'lumotda 248 takror guruhdan 247 tasi shunday chiqdi;
+        # bittasi haqiqatan ikki xil odam (bir xil familiya-ism, boshqa
+        # otasining ismi va sana) — u bog'lanmaydi, oldingidek.
+        if len(_people_in(group)) == 1 and len(candidates) == 1:
+            login = next(iter(candidates))
+            for t in group:
+                out[t["id"]] = login
             by_name_linked += 1
 
     # --- Ikki hisobli odam (2026-09-26). 24 kishida Xodim ID bilan ochilgan
@@ -436,12 +466,16 @@ def sync_lessons(db: Session, *, start: dt.date, end: dt.date, education_year: i
         else:
             stats["ozgarmadi"] += 1
         row.synced_at = now
+        row.hemis_status = "active"
+        row.hemis_missing_at = None
 
-    # Jadvaldan olib tashlangan dars (bekor qilingan) bazada qolmasin.
+    # Preserve the record and its linked evidence; an absent HEMIS row alone
+    # does not prove cancellation. Mark it for review instead of deleting it.
     for key, row in existing.items():
-        if key not in seen:
-            db.delete(row)
-            stats["olib_tashlandi"] += 1
+        if key not in seen and row.hemis_status != "missing_from_hemis":
+            row.hemis_status = "missing_from_hemis"
+            row.hemis_missing_at = now
+            stats["hemisda_topilmadi"] = stats.get("hemisda_topilmadi", 0) + 1
 
     logger.info("HEMIS to'liq jadval: %s", stats)
     return stats

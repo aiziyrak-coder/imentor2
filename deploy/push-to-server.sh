@@ -19,9 +19,12 @@ BASE="${1:?bazaviy commit kerak, masalan: HEAD~1}"
 DRY="${2:-}"
 HOST="${IMENTOR_HOST:-admin_root@192.168.0.101}"
 KEY="${IMENTOR_KEY:-$HOME/.ssh/imentor_deploy}"
+# Server ofis tarmog'idan 22-portda, tashqaridan esa boshqa port orqali
+# ko'rinadi. Tarmoqdan tashqarida turib chiqarish uchun: IMENTOR_PORT.
+PORT="${IMENTOR_PORT:-22}"
 ROOT="/home/imentor"
 COMPOSE="docker compose -f docker-compose.prod.yml"
-R() { ssh -i "$KEY" "$HOST" "$@"; }
+R() { ssh -i "$KEY" -p "$PORT" "$HOST" "$@"; }
 
 cd "$(git rev-parse --show-toplevel)"
 if [ -n "$(git status --porcelain -- backend_fastapi frontend deploy)" ]; then
@@ -31,8 +34,9 @@ fi
 
 # Faqat server ishlatadigan fayllar (harness, testlar serverga kerak emas).
 mapfile -t FILES < <(git diff --name-only --diff-filter=AMR "$BASE" HEAD -- backend_fastapi frontend deploy \
-  | grep -v -e '^frontend/src/harness/' -e '^frontend/harness.html$' || true)
-mapfile -t DELETED < <(git diff --name-only --diff-filter=D "$BASE" HEAD -- backend_fastapi frontend deploy || true)
+  | grep -v -e '^frontend/src/harness/' -e '^frontend/harness.html$' -e '^backend_fastapi/tests/' -e '\.test\.tsx\?$' || true)
+mapfile -t DELETED < <(git diff --name-only --diff-filter=D "$BASE" HEAD -- backend_fastapi frontend deploy \
+  | grep -v -e '^backend_fastapi/tests/' -e '\.test\.tsx\?$' || true)
 if [ ${#FILES[@]} -eq 0 ] && [ ${#DELETED[@]} -eq 0 ]; then
   echo "Yuboriladigan o'zgarish yo'q."
   exit 0
@@ -105,7 +109,7 @@ if [ $need_backend -eq 1 ]; then
   if [ $need_migrate -eq 1 ]; then
     # migrate_fastapi O'Z image'ini ishlatadi — uni ham qurmasa, yangi migratsiya ko'rinmaydi.
     echo "== 4b. Migratsiya"
-    R "cd $ROOT && $COMPOSE build migrate_fastapi > /tmp/push-migrate.log 2>&1 && $COMPOSE run --rm --no-deps migrate_fastapi 2>&1 | grep -i 'running upgrade\|error' || true"
+    R "cd $ROOT && $COMPOSE build migrate_fastapi > /tmp/push-migrate.log 2>&1 && $COMPOSE run --rm --no-deps migrate_fastapi > /tmp/push-migrate-run.log 2>&1 || { cat /tmp/push-migrate.log /tmp/push-migrate-run.log 2>/dev/null; exit 1; }; cat /tmp/push-migrate-run.log"
   fi
   R "cd $ROOT && $COMPOSE up -d --no-deps --no-build backend_fastapi"
 fi

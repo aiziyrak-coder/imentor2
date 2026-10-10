@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock, Database, Monitor, Search, Sparkles, Users, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Database, MapPin, Monitor, Search, Users, Wrench } from 'lucide-react';
 import { HttpError } from '../api/httpClient';
 import {
   fetchControlReport,
@@ -118,7 +118,7 @@ const DEPTH: Record<string, { label: string; cls: string }> = {
   worked: { label: 'material yaratgan', cls: 'bg-emerald-100 text-emerald-800' },
   viewed: { label: 'ko‘rgan, yaratmagan', cls: 'bg-amber-100 text-amber-800' },
   visit: { label: 'kirib chiqqan', cls: 'bg-orange-100 text-orange-800' },
-  none: { label: 'umuman kirmagan', cls: 'bg-rose-100 text-rose-800' },
+  none: { label: 'kirish qaydi yo‘q', cls: 'bg-rose-100 text-rose-800' },
 };
 
 /** Qatordagi kichik raqam ustuni — sarlavhasi bilan, shunda nima ekani aniq. */
@@ -237,6 +237,94 @@ function TeacherRow({ r, onOpen }: { r: ControlTeacher; onOpen: (p: Person) => v
 }
 
 /** Tepasida aqlli filtr, qidiruv va tartib — rektor kerakli ro'yxatni bir bosishda oladi. */
+/**
+ * Monitorli xonada darsi UMUMAN yo'q o'qituvchilar: klinika bazasi,
+ * dispanser, masofaviy dars. Ularni monitor bo'yicha baholab bo'lmaydi,
+ * shuning uchun asosiy ro'yxatda emas — lekin ko'rinmay ham qolmasin
+ * (2026-10-06 da rektor aynan shuni so'radi).
+ */
+function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }) {
+  const [open, setOpen] = useState(false);
+  const o = data.offsite;
+  if (!o || !o.count) return null;
+  return (
+    <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
+      >
+        <MapPin size={15} className="shrink-0 text-slate-400" />
+        <span className="text-[13.5px] font-bold text-slate-800">Monitorsiz joyda dars o‘tadiganlar</span>
+        <span className="text-[12px] text-slate-400">{o.count} o‘qituvchi · {o.lessons} dars</span>
+        <ChevronRight
+          size={16}
+          className={`ml-auto shrink-0 text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+      </button>
+
+      <p className="border-t border-slate-100 bg-slate-50/60 px-4 py-2 text-[12px] leading-relaxed text-slate-500">
+        Klinika bazasi, dispanser va masofaviy darslar. Bu xonalarda monitor yo‘q, shuning uchun
+        ular yuqoridagi foizga KIRMAYDI — aks holda ko‘rsatkich asossiz pasayardi.
+      </p>
+
+      {open && (
+        <>
+          <div className="border-t border-slate-100 px-4 py-2">
+            <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-slate-400">
+              Qayerda dars o‘tilmoqda
+            </p>
+            <ul className="divide-y divide-slate-100">
+              {o.places.slice(0, 12).map((p) => (
+                <li key={p.place} className="flex items-center gap-3 py-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-slate-700" title={p.place}>
+                    {p.place}
+                  </span>
+                  <span className="shrink-0 text-[11.5px] tabular-nums text-slate-500">
+                    {p.lessons} dars
+                  </span>
+                  <span className="w-[74px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400">
+                    {p.teachers} o‘qituvchi
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {o.places_total > 12 && (
+              <p className="pt-1.5 text-[11.5px] text-slate-400">yana {o.places_total - 12} ta joy</p>
+            )}
+          </div>
+
+          <ul className="divide-y divide-slate-100 border-t border-slate-100">
+            {o.teachers.slice(0, 60).map((r) => (
+              <li key={r.teacher_key || r.employee_id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen({ kind: 'teacher', key: r.teacher_key, name: r.teacher_name })}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-slate-50"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-slate-800">{r.teacher_name}</span>
+                  <span className="hidden min-w-0 flex-1 truncate text-[12px] text-slate-400 sm:block">
+                    {r.department}
+                  </span>
+                  <span className="shrink-0 text-[11.5px] tabular-nums text-slate-500">
+                    {r.other_lessons} dars
+                  </span>
+                  <span className="w-[86px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400">
+                    {minutesText(r.minutes)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {o.teachers.length > 60 && (
+            <p className="px-4 py-2 text-[11.5px] text-slate-400">yana {o.teachers.length - 60} o‘qituvchi</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }) {
   const [flag, setFlag] = useState<Flag>('watched');
   const [sort, setSort] = useState<Sort>('percent');
@@ -256,7 +344,9 @@ function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void 
     <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
       <div className="space-y-2 border-b border-slate-100 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[13.5px] font-bold text-slate-800">O‘qituvchilar</h2>
+          <h2 className="text-[13.5px] font-bold text-slate-800">
+            Monitorli xonada dars o‘tadiganlar
+          </h2>
           <span className="text-[12px] text-slate-400">{rows.length} ta</span>
           <div className="relative ml-auto">
             <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -325,105 +415,6 @@ function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void 
   );
 }
 
-/* =================================================== modul va material kesimi */
-
-function Modules({ data }: { data: Report }) {
-  const q = data.quality;
-  const top = Math.max(1, ...data.modules.map((m) => m.minutes));
-  const created = Object.entries(data.created_labels).filter(([key]) => (data.created[key] ?? 0) >= 0);
-  return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-        <h2 className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 text-[13.5px] font-bold text-slate-800">
-          <Clock size={15} className="text-slate-400" /> Qaysi bo‘limda qancha ishlagan
-          <Stat metric="minutes" label="iMentor’da ishlagan vaqt bo‘yicha" className="ml-auto px-1">
-            <span className="text-[12px] font-medium text-slate-500">jami {minutesText(q.minutes)}</span>
-          </Stat>
-        </h2>
-        {data.modules.length === 0 ? (
-          <p className="px-4 py-5 text-center text-[12.5px] text-slate-400">Bu davrda hech kim bo‘limlarda ishlamagan.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {data.modules.slice(0, 12).map((m) => (
-              <li key={m.page}>
-                <Stat
-                  metric={`module:${m.page}`}
-                  label={`${m.label} — shu bo‘limda ishlaganlar`}
-                  className="flex w-full items-center gap-3 px-4 py-2 text-left"
-                >
-                <span className="w-[150px] shrink-0 truncate text-[12.5px] text-slate-700" title={m.label}>
-                  {m.label}
-                </span>
-                <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                  <span
-                    className="block h-full rounded-full bg-sky-500"
-                    style={{ width: `${Math.max(2, (m.minutes / top) * 100)}%` }}
-                  />
-                </span>
-                <span className="w-[74px] shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-slate-700">
-                  {minutesText(m.minutes)}
-                </span>
-                <span className="hidden w-[68px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400 sm:block">
-                  {m.people} kishi
-                </span>
-                </Stat>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-        <h2 className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 text-[13.5px] font-bold text-slate-800">
-          <Sparkles size={15} className="text-slate-400" /> Shu davrda yaratilgan material
-        </h2>
-        <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
-          {created.map(([key, label]) => (
-            <Stat
-              key={key}
-              metric={`created:${key}`}
-              label={`${label} — yaratganlar`}
-              className="rounded-xl bg-slate-50 p-2.5 text-left"
-            >
-              <p className="text-[11px] text-slate-500">{label}</p>
-              <p className="text-[19px] font-bold tabular-nums text-slate-900">{data.created[key] ?? 0}</p>
-            </Stat>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-3 text-[12px] sm:grid-cols-4">
-          {(
-            [
-              ['Material yaratgan', q.worked, 'text-emerald-700', 'worked'],
-              ['Ko‘rgan, yaratmagan', q.viewed, 'text-amber-700', 'viewed'],
-              ['Kirib chiqqan', q.visit, 'text-orange-700', 'visit'],
-              ['Umuman kirmagan', q.never, 'text-rose-700', 'never'],
-            ] as Array<[string, number, string, string]>
-          ).map(([label, value, tone, metric]) => (
-            <Stat key={label} metric={metric} label={label} className="text-left">
-              <p className="text-slate-500">{label}</p>
-              <p className={`text-[17px] font-bold tabular-nums ${tone}`}>{value}</p>
-            </Stat>
-          ))}
-        </div>
-        <p className="border-t border-slate-100 px-4 py-2 text-[11.5px] text-slate-500">
-          Fan biriktirmagan{' '}
-          <Stat metric="no_subject" label="Fan biriktirmaganlar" className="px-1">
-            <b className="text-rose-700">{q.no_subject}</b>
-          </Stat>{' '}
-          · profili to‘liq emas{' '}
-          <Stat metric="profile_incomplete" label="Profili to‘liq emas" className="px-1">
-            <b className="text-amber-700">{q.profile_incomplete}</b>
-          </Stat>{' '}
-          · jami nazoratdagi hisob{' '}
-          <Stat metric="teachers" label="Nazoratdagi hisoblar" className="px-1">
-            {q.teachers}
-          </Stat>
-        </p>
-      </section>
-    </div>
-  );
-}
-
 /* ==================================================== dalil va monitor xonalari */
 
 function dayText(iso: string | null): string {
@@ -447,7 +438,7 @@ function Source({ data }: { data: Report }) {
           {src.teachers} o‘qituvchi
         </Stat>
       </span>
-      <span>{rs.rooms} monitor xonasi ({rs.ok} ishlayapti, {rs.suspect} tekshirish kerak)</span>
+      <span>{rs.rooms} monitor xonasi ({rs.ok} faollik qaydi bor, {rs.suspect} tekshirish kerak)</span>
       {src.unlinked_teachers > 0 && (
         <Stat metric="unlinked" label="iMentor hisobi topilmaganlar" className="px-1">
           <span className="text-amber-700">{src.unlinked_teachers} ta hisobi bog‘lanmagan</span>
@@ -504,11 +495,11 @@ function AttentionList({
                 <span className="text-slate-500">dars · {r.days} kun</span>
                 {tone === 'rose' && (
                   <span className="block text-[11px] text-slate-500">
-                    shundan {r.proven_lessons} tasi monitori ISHLAYOTGANI isbotlangan xonada
+                    shundan {r.proven_lessons} tasi dars vaqtida boshqa hisobda faollik qayd etilgan xonada
                   </span>
                 )}
                 {r.other_used > 0 && (
-                  <span className="block text-[11px] text-slate-400">o‘z qurilmasidan {r.other_used} marta kirgan</span>
+                  <span className="block text-[11px] text-slate-400">monitorsiz dars vaqtida {r.other_used} faollik qaydi</span>
                 )}
               </span>
             </button>
@@ -764,6 +755,11 @@ export function ControlReportView({
             <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="-mx-1 px-1">
               <p className={`mt-1 text-[44px] font-bold leading-none tabular-nums ${tone.text}`}>{h.monitor_percent}%</p>
             </Stat>
+            <p className="text-[12px] text-slate-500">
+              Dars “o‘tilgan” deb faqat kamida{' '}
+              <b className="text-slate-700">{h.min_lesson_minutes} daqiqa</b> ishlangan bo‘lsa sanaladi —
+              qisqa kirib chiqish hisoblanmaydi.
+            </p>
             <p className="mt-1 text-[13px] text-slate-500">
               <Stat metric="monitor_lessons" label="Monitorli xonada darsi bor o‘qituvchilar" className="px-1">
                 {h.monitor_lessons}
@@ -781,6 +777,19 @@ export function ControlReportView({
               <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="px-1">
                 <p className="text-[19px] font-bold tabular-nums text-slate-900">{h.watched_teachers}</p>
               </Stat>
+            </div>
+            <div>
+              <p className="text-slate-500">Kirgan, dars o‘tmagan</p>
+              <Stat
+                metric="short"
+                label={`Kirgan, lekin ${h.min_lesson_minutes} daqiqadan kam ishlagan`}
+                className="px-1"
+              >
+                <p className={`text-[19px] font-bold tabular-nums ${h.short_lessons ? 'text-amber-600' : 'text-slate-900'}`}>
+                  {h.short_teachers}
+                </p>
+              </Stat>
+              <p className="text-[11px] text-slate-400">{h.short_lessons} dars</p>
             </div>
             <div>
               <p className="text-slate-500">Umuman ishlatmagan</p>
@@ -842,22 +851,19 @@ export function ControlReportView({
       </section>
       )}
 
-      {/* ---------------------------------------------------- nima qilgani */}
-      <Modules data={data} />
-
       {/* ------------------------------------------ bahonasi yo'qlar va xonasi shubhalilar */}
       <AttentionList
         rows={data.attention}
         tone="rose"
-        title="Monitori ishlayotgan xonada dars o‘tgan, lekin iMentor ochmagan"
-        hint="Bu xonalarda boshqa o‘qituvchilar o‘sha kunlari iMentor ochgan — jihoz ishlagan."
+        title="HEMIS jadvalida monitorli xona: foydalanish qaydi topilmadi"
+        hint="Boshqa hisoblar faolligi monitor ishlaganini yoki dars o‘tilganini tasdiqlamaydi."
         onOpen={open}
       />
       <AttentionList
         rows={data.check_room}
         tone="amber"
         title="Avval xonasini tekshirish kerak"
-        hint="Bu xonalarda hech kim iMentor ocha olmagan — talab qilishdan oldin monitor tekshiriladi."
+        hint="Dars vaqtida foydalanish qaydi yo‘q. Xona va qayd tizimi holati tekshirilishi kerak."
         onOpen={open}
       />
       <RoomTable rows={data.rooms} />
@@ -899,6 +905,9 @@ export function ControlReportView({
 
       {/* ---------------------------------------------------- o'qituvchilar */}
       <Teachers data={data} onOpen={open} />
+
+      {/* --------------------------------- monitorsiz joyda dars o'tadiganlar */}
+      <Offsite data={data} onOpen={open} />
 
       {/* ---------------------------------------------------- talabalar */}
       <section className="space-y-3">

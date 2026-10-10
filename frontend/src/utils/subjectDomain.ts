@@ -115,6 +115,18 @@ const BIOMEDICAL_RE =
  * Mavzu bemor yonidagi QARORNI talab qiladimi. Shunday bo'lsa — fan qanday
  * bo'lishidan qat'i nazar (tibbiy bo'lsa) klinik keys o'rinli.
  */
+/**
+ * Nomining O'ZI klinik bo'lgan fan — kafedra rasmiy klinik ro'yxatda
+ * bo'lmasa ham. "Xalq tabobati va farmakologiya" kafedrasida shunday bitta
+ * fan bor: "Klinik farmakologiya" bemor yonidagi dori tanlashga o'rgatadi,
+ * qolgan farmakologiya fanlari esa dori guruhlari va mexanizmlari haqida
+ * (2026-10-05 da kafedra shuni aytdi).
+ *
+ * Faqat FAN NOMIGA qo'llanadi: kafedra nomidagi "klinik" so'zi butun
+ * kafedrani klinik qilib yubormasin.
+ */
+const CLINICAL_SUBJECT_RE = /(^|\s)klinik|(^|\s)klinika(\s|$)/i;
+
 const PATIENT_TOPIC_RE =
   /\bbemor|\bmurojaat\s*qil|shikoyat\s*bilan|tashxis|diagnost|differensial|davolash|davolash\s*taktik|taktika|shoshilinch\s*yordam|birinchi\s*yordam|reanimat|asorat|dispanser\s*kuzatuv|retsept|dori\s*doza|klinik\s*korik|klinik\s*tekshiruv|palata|statsionar|ambulator|lecheni|diagnostik/i;
 
@@ -150,32 +162,47 @@ export function resolveSubjectDomain(input: {
   const topic = foldDomainText(input.topic || '');
   const rest = foldDomainText(`${input.topic || ''} ${(input.lectureText || '').slice(0, 2500)}`);
 
+  const subjectMeta = foldDomainText(input.subjectName || '');
   const deptClinical =
     input.departmentIsClinical === true ||
     (!!meta && CLINICAL_DEPT_RE.test(meta) && !BASIC_SCIENCE_DEPT_RE.test(meta));
+  // Bemor yonida dars o'tiladigan fan: rasmiy klinik kafedra YOKI nomining
+  // o'zi klinik ("Klinik farmakologiya"). Shu bayroqsiz oddiy farmakologiya
+  // mavzusidagi "davolash"/"retsept" so'zi butun fanni klinik qilib yuborardi
+  // — kafedra aynan shundan shikoyat qildi (2026-10-05).
+  const clinicalSubject =
+    deptClinical || (!!subjectMeta && CLINICAL_SUBJECT_RE.test(subjectMeta));
   // "Tibbiy va biologik kimyo" ikkala qolipga ham tushadi ("kimyo" akademik,
   // "biologik" tibbiy) — tibbiy qolip ustun: bu fan tibbiyotdan tashqari emas.
   const nonMedical =
     !!meta && (ACADEMIC_RE.test(meta) || ACADEMIC_CODE_RE.test(meta)) && !BIOMEDICAL_RE.test(meta);
   const medical =
-    deptClinical || (!!meta && BIOMEDICAL_RE.test(meta) && !nonMedical) ||
+    clinicalSubject || (!!meta && BIOMEDICAL_RE.test(meta) && !nonMedical) ||
     (!!rest && !nonMedical && (PATIENT_TOPIC_RE.test(rest) || DISEASE_TOPIC_RE.test(rest)));
 
   // 1. Fan tibbiyotdan tashqari bo'lsa — mavzu nima bo'lishidan qat'i nazar.
   //    "Axborot texnologiyalari" da "tashxis" so'zi uchrasa ham bemor yo'q.
-  if (nonMedical && !deptClinical) return 'academic';
+  if (nonMedical && !clinicalSubject) return 'academic';
 
   // 2. MAVZU hal qiladi — foydalanuvchi aynan shuni so'radi.
   if (topic) {
-    if (PATIENT_TOPIC_RE.test(topic)) return medical ? 'clinical' : 'academic';
+    // Bemor qarorini talab qiladigan mavzu KLINIK FANDAgina bemor kartasiga
+    // aylanadi. Klinik bo'lmagan fanda u bemorsiz tibbiy mavzu bo'lib qoladi:
+    // dori guruhi, mexanizm, me'yoriy doza — lekin bemor ssenariysi yo'q.
+    if (PATIENT_TOPIC_RE.test(topic)) {
+      if (clinicalSubject) return 'clinical';
+      return medical ? 'biomedical' : 'academic';
+    }
     if (THEORY_TOPIC_RE.test(topic) && !DISEASE_TOPIC_RE.test(topic)) {
       return medical ? 'biomedical' : 'academic';
     }
-    if (DISEASE_TOPIC_RE.test(topic)) return deptClinical ? 'clinical' : medical ? 'biomedical' : 'academic';
+    if (DISEASE_TOPIC_RE.test(topic)) {
+      return clinicalSubject ? 'clinical' : medical ? 'biomedical' : 'academic';
+    }
   }
 
   // 3. Mavzu jim bo'lsa — kafedra va fan.
-  if (deptClinical) return 'clinical';
+  if (clinicalSubject) return 'clinical';
   if (meta && BIOMEDICAL_RE.test(meta)) return 'biomedical';
 
   // 4. Oxirgi chora — ma'ruza matni. Tibbiy ishora bo'lsa bemorsiz tibbiy,

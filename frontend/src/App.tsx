@@ -100,6 +100,8 @@ import AdminClientErrors from './components/admin/AdminClientErrors';
 import TeacherSettings from './components/settings/TeacherSettings';
 import HodimGpsPromptBar from './components/staff/HodimGpsPromptBar';
 import PublicLandingPage from './components/public/PublicLandingPage';
+import AdminLoginScreen from './components/auth/AdminLoginScreen';
+import { isAdminLoginPath } from './utils/adminLoginPath';
 import MobileAuthScreen from './components/auth/MobileAuthScreen';
 import { useStaffLocationTracking } from './hooks/useStaffLocationTracking';
 import type { SyllabusTopic } from './services/aiService';
@@ -350,7 +352,6 @@ export default function App() {
   const [user, setUser] = useState<LocalStaffUser | null>(() => getCurrentLocalUser());
   /** Kompyuterda login modal holati: 'qr' — standart (yuz skaneri faqat telefonda),
    * 'qr' — telefon orqali QR, 'password' — login (telefon / Xodim ID) va parol. */
-  const [desktopAuthView, setDesktopAuthView] = useState<'face' | 'qr' | 'password'>('qr');
   /** null = tekshirilmoqda; false = birinchi kirish fan tanlash; true = tayyor */
   const [teachingSubjectsReady, setTeachingSubjectsReady] = useState<boolean | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<SyllabusTopicContext | null>(() =>
@@ -511,7 +512,7 @@ export default function App() {
   }, [user?.uid]);
 
   const userRole = user ? normalizeUserRole(user) : null;
-  useActivityTelemetry(!!user && !!userRole, activeView);
+  const telemetryFailed = useActivityTelemetry(!!user && !!userRole, activeView);
 
   const handleLogout = async () => {
     if (user && userRole) {
@@ -753,6 +754,9 @@ export default function App() {
       {/* Global alertlar — yuqori o'ng burchak, 20 soniyada o'zi yo'qoladi.
           Talaba QR rejimida ham ko'rinsin, shuning uchun eng tashqarida. */}
       <AppToastHost />
+      {telemetryFailed && <div role="alert" className="fixed bottom-3 left-3 right-3 z-[100] rounded-xl bg-amber-100 p-3 text-sm text-amber-950 shadow-lg">
+        Faollik qaydi serverga yetib bormadi. Internet va kirish holatini tekshiring. Hisobotda bu vaqt to‘liq ko‘rinmasligi mumkin.
+      </div>}
       {/* Student QR: always fullscreen test only (no shell), even if staff session exists */}
       {isPublicStudentTestUrl() ? (
         <GlobalTopicContext.Provider value={null}>
@@ -766,7 +770,11 @@ export default function App() {
       <GlobalTopicContext.Provider value={selectedTopic}>
       <AppNavigationContext.Provider value={{ openSyllabus }}>
       <GlobalLectureContext.Provider value={lectureContextValue}>
-      {!user && isMobileDevice ? (
+      {!user && isAdminLoginPath() ? (
+        // `imentor.uz/admin` — administratorning parol sahifasi. Qurilmadan
+        // qat'i nazar: telefonda ham, kompyuterda ham shu ochiladi.
+        <AdminLoginScreen />
+      ) : !user && isMobileDevice ? (
         // Telefonda landing kerak emas — darhol kirish sahifasi.
         <MobileAuthScreen />
       ) : !user ? (
@@ -774,8 +782,6 @@ export default function App() {
           language={language}
           setLanguage={setLanguage}
           isMobileDevice={isMobileDevice}
-          desktopAuthView={desktopAuthView}
-          setDesktopAuthView={setDesktopAuthView}
         />
       ) : shouldHodimUseMobileCompanion(user, isMobileDevice) ? (
         <HodimMobileCompanion />

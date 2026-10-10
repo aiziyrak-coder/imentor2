@@ -57,3 +57,5 @@ class HemisLesson(Base):
     monitor_department: Mapped[str] = mapped_column(String(255), default="")
 
     synced_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    hemis_status: Mapped[str] = mapped_column(String(32), default="active", server_default="active")
+    hemis_missing_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

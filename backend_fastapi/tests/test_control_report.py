@@ -55,12 +55,27 @@ def test_headline_counts_only_monitor_rooms():
     assert h["total_lessons"] == 3
 
 
-def test_teacher_with_no_monitor_lesson_is_not_marked_bad():
-    """Monitorsiz xonada ishlaydigan o'qituvchi qizil bo'lmaydi — u majburiy nazoratda emas."""
+def test_a_teacher_without_a_monitor_room_is_listed_separately():
+    """Klinikada yoki masofadan dars o'tadigan o'qituvchi asosiy ro'yxatda EMAS.
+
+    Uni monitor bo'yicha baholab bo'lmaydi, bitta ro'yxatga qo'shilsa esa
+    raqamlarni chalkashtiradi (2026-10-06).
+    """
     out = run([lesson(1, monitor="")], {"u1": []})
-    (row,) = out["teachers"]
+    assert out["teachers"] == []
+    (row,) = out["offsite"]["teachers"]
     assert row["monitor_lessons"] == 0 and row["monitor_percent"] is None and row["band"] == "none"
     assert out["headline"]["watched_teachers"] == 0 and out["headline"]["idle_teachers"] == 0
+    assert out["headline"]["offsite_teachers"] == 1
+
+
+def test_the_separate_list_says_where_those_lessons_are():
+    """Rektor "qayerda dars o'tilyapti" degan savolga javob olsin."""
+    out = run([lesson(1, monitor="", room="Online (Masofaviy)")], {"u1": []})
+    places = out["offsite"]["places"]
+    assert places and places[0]["lessons"] == 1
+    assert "Online (Masofaviy)" in places[0]["place"]
+    assert places[0]["teachers"] == 1
 
 
 def test_attention_list_holds_those_who_never_used_a_monitor_room():

@@ -4,6 +4,7 @@ import datetime as dt
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -302,7 +303,26 @@ def upsert_draft(
     draft.last_name = payload.last_name.strip()
     draft.answers = list(payload.answers or [])
     draft.updated_at = dt.datetime.now(dt.timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Talabaning telefoni bir vaqtda ikki marta saqlaganda ikkala so'rov
+        # ham "qoralama yo'q" deb ko'rib, ikkitasini qo'shardi — ikkinchisi
+        # 500 bilan yiqilardi (2026-10-07). Endi borini yangilaymiz.
+        db.rollback()
+        existing = db.execute(
+            select(LiveTestDraft).where(
+                LiveTestDraft.session_id == obj.id,
+                LiveTestDraft.participant_key == participant_key,
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        existing.first_name = payload.first_name.strip()
+        existing.last_name = payload.last_name.strip()
+        existing.answers = list(payload.answers or [])
+        existing.updated_at = dt.datetime.now(dt.timezone.utc)
+        db.commit()
     return {"ok": True}
 
 

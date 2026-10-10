@@ -45,7 +45,11 @@ export async function postActivityEvents(
   options?: { beacon?: boolean },
 ): Promise<void> {
   const token = await getBackendAccessToken();
-  if (!token || events.length === 0) return;
+  if (events.length === 0) return;
+  if (!token) {
+    window.dispatchEvent(new CustomEvent('imentor:telemetry-status', { detail: false }));
+    return;
+  }
   const url = `${apiBaseUrl()}/v1/analytics/events/`;
 
   /* Sahifa yopilayotganda oddiy so'rov bekor qilinadi va oxirgi bo'lakdagi
@@ -74,7 +78,11 @@ export async function postActivityEvents(
     headers: { Authorization: `Bearer ${token}` },
     body: { events, page },
     timeoutMs: 12000,
-  }).catch(() => undefined);
+  }).then(() => {
+    window.dispatchEvent(new CustomEvent('imentor:telemetry-status', { detail: true }));
+  }).catch(() => {
+    window.dispatchEvent(new CustomEvent('imentor:telemetry-status', { detail: false }));
+  });
 }
 
 export async function postLiveTestAnticheatEvents(

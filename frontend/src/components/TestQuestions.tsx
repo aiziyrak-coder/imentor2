@@ -23,7 +23,8 @@ import { AppLanguageContext, GlobalTopicContext } from '../App';
 import type { AppLanguage } from '../i18n/language';
 import { useUiText } from '../i18n/useUiText';
 import { getCurrentLocalUser, normalizeUserRole } from '../utils/localStaffAuth';
-import { getBackendAccessToken, loginStudentWithOnlineTest } from '../utils/backendAuth';
+import { getBackendAccessToken } from '../utils/backendAuth';
+import IdLogin from './auth/IdLogin';
 import {
   listPreparedForTopicSynced,
   loadLatestPreparedContent,
@@ -353,11 +354,9 @@ export default function TestQuestions() {
 
   const [studentFirstName, setStudentFirstName] = useState('');
   const [studentLastName, setStudentLastName] = useState('');
-  const [studentLoginId, setStudentLoginId] = useState('');
-  const [studentLoginPassword, setStudentLoginPassword] = useState('');
-  // Talaba QR'ni skanerlagach avval yuz orqali kiradi; login-parol — zaxira yo'l.
-  const [studentLoginMode, setStudentLoginMode] = useState<'face' | 'password'>('face');
-  const [studentAuthLoading, setStudentAuthLoading] = useState(false);
+  // Talaba QR'ni skanerlagach avval yuz orqali kiradi; zaxira yo'l — JSHSHIR
+  // yoki pasport. Parol bilan kirish olib tashlandi (2026-10-02).
+  const [studentLoginMode, setStudentLoginMode] = useState<'face' | 'id'>('face');
   const [studentAuthed, setStudentAuthed] = useState(() => {
     const u = getCurrentLocalUser();
     return normalizeUserRole(u) === 'student';
@@ -912,37 +911,25 @@ export default function TestQuestions() {
     }
   };
 
-  const handleStudentLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!studentLoginId.trim() || !studentLoginPassword) {
-      setError(t('test.studentLoginRequired'));
+  /** JSHSHIR yoki pasport bilan kirgach — ism-familiya hisobdan olinadi. */
+  const handleStudentIdLogin = async () => {
+    const u = getCurrentLocalUser();
+    if (normalizeUserRole(u) !== 'student' || !u) {
+      setError(t('test.studentLoginForbidden'));
       return;
     }
-    setStudentAuthLoading(true);
-    try {
-      const u = await loginStudentWithOnlineTest(studentLoginId.trim(), studentLoginPassword);
-      setStudentFirstName(u.firstName || '');
-      setStudentLastName(u.lastName || '');
-      setStudentAuthed(true);
-      setStudentLoginPassword('');
-      await getBackendAccessToken();
-    } catch (err) {
-      console.error(err);
-      const code = err instanceof Error ? err.message : '';
-      setError(
-        code === 'forbidden' ? t('test.studentLoginForbidden') : t('test.studentLoginError'),
-      );
-    } finally {
-      setStudentAuthLoading(false);
-    }
+    setError(null);
+    setStudentFirstName(u.firstName || '');
+    setStudentLastName(u.lastName || '');
+    setStudentAuthed(true);
+    await getBackendAccessToken();
   };
 
   const handleStudentFaceLogin = async () => {
     const u = getCurrentLocalUser();
     if (normalizeUserRole(u) !== 'student' || !u) {
-      // Yuz xodimniki chiqdi — test talaba uchun; login-parol bilan kirsin.
-      setStudentLoginMode('password');
+      // Yuz xodimniki chiqdi — test talaba uchun; JSHSHIR/pasport bilan kirsin.
+      setStudentLoginMode('id');
       setError(t('test.studentLoginForbidden'));
       return;
     }
@@ -1032,59 +1019,30 @@ export default function TestQuestions() {
           {!studentAuthed && studentLoginMode === 'face' ? (
             <div className="rounded-2xl bg-white px-4 py-6 ring-1 ring-slate-900/[0.06] sm:px-8">
               <FaceLogin
-                onUsePassword={() => setStudentLoginMode('password')}
+                onUsePassword={() => setStudentLoginMode('id')}
                 onLoggedIn={() => void handleStudentFaceLogin()}
               />
             </div>
           ) : !studentAuthed ? (
-            <form
-              onSubmit={handleStudentLogin}
-              className="mx-auto w-full max-w-md space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-900/[0.06] sm:p-8"
-            >
-              <div className="flex items-center gap-2 text-blue-700 font-semibold">
+            <div className="mx-auto w-full max-w-md space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-900/[0.06] sm:p-8">
+              <div className="flex items-center gap-2 font-semibold text-blue-700">
                 <KeyRound size={20} />
                 {t('test.studentLoginTitle')}
               </div>
-              <input
-                value={studentLoginId}
-                onChange={(e) => setStudentLoginId(e.target.value)}
-                placeholder={t('test.studentLoginId')}
-                autoComplete="username"
-                className={staffInput}
-              />
-              <input
-                type="password"
-                value={studentLoginPassword}
-                onChange={(e) => setStudentLoginPassword(e.target.value)}
-                placeholder={t('test.studentLoginPassword')}
-                autoComplete="current-password"
-                className={staffInput}
-              />
               {error && (
-                <div className="bg-rose-50 text-rose-700 border border-rose-200 p-3 rounded-xl text-sm">
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                   {error}
                 </div>
               )}
-              <button
-                type="submit"
-                disabled={studentAuthLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 h-12 w-full text-[14px]"
-              >
-                {studentAuthLoading ? <Loader2 size={18} className="animate-spin" /> : null}
-                {t('test.studentLoginBtn')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
+              {/* Talaba ham xodim kabi parolsiz kiradi (2026-10-02). */}
+              <IdLogin
+                onUseFace={() => {
                   setError(null);
                   setStudentLoginMode('face');
                 }}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 text-[13.5px] font-semibold text-slate-500 hover:text-sky-700"
-              >
-                <ScanFace size={16} />
-                {t('auth.face.title')}
-              </button>
-            </form>
+                onDone={() => void handleStudentIdLogin()}
+              />
+            </div>
           ) : sessionLoading ? (
             <div className="py-12 text-center">
               <Loader2 className="animate-spin text-blue-600 mx-auto mb-3" />

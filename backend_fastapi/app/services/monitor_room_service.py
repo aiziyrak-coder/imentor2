@@ -32,7 +32,7 @@ SUSPECT_TEACHERS = 3
 #: suspect — ko'p dars, bir necha o'qituvchi, birorta ishlatish yo'q → texnik tekshiruv.
 #: quiet   — dars kam, ishlatish yo'q → hali xulosa qilib bo'lmaydi.
 STATUS_LABEL = {
-    "ok": "ishlayapti",
+    "ok": "faollik qaydi bor; qurilma holati tasdiqlanmagan",
     "suspect": "tekshirish kerak",
     "quiet": "ma'lumot kam",
 }
@@ -47,6 +47,7 @@ def _blank(monitor_id: str) -> dict:
         "buildings": set(),
         "lessons": 0,
         "used": 0,
+        "active_lesson_ids": set(),
         "teachers": set(),
         "used_teachers": set(),
         "departments": set(),
@@ -79,6 +80,7 @@ def room_stats(lessons: Iterable, used: dict[int, tuple[bool, int]]) -> dict[str
             row["teachers"].add(lesson.teacher_username)
         if lesson.id in used:
             row["used"] += 1
+            row["active_lesson_ids"].add(lesson.id)
             if lesson.teacher_username:
                 row["used_teachers"].add(lesson.teacher_username)
             if row["last_used"] is None or lesson.lesson_date > row["last_used"]:
@@ -114,6 +116,7 @@ def payload(stats: dict[str, dict]) -> list[dict]:
         "last_used": r["last_used"].isoformat() if r["last_used"] else None,
         "status": r["status"],
         "status_label": STATUS_LABEL[r["status"]],
+        "device_health_verified": False,
     } for r in stats.values()]
     order = {"suspect": 0, "quiet": 1, "ok": 2}
     rows.sort(key=lambda r: (order[r["status"]], -r["lessons"]))
@@ -121,16 +124,8 @@ def payload(stats: dict[str, dict]) -> list[dict]:
 
 
 def teacher_excuse(lessons: Iterable, stats: dict[str, dict]) -> str:
-    """Bitta o'qituvchining monitorli darslari bo'yicha bahona bor-yo'qligi.
-
-    `none`         — darslari ISHLAYOTGANI isbotlangan xonada bo'lgan, bahona yo'q.
-    `check_room`   — hamma darsi shubhali/ma'lumoti kam xonada → avval xona tekshiriladi.
-    """
-    proven = 0
-    for lesson in lessons:
-        if lesson.monitor_id and (stats.get(lesson.monitor_id) or {}).get("status") == "ok":
-            proven += 1
-    return "none" if proven else "check_room"
+    """Room-level telemetry cannot establish an individual teacher's access."""
+    return "check_room"
 
 
 def summary(stats: dict[str, dict]) -> dict:

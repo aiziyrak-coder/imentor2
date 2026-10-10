@@ -55,11 +55,14 @@ def face_login(
     settings = get_settings()
     try:
         decision = fl.identify(db, settings.face_api_url, data)
-    except requests.RequestException:
+    except (requests.RequestException, OSError):
+        # `TimeoutError` — `OSError`ning avlodi va `RequestException`ga
+        # o'ralmay chiqib ketishi mumkin; o'ralmagani talabaga 500 ko'rsatardi
+        # (2026-10-07). Ikkalasi ham bir xil tushunarli javob beradi.
         logger.exception("face_api bilan bog'lanib bo'lmadi")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Yuz orqali kirish hozir ishlamayapti. Login va parol bilan kiring.",
+            detail="Yuz orqali kirish hozir ishlamayapti. JSHSHIR yoki pasport bilan kiring.",
         )
 
     if decision.status == "no_face":
@@ -70,14 +73,14 @@ def face_login(
     if decision.status == "unknown":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Yuz tanilmadi. Kameraga to'g'ri qarab qayta urining yoki login va parol bilan kiring.",
+            detail="Yuz tanilmadi. Kameraga to'g'ri qarab qayta urining yoki JSHSHIR/pasport bilan kiring.",
         )
     if decision.status == "unlinked":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
                 "Yuzingiz tanildi, lekin iMentor hisobingizga hali bog'lanmagan. "
-                "Administratorga ayting; hozircha login va parol bilan kiring."
+                "Administratorga ayting; hozircha JSHSHIR yoki pasport bilan kiring."
             ),
         )
 
@@ -95,7 +98,7 @@ def face_login(
     if user is None or not user.is_active or role not in fl.FACE_LOGIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu hisobga yuz orqali kirib bo'lmaydi. Login va parol bilan kiring.",
+            detail="Bu hisobga yuz orqali kirib bo'lmaydi. JSHSHIR yoki pasport bilan kiring.",
         )
     auth_service.touch_last_login(db, user)
     record_activity_event(db, owner_key=user.username, role=role, event_type="login", meta={"method": "face"})
