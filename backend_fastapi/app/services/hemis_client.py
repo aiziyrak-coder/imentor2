@@ -95,7 +95,8 @@ def iter_all(path: str, **params: Any) -> Iterator[dict]:
         if not pagination or page >= int(pagination.get("pageCount") or 1):
             return
         page += 1
-    logger.warning("HEMIS %s: %d sahifadan oshdi — to'xtatildi", path, MAX_PAGES)
+    # Never present a truncated import as a complete authoritative snapshot.
+    raise HemisError(f"HEMIS {path}: {MAX_PAGES} sahifalik chegara oshdi; to‘liq nusxa olinmadi")
 
 
 def auditoriums() -> list[dict]:

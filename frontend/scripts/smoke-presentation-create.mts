@@ -157,7 +157,7 @@ async function main() {
   const ai = await req('POST', '/v1/education-ai/completion/', {
     token,
     body: {
-      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-nano',
+      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

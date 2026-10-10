@@ -13,16 +13,21 @@ import {
 import { useUiText } from '../../i18n/useUiText';
 
 interface LoginPageProps {
-  onSwitchToRegister: () => void;
   /** Kompyuterda QR ekraniga o'tish. */
   onWantsHodimQr?: () => void;
   /** Yuz orqali kirish ekraniga qaytish. */
   onWantsFace?: () => void;
 }
 
-/** Xodim (o'qituvchi) login va parol bilan kiradi. Talaba kirishi olib
- * tashlangan — talabalar uchun iMentor'da ish yo'q. */
-export default function LoginPage({ onSwitchToRegister, onWantsHodimQr, onWantsFace }: LoginPageProps) {
+/**
+ * Login va parol bilan kirish.
+ *
+ * Kompyuterda bu oyna faqat `imentor.uz/admin` manzilida ochiladi; xodim
+ * telefonda kiradi (joylashuv shu yerda qayd etiladi). Ro'yxatdan o'tish
+ * havolasi olib tashlandi — hisob faqat administrator orqali ochiladi
+ * (2026-10-02).
+ */
+export default function LoginPage({ onWantsHodimQr, onWantsFace }: LoginPageProps) {
   const { t } = useUiText();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -123,14 +128,6 @@ export default function LoginPage({ onSwitchToRegister, onWantsHodimQr, onWantsF
             </div>
           </div>
 
-          <p className="text-[11px] text-black/45 leading-relaxed bg-black/[0.03] rounded-xl px-3 py-2 border border-black/5">
-            <span className="font-semibold text-black/55">{t('auth.newAccountLabel')}</span> {t('auth.newAccountIntro')}{' '}
-            <button type="button" onClick={onSwitchToRegister} className="text-blue-600 font-semibold underline-offset-2 hover:underline">
-              {t('auth.registerLink')}
-            </button>{' '}
-            {`— ${t('auth.hodimRole')}.`}
-          </p>
-
           {error && (
             <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
               <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -168,12 +165,7 @@ export default function LoginPage({ onSwitchToRegister, onWantsHodimQr, onWantsF
           )}
         </form>
 
-        <p className="mt-6 text-center text-[13px] text-black/50">
-          {t('auth.noAccount')}{' '}
-          <button type="button" onClick={onSwitchToRegister} className="font-semibold text-blue-600 hover:underline">
-            {t('auth.registerLink')}
-          </button>
-        </p>
+        <p className="mt-6 text-center text-[13px] text-black/50">{t('auth.accountsByAdmin')}</p>
       </div>
     </motion.div>
   );

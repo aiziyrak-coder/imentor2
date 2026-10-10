@@ -22,7 +22,8 @@ import { AppLanguageContext, GlobalTopicContext } from '../App';
 import type { AppLanguage } from '../i18n/language';
 import { useUiText } from '../i18n/useUiText';
 import { getCurrentLocalUser, normalizeUserRole } from '../utils/localStaffAuth';
-import { getBackendAccessToken, loginStudentWithOnlineTest } from '../utils/backendAuth';
+import { getBackendAccessToken } from '../utils/backendAuth';
+import IdLogin from './auth/IdLogin';
 import {
   listPreparedForTopicSynced,
   loadLatestPreparedContent,
@@ -66,6 +67,10 @@ import {
   finalizeLiveTestSessionOnServer,
   upsertLiveTestDraftOnServer,
   getLiveTestParticipantKey,
+  saveLocalLiveTestAnswers,
+  loadLocalLiveTestAnswers,
+  clearLocalLiveTestAnswers,
+  countAnswered,
   createLiveTestSessionOnServer,
   type StudentTestQuestion,
 } from '../utils/liveTestApi';
@@ -77,6 +82,7 @@ import {
 } from '../utils/liveTestAnticheat';
 import QRCode from 'qrcode';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
+import { HttpError } from '../api/httpClient';
 import MedicalReferencesList from './staff/MedicalReferencesList';
 import {
   downloadTestAnswerKeyPdf,
@@ -103,6 +109,12 @@ function stripQuestionsForStudentView(questions: TestQuestion[]): StudentTestQue
     if (q.references?.length) item.references = q.references;
     return item;
   });
+}
+
+/** Shu brauzerda kirgan talaba (javoblar va ishtirokchi kaliti shunga bog'lanadi). */
+function studentOwnerKey(): string {
+  const u = getCurrentLocalUser();
+  return normalizeUserRole(u) === 'student' && u ? u.uid || '' : '';
 }
 
 function saveStudentSession(sessionId: string, data: LiveTestSessionDoc): void {
@@ -344,6 +356,9 @@ export default function TestQuestions() {
   const [submissions, setSubmissions] = useState<TestSubmissionDoc[]>([]);
   /** true — savollar (tahlil bilan), false — talabalar natijalari jadvali. */
   const [showQuestions, setShowQuestions] = useState(true);
+  /** Jonli sessiya ochiq paytda to'g'ri javoblar ekranda YASHIRIN. O'qituvchi
+   *  ogohlantirishni tasdiqlab ochsagina ko'rinadi (sessiya almashsa qayta yopiladi). */
+  const [revealDuringSession, setRevealDuringSession] = useState(false);
   const [downloadingKeyPdf, setDownloadingKeyPdf] = useState(false);
   const [downloadingResultsPdf, setDownloadingResultsPdf] = useState(false);
   const [sessionClosed, setSessionClosed] = useState(false);
@@ -353,17 +368,16 @@ export default function TestQuestions() {
 
   const [studentFirstName, setStudentFirstName] = useState('');
   const [studentLastName, setStudentLastName] = useState('');
-  const [studentLoginId, setStudentLoginId] = useState('');
-  const [studentLoginPassword, setStudentLoginPassword] = useState('');
-  // Talaba QR'ni skanerlagach avval yuz orqali kiradi; login-parol — zaxira yo'l.
-  const [studentLoginMode, setStudentLoginMode] = useState<'face' | 'password'>('face');
-  const [studentAuthLoading, setStudentAuthLoading] = useState(false);
+  // Talaba QR'ni skanerlagach avval yuz orqali kiradi; zaxira yo'l — JSHSHIR
+  // yoki pasport. Parol bilan kirish olib tashlandi (2026-10-02).
+  const [studentLoginMode, setStudentLoginMode] = useState<'face' | 'id'>('face');
   const [studentAuthed, setStudentAuthed] = useState(() => {
     const u = getCurrentLocalUser();
     return normalizeUserRole(u) === 'student';
   });
   const [studentAnswers, setStudentAnswers] = useState<number[]>([]);
   const [studentSubmitted, setStudentSubmitted] = useState(false);
+  const [missingQuestion, setMissingQuestion] = useState<number | null>(null);
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentTest, setStudentTest] = useState<LiveTestSessionDoc | null>(null);
 
@@ -478,12 +492,6 @@ export default function TestQuestions() {
           testStartedAtRef.current = Date.now();
           void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
-          void upsertLiveTestDraftOnServer(studentSessionId, {
-            participantKey: participantKeyRef.current,
-            firstName: '',
-            lastName: '',
-            answers: new Array(doc.questions.length).fill(-1),
-          }).catch(() => {});
           return;
         }
       } catch {
@@ -503,12 +511,6 @@ export default function TestQuestions() {
           testStartedAtRef.current = Date.now();
           void postActivityEvents([{ event_type: 'live_test_opened' }], `live-test:${studentSessionId}`);
           setSessionLoading(false);
-          void upsertLiveTestDraftOnServer(studentSessionId, {
-            participantKey: participantKeyRef.current,
-            firstName: '',
-            lastName: '',
-            answers: new Array(local.questions.length).fill(-1),
-          }).catch(() => {});
         }
         return;
       }
@@ -524,18 +526,51 @@ export default function TestQuestions() {
     };
   }, [isStudentMode, studentSessionId]);
 
+  // Sahifa yangilangan yoki telefon uxlab qolgan bo'lsa talaba to'xtagan
+  // joyidan davom etadi (ilgari javoblar o'chib ketardi). Javoblar va
+  // ishtirokchi kaliti KIRGAN TALABAGA bog'liq: bitta telefondan ikki talaba
+  // yechsa, biri ikkinchisining javoblarini ko'rmaydi.
+  useEffect(() => {
+    if (!isStudentMode || !studentSessionId || !studentTest || !studentAuthed) return;
+    const owner = studentOwnerKey();
+    participantKeyRef.current = getLiveTestParticipantKey(studentSessionId, owner);
+    const saved = loadLocalLiveTestAnswers(studentSessionId, studentTest.questions.length, owner);
+    if (saved) setStudentAnswers(saved);
+  }, [isStudentMode, studentSessionId, studentTest, studentAuthed]);
+
   // Talabaning javob qoralamasi fonda serverga yoziladi — telefon o'chsa yoki
   // sahifa yopilsa ish yo'qolmasin. MUHIM: bu effekt AYNAN talaba rejimi
   // uchun (avval shart teskari yozilgani uchun hech qachon ishlamagan).
   useEffect(() => {
     if (!isStudentMode || !studentSessionId || !studentTest || studentSubmitted || sessionClosed) return;
+    if (!studentAuthed) return;
+    const sent = studentAnswers;
     const timer = window.setTimeout(() => {
       void upsertLiveTestDraftOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
         firstName: studentFirstName,
         lastName: studentLastName,
-        answers: studentAnswers,
-      }).catch(() => {});
+        answers: sent,
+      })
+        .then((saved) => {
+          if (saved.alreadySubmitted) {
+            // Allaqachon topshirgan yoki test yopilganda javoblari qabul qilingan.
+            clearLocalLiveTestAnswers(studentSessionId, studentOwnerKey());
+            setStudentSubmitted(true);
+            return;
+          }
+          // Boshqa qurilma yoki oldingi oynadan saqlangan javoblar ko'proq
+          // bo'lsa — o'shalar tiklanadi.
+          if (saved.answers.length === sent.length && countAnswered(saved.answers) > countAnswered(sent)) {
+            setStudentAnswers((now) => (now === sent ? saved.answers : now));
+          }
+        })
+        .catch((err) => {
+          if (err instanceof HttpError && err.status === 403) {
+            setSessionClosed(true);
+            setError(t('test.sessionClosedStudentHint'));
+          }
+        });
     }, 700);
     return () => window.clearTimeout(timer);
   }, [
@@ -544,6 +579,7 @@ export default function TestQuestions() {
     studentTest,
     studentSubmitted,
     sessionClosed,
+    studentAuthed,
     studentFirstName,
     studentLastName,
     studentAnswers,
@@ -969,6 +1005,8 @@ export default function TestQuestions() {
     const next = [...studentAnswers];
     next[questionIndex] = optionIndex;
     setStudentAnswers(next);
+    if (studentSessionId) saveLocalLiveTestAnswers(studentSessionId, next, studentOwnerKey());
+    if (missingQuestion === questionIndex) setMissingQuestion(null);
   };
 
   /** Ball. Javoblar ro'yxati savollar ro'yxatidan uzunroq bo'lishi mumkin
@@ -1017,37 +1055,25 @@ export default function TestQuestions() {
     }
   };
 
-  const handleStudentLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!studentLoginId.trim() || !studentLoginPassword) {
-      setError(t('test.studentLoginRequired'));
+  /** JSHSHIR yoki pasport bilan kirgach — ism-familiya hisobdan olinadi. */
+  const handleStudentIdLogin = async () => {
+    const u = getCurrentLocalUser();
+    if (normalizeUserRole(u) !== 'student' || !u) {
+      setError(t('test.studentLoginForbidden'));
       return;
     }
-    setStudentAuthLoading(true);
-    try {
-      const u = await loginStudentWithOnlineTest(studentLoginId.trim(), studentLoginPassword);
-      setStudentFirstName(u.firstName || '');
-      setStudentLastName(u.lastName || '');
-      setStudentAuthed(true);
-      setStudentLoginPassword('');
-      await getBackendAccessToken();
-    } catch (err) {
-      console.error(err);
-      const code = err instanceof Error ? err.message : '';
-      setError(
-        code === 'forbidden' ? t('test.studentLoginForbidden') : t('test.studentLoginError'),
-      );
-    } finally {
-      setStudentAuthLoading(false);
-    }
+    setError(null);
+    setStudentFirstName(u.firstName || '');
+    setStudentLastName(u.lastName || '');
+    setStudentAuthed(true);
+    await getBackendAccessToken();
   };
 
   const handleStudentFaceLogin = async () => {
     const u = getCurrentLocalUser();
     if (normalizeUserRole(u) !== 'student' || !u) {
-      // Yuz xodimniki chiqdi — test talaba uchun; login-parol bilan kirsin.
-      setStudentLoginMode('password');
+      // Yuz xodimniki chiqdi — test talaba uchun; JSHSHIR/pasport bilan kirsin.
+      setStudentLoginMode('id');
       setError(t('test.studentLoginForbidden'));
       return;
     }
@@ -1085,13 +1111,19 @@ export default function TestQuestions() {
       return;
     }
     if (studentAnswers.includes(-1)) {
-      setError(t('test.studentErrorAllQuestions'));
+      // Qaysi savol qolganini talaba o'zi qidirmasin: o'sha savolga olib boriladi.
+      const first = studentAnswers.indexOf(-1);
+      setMissingQuestion(first);
+      setError(`${t('test.studentErrorAllQuestions')} (${first + 1})`);
+      document.getElementById(`student-question-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     setStudentLoading(true);
     setError(null);
     try {
-      await flushLiveTestEvents(studentSessionId, participantKeyRef.current);
+      // Kuzatuv hodisalari kutilmaydi: sekin internetda ular javoblarni
+      // yuborishni 15 soniyagacha ushlab turardi.
+      void flushLiveTestEvents(studentSessionId, participantKeyRef.current).catch(() => undefined);
       const started = testStartedAtRef.current ?? Date.now();
       await submitLiveTestOnServer(studentSessionId, {
         participantKey: participantKeyRef.current,
@@ -1111,14 +1143,30 @@ export default function TestQuestions() {
       const list = loadLocalSubmissions(studentSessionId);
       list.unshift(item);
       saveLocalSubmissions(studentSessionId, list);
+      clearLocalLiveTestAnswers(studentSessionId, studentOwnerKey());
       setStudentSubmitted(true);
     } catch (err) {
       console.error(err);
-      setError(t('test.studentErrorSubmit'));
+      if (err instanceof HttpError && err.status === 403) {
+        // O'qituvchi testni yopib bo'lgan — "internetni tekshiring" emas.
+        setSessionClosed(true);
+        setError(t('test.sessionClosedStudentHint'));
+      } else {
+        setError(t('test.studentErrorSubmit'));
+      }
     } finally {
       setStudentLoading(false);
     }
   };
+
+  // Sinfdagi katta ekran: QR ko'rsatilib, talabalar test yechayotgan paytda
+  // to'g'ri javob, variant izohlari va tahlil ko'rinmasligi kerak (2026-10-09:
+  // monitorda javoblari ochiq test rasmi kelgan). Sessiya yakunlangach — ochiq.
+  const sessionRunning = Boolean(teacherSessionId) && !sessionClosed;
+  const hideAnswers = sessionRunning && !revealDuringSession;
+  useEffect(() => {
+    setRevealDuringSession(false);
+  }, [teacherSessionId]);
 
   // Hook shartli `return`dan OLDIN chaqiriladi (React hook qoidasi).
   const staffTopic = useLocalizedTopic(
@@ -1142,59 +1190,30 @@ export default function TestQuestions() {
           {!studentAuthed && studentLoginMode === 'face' ? (
             <div className="rounded-2xl bg-white px-4 py-6 ring-1 ring-slate-900/[0.06] sm:px-8">
               <FaceLogin
-                onUsePassword={() => setStudentLoginMode('password')}
+                onUsePassword={() => setStudentLoginMode('id')}
                 onLoggedIn={() => void handleStudentFaceLogin()}
               />
             </div>
           ) : !studentAuthed ? (
-            <form
-              onSubmit={handleStudentLogin}
-              className="mx-auto w-full max-w-md space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-900/[0.06] sm:p-8"
-            >
-              <div className="flex items-center gap-2 text-blue-700 font-semibold">
+            <div className="mx-auto w-full max-w-md space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-900/[0.06] sm:p-8">
+              <div className="flex items-center gap-2 font-semibold text-blue-700">
                 <KeyRound size={20} />
                 {t('test.studentLoginTitle')}
               </div>
-              <input
-                value={studentLoginId}
-                onChange={(e) => setStudentLoginId(e.target.value)}
-                placeholder={t('test.studentLoginId')}
-                autoComplete="username"
-                className={staffInput}
-              />
-              <input
-                type="password"
-                value={studentLoginPassword}
-                onChange={(e) => setStudentLoginPassword(e.target.value)}
-                placeholder={t('test.studentLoginPassword')}
-                autoComplete="current-password"
-                className={staffInput}
-              />
               {error && (
-                <div className="bg-rose-50 text-rose-700 border border-rose-200 p-3 rounded-xl text-sm">
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                   {error}
                 </div>
               )}
-              <button
-                type="submit"
-                disabled={studentAuthLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 bg-slate-900 text-white hover:bg-slate-700 h-12 w-full text-[14px]"
-              >
-                {studentAuthLoading ? <Loader2 size={18} className="animate-spin" /> : null}
-                {t('test.studentLoginBtn')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
+              {/* Talaba ham xodim kabi parolsiz kiradi (2026-10-02). */}
+              <IdLogin
+                onUseFace={() => {
                   setError(null);
                   setStudentLoginMode('face');
                 }}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 text-[13.5px] font-semibold text-slate-500 hover:text-sky-700"
-              >
-                <ScanFace size={16} />
-                {t('auth.face.title')}
-              </button>
-            </form>
+                onDone={() => void handleStudentIdLogin()}
+              />
+            </div>
           ) : sessionLoading ? (
             <div className="py-12 text-center">
               <Loader2 className="animate-spin text-blue-600 mx-auto mb-3" />
@@ -1236,7 +1255,11 @@ export default function TestQuestions() {
                 {/* Talaba ko'rinishi ham o'qituvchinikidek: raqam nishoni,
                     qalin savol matni, bir xil variant o'lchamlari. */}
                 {studentTest.questions.map((q, i) => (
-                  <div key={i} className="space-y-4 rounded-2xl bg-white p-5 ring-1 ring-slate-900/[0.06] sm:p-6">
+                  <div
+                    key={i}
+                    id={`student-question-${i}`}
+                    className={`space-y-4 rounded-2xl bg-white p-5 ring-1 sm:p-6 ${missingQuestion === i ? 'ring-2 ring-rose-400' : 'ring-slate-900/[0.06]'}`}
+                  >
                     <div className="flex items-start gap-3">
                       <div className={staffIndexBadge}>{i + 1}</div>
                       <p className={staffQuestionText}>{q.question}</p>
@@ -1262,6 +1285,11 @@ export default function TestQuestions() {
                 ))}
               </div>
 
+              {!studentSubmitted && !sessionClosed && (
+                <p className="text-center text-[13px] font-medium text-slate-500" data-testid="student-progress">
+                  {countAnswered(studentAnswers)} / {studentTest.questions.length}
+                </p>
+              )}
               {!studentSubmitted && !sessionClosed ? (
                 <button
                   onClick={handleStudentSubmit}
@@ -1570,6 +1598,31 @@ export default function TestQuestions() {
                     Test bo'limi boshqa ilovadek ko'rinardi. */}
                 <TranslationGate status={testStatus} onRetry={retryTestTranslation}>
                 <div className="space-y-6">
+                {sessionRunning && (
+                  <div
+                    role="status"
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-[13px] ${
+                      hideAnswers
+                        ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+                        : 'border-rose-200 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Lock size={15} className="shrink-0" />
+                      {hideAnswers ? t('test.answersHiddenDuringSession') : t('test.answersShownDuringSession')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hideAnswers && !window.confirm(t('test.revealAnswersConfirm'))) return;
+                        setRevealDuringSession(hideAnswers);
+                      }}
+                      className={staffBtnGhost}
+                    >
+                      {hideAnswers ? t('test.revealAnswers') : t('test.hideAnswers')}
+                    </button>
+                  </div>
+                )}
                 {(displayedTest?.questions || []).map((q, i) => (
                   <StaffPanel key={i} large className="p-5 sm:p-7 space-y-5">
                     <div className="flex items-start gap-4">
@@ -1578,8 +1631,9 @@ export default function TestQuestions() {
                     </div>
                     <div className="space-y-2">
                       {q.options.map((option, optIdx) => {
-                        const optionExplanation = q.optionExplanations?.[optIdx]?.trim();
-                        const isCorrect = optIdx === q.correctOptionIndex;
+                        const optionExplanation = hideAnswers ? '' : q.optionExplanations?.[optIdx]?.trim();
+                        // Sessiya ketayotganda to'g'ri variant ajratib ko'rsatilmaydi.
+                        const isCorrect = !hideAnswers && optIdx === q.correctOptionIndex;
                         return (
                           <div
                             key={optIdx}
@@ -1603,6 +1657,7 @@ export default function TestQuestions() {
                         );
                       })}
                     </div>
+                    {!hideAnswers && (
                     <div className={staffExplainBox}>
                       <h4 className={staffExplainTitle}>
                         <Brain size={14} className="shrink-0" /> {t('test.correctAnalysis')}
@@ -1617,6 +1672,7 @@ export default function TestQuestions() {
                         />
                       )}
                     </div>
+                    )}
                   </StaffPanel>
                 ))}
                 {displayedTest?.references && displayedTest.references.length > 0 && (

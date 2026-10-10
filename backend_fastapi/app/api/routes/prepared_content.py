@@ -28,6 +28,7 @@ from app.schemas.prepared_content import (
     PreparedContentPayloadIn,
     PreparedContentSummaryOut,
 )
+from app.services.json_sanitize import clean_json
 from app.services import content_catalog as cc
 from app.services import syllabus_access as access
 from app.services import topic_norm as tn
@@ -378,7 +379,8 @@ def create_prepared_content(
             if syllabus
             else _existing_syllabus_id(db, _syllabus_id_from_norm(topic_norm))
         ),
-        payload=payload.payload,
+        # Nol belgisi bo'lsa jsonb butun so'rovni rad etadi — tozalab yoziladi.
+        payload=clean_json(payload.payload),
         created_at=dt.datetime.now(dt.timezone.utc),
     )
     db.add(obj)

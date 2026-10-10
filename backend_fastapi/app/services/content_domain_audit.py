@@ -37,6 +37,12 @@ VIGNETTE = re.compile(
 # Faqat klinik vignette'da uchraydigan aniq belgilar.
 CLINICAL_MARKERS = re.compile(r"hba1c|metformin|insulin\b|qandli diabet|appenditsit|pnevmoni", re.I)
 
+# Nomining O'ZI klinik bo'lgan fan — kafedra rasmiy klinik ro'yxatda
+# bo'lmasa ham bemor ssenariysi O'RINLI. "Xalq tabobati va farmakologiya"
+# kafedrasida shunday bitta fan bor: "Klinik farmakologiya" (2026-10-05).
+# Frontenddagi `subjectDomain.ts` dagi CLINICAL_SUBJECT_RE bilan bir xil.
+CLINICAL_SUBJECT = re.compile(r"(^|\s)klinik|(^|\s)klinika(\s|$)", re.I)
+
 
 def has_patient_case(payload: dict | None) -> bool:
     text = json.dumps(payload or {}, ensure_ascii=False)
@@ -49,9 +55,13 @@ def find_mismatched(db: Session) -> list[tuple[PreparedContent, str]]:
     Kafedra `is_clinical` bayrog'i institut hujjatidan olinadi
     (`clinical_departments`). Fani bog'lanmagan yozuvlarga tegilmaydi —
     ularning domenini aniq bilib bo'lmaydi.
+
+    Nomi klinik bo'lgan fan ("Klinik farmakologiya") klinik bo'lmagan
+    kafedrada tursa ham TEGILMAYDI: u bemor yonidagi dori tanlashga
+    o'rgatadi va bemor ssenariysi uning asosiy quroli.
     """
     rows = db.execute(
-        select(PreparedContent, AcademicDepartment.name)
+        select(PreparedContent, AcademicDepartment.name, CourseSyllabus.subject_name)
         .join(CourseSyllabus, CourseSyllabus.id == PreparedContent.syllabus_id)
         .join(AcademicDepartment, AcademicDepartment.id == CourseSyllabus.department_id)
         .where(
@@ -60,7 +70,11 @@ def find_mismatched(db: Session) -> list[tuple[PreparedContent, str]]:
             PreparedContent.retired_reason == "",
         )
     ).all()
-    return [(item, dep) for item, dep in rows if has_patient_case(item.payload)]
+    return [
+        (item, dep)
+        for item, dep, subject in rows
+        if not CLINICAL_SUBJECT.search(subject or "") and has_patient_case(item.payload)
+    ]
 
 
 def retire(db: Session, *, dry_run: bool = True, undo: bool = False) -> dict:

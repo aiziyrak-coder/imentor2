@@ -24,6 +24,7 @@ import {
   Users,
   MapPin,
   Building2,
+  Landmark,
   Files,
   Library,
   BookMarked,
@@ -91,6 +92,7 @@ import AdminLiveTestResultsPage from './components/admin/AdminLiveTestResultsPag
 import AdminStaffLocationConsole from './components/admin/AdminStaffLocationConsole';
 import AdminLiveTeachingBoard from './components/admin/AdminLiveTeachingBoard';
 import AdminCampusBuildingsPage from './components/admin/AdminCampusBuildingsPage';
+import AdminDepartmentsPage from './components/admin/AdminDepartmentsPage';
 import AdminSyllabusCatalog from './components/admin/AdminSyllabusCatalog';
 import AdminOnlineEdu from './components/admin/AdminOnlineEdu';
 import AdminCourseAssignments from './components/admin/AdminCourseAssignments';
@@ -101,6 +103,8 @@ import AdminClientErrors from './components/admin/AdminClientErrors';
 import TeacherSettings from './components/settings/TeacherSettings';
 import HodimGpsPromptBar from './components/staff/HodimGpsPromptBar';
 import PublicLandingPage from './components/public/PublicLandingPage';
+import AdminLoginScreen from './components/auth/AdminLoginScreen';
+import { isAdminLoginPath } from './utils/adminLoginPath';
 import MobileAuthScreen from './components/auth/MobileAuthScreen';
 import { useStaffLocationTracking } from './hooks/useStaffLocationTracking';
 import type { SyllabusTopic } from './services/aiService';
@@ -123,6 +127,7 @@ type View =
   | 'admin-cases'
   | 'admin-tests'
   | 'admin-live-test-results'
+  | 'admin-departments'
   | 'admin-syllabuses'
   | 'admin-course-assignments'
   | 'admin-online-edu'
@@ -152,6 +157,7 @@ const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-cases': BriefcaseMedical,
   'admin-tests': ClipboardList,
   'admin-live-test-results': Users,
+  'admin-departments': Landmark,
   'admin-syllabuses': BookOpen,
   'admin-course-assignments': GraduationCap,
   'admin-online-edu': Monitor,
@@ -187,6 +193,7 @@ const ADMIN_NAV_IDS: View[] = [
   'admin-staff-location',
   'admin-live-teaching',
   'admin-campus-buildings',
+  'admin-departments',
   'admin-syllabuses',
   'admin-course-assignments',
   'admin-online-edu',
@@ -368,7 +375,6 @@ export default function App() {
   const [user, setUser] = useState<LocalStaffUser | null>(() => getCurrentLocalUser());
   /** Kompyuterda login modal holati: 'qr' — standart (yuz skaneri faqat telefonda),
    * 'qr' — telefon orqali QR, 'password' — login (telefon / Xodim ID) va parol. */
-  const [desktopAuthView, setDesktopAuthView] = useState<'face' | 'qr' | 'password'>('qr');
   /** null = tekshirilmoqda; false = birinchi kirish fan tanlash; true = tayyor */
   const [teachingSubjectsReady, setTeachingSubjectsReady] = useState<boolean | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<SyllabusTopicContext | null>(() =>
@@ -534,7 +540,7 @@ export default function App() {
   }, [user?.uid]);
 
   const userRole = user ? normalizeUserRole(user) : null;
-  useActivityTelemetry(!!user && !!userRole, activeView);
+  const telemetryFailed = useActivityTelemetry(!!user && !!userRole, activeView);
 
   const handleLogout = async () => {
     if (user && userRole) {
@@ -689,6 +695,8 @@ export default function App() {
         return <AdminTestsLibrary />;
       case 'admin-live-test-results':
         return <AdminLiveTestResultsPage />;
+      case 'admin-departments':
+        return <AdminDepartmentsPage />;
       case 'admin-syllabuses':
         return <AdminSyllabusCatalog />;
       case 'admin-online-edu':
@@ -781,6 +789,9 @@ export default function App() {
       {/* Global alertlar — yuqori o'ng burchak, 20 soniyada o'zi yo'qoladi.
           Talaba QR rejimida ham ko'rinsin, shuning uchun eng tashqarida. */}
       <AppToastHost />
+      {telemetryFailed && <div role="alert" className="fixed bottom-3 left-3 right-3 z-[100] rounded-xl bg-amber-100 p-3 text-sm text-amber-950 shadow-lg">
+        Faollik qaydi serverga yetib bormadi. Internet va kirish holatini tekshiring. Hisobotda bu vaqt to‘liq ko‘rinmasligi mumkin.
+      </div>}
       {/* Student QR: always fullscreen test only (no shell), even if staff session exists */}
       {isPublicStudentTestUrl() ? (
         <GlobalTopicContext.Provider value={null}>
@@ -794,7 +805,11 @@ export default function App() {
       <GlobalTopicContext.Provider value={selectedTopic}>
       <AppNavigationContext.Provider value={{ openSyllabus }}>
       <GlobalLectureContext.Provider value={lectureContextValue}>
-      {!user && isMobileDevice ? (
+      {!user && isAdminLoginPath() ? (
+        // `imentor.uz/admin` — administratorning parol sahifasi. Qurilmadan
+        // qat'i nazar: telefonda ham, kompyuterda ham shu ochiladi.
+        <AdminLoginScreen />
+      ) : !user && isMobileDevice ? (
         // Telefonda landing kerak emas — darhol kirish sahifasi.
         <MobileAuthScreen />
       ) : !user ? (
@@ -802,8 +817,6 @@ export default function App() {
           language={language}
           setLanguage={setLanguage}
           isMobileDevice={isMobileDevice}
-          desktopAuthView={desktopAuthView}
-          setDesktopAuthView={setDesktopAuthView}
         />
       ) : shouldHodimUseMobileCompanion(user, isMobileDevice) ? (
         <HodimMobileCompanion />

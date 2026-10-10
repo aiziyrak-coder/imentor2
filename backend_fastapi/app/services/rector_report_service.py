@@ -45,6 +45,8 @@ from app.services.activity_report_service import (
     all_teachers_activity,
     range_bounds,
 )
+from app.services import report_exclusion
+from app.services.dean_access import ExclusionScope
 
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
 
@@ -80,14 +82,21 @@ def _department_allowed(department: str | None, allowed: set[str]) -> bool:
 
 def _allowed_subject_codes(db: Session, allowed_departments: list[str] | tuple[str, ...] | None) -> set[str] | None:
     allowed = _allowed_department_names(allowed_departments)
-    if not allowed:
+    excluded = report_exclusion.load(db)
+    if not allowed and not excluded.subject_codes:
         return None
+    # Faqat chiqarish (dekan cheklovi yo'q): kafedrasiz fanlar ham qoladi.
+    keep_unassigned = not allowed or isinstance(allowed_departments, ExclusionScope)
     rows = db.execute(
         select(CourseSyllabus.subject_code, AcademicDepartment.name)
-        .join(AcademicDepartment, AcademicDepartment.id == CourseSyllabus.department_id)
+        .outerjoin(AcademicDepartment, AcademicDepartment.id == CourseSyllabus.department_id)
         .where(CourseSyllabus.subject_code.is_not(None), CourseSyllabus.subject_code != "")
     ).all()
-    return {r.subject_code for r in rows if _department_allowed(r.name, allowed)}
+    return {
+        r.subject_code for r in rows
+        if r.subject_code not in excluded.subject_codes
+        and (_department_allowed(r.name, allowed) if r.name else keep_unassigned)
+    }
 
 def band_of(percent: float | None) -> str:
     if percent is None:
@@ -981,8 +990,14 @@ def filter_options(db: Session) -> dict:
         .where(CourseSyllabus.subject_code != "", public_syllabus_clause())
         .distinct()
     ).all()
+    excluded = report_exclusion.load(db)
+    departments = [d for d in departments if not excluded.department_excluded(d)]
     subjects = sorted(
-        [{"code": r.subject_code, "name": r.subject_name or r.subject_code} for r in subject_rows],
+        [
+            {"code": r.subject_code, "name": r.subject_name or r.subject_code}
+            for r in subject_rows
+            if not excluded.subject_excluded(r.subject_name, r.subject_code)
+        ],
         key=lambda s: s["name"].lower(),
     )
 

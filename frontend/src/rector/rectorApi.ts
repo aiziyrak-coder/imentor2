@@ -637,7 +637,14 @@ function get<T>(path: string): Promise<T> {
   // umumiy httpClient shu brauzerdagi O'QITUVCHI tokenini yangilab qayta
   // urinardi — u rektor huquqiga ega emas, natijada parol oynasi o'rniga
   // "HTTP 403" chiqib qolardi.
-  return httpJson<T>(`${apiBaseUrl()}/v1/rector${path}`, { headers: authHeader(), retryOnUnauthorized: false });
+  // Umumiy chegara 12 soniya, lekin uzun davr hisoboti (30 kun) serverda
+  // 15-20 soniya hisoblanadi — sahifa natijani kutmay "so'rov vaqti tugadi"
+  // derdi (2026-10-09).
+  return httpJson<T>(`${apiBaseUrl()}/v1/rector${path}`, {
+    headers: authHeader(),
+    retryOnUnauthorized: false,
+    timeoutMs: 90000,
+  });
 }
 
 export function fetchFilters(): Promise<FilterOptions> {
@@ -849,6 +856,8 @@ export type ScheduledLessonRow = {
   building: string;
   monitor_id: string;
   used: boolean;
+  /** Dars hali tugamagan — baholanmaydi. */
+  pending?: boolean;
   students: number;
   // Dalil: qator qaysi HEMIS yozuvidan va qaysi inventar xonasidan kelgan.
   hemis_id: string;
@@ -856,6 +865,15 @@ export type ScheduledLessonRow = {
   monitor_room: string;
   monitor_department: string;
   synced_at: string | null;
+  hemis_status?: string;
+  hemis_missing_at?: string | null;
+  evidence?: {
+    status: string; room_presence: string; note: string; seconds: number;
+    reported_seconds?: number; overlap_seconds?: number;
+    first_event?: string | null; last_event?: string | null;
+    pages: Array<{ page: string; seconds: number; opens: number }>;
+    events: Array<{ id: number; at: string; action: string; page: string; seconds: number }>;
+  };
 };
 
 export function fetchLessonTeachers(f: ReportFilters): Promise<LessonTeachersReport> {
@@ -917,6 +935,12 @@ export type ControlTeacher = {
   // Nechta darsi ishlayotgani isbotlangan xonada bo'lgan; bahona shu bilan hal bo'ladi.
   proven_lessons: number;
   excuse: 'none' | 'check_room';
+  /** Davrdagi holati — har o'qituvchi faqat bitta toifada. */
+  state?: 'full' | 'partial' | 'opened' | 'none' | 'on_leave' | 'unlinked' | 'offsite';
+  /** Monitorli darslaridan o'tilmay qolgani. */
+  monitor_missed?: number;
+  /** Bugun hali tugamagan (baholanmagan) monitorli darslari. */
+  pending_lessons?: number;
 };
 
 export type ControlRoom = {
@@ -969,6 +993,28 @@ export type ControlReport = {
     total_lessons: number;
     blamed_teachers: number;
     check_room_teachers: number;
+    /** Monitorli xonada darsi umuman yo'q — asosiy foizga kirmaydi. */
+    offsite_teachers: number;
+    /** Kirgan, lekin darsni iMentor'da o'tmagan (chegaradan past). */
+    short_lessons: number;
+    short_teachers: number;
+    /** Dars "o'tilgan" deyish uchun kerak bo'lgan eng kam daqiqa. */
+    min_lesson_minutes: number;
+    /** Monitorli darslar ishlangan vaqt bo'yicha (yig'indisi = monitor_lessons).
+     *  full — chegaradan o'tgan; near — NEAR..chegara; brief — 1..NEAR; none — ochilmagan. */
+    work_buckets?: { full: number; near: number; brief: number; none: number };
+    short_near_teachers?: number;
+    short_brief_teachers?: number;
+    /** "Yaqin" toifasining pastki chegarasi (daqiqa). */
+    near_minutes?: number;
+    /** Kamida bitta darsini iMentor'da o'tgan o'qituvchilar va ularning ulushi. */
+    teachers_used?: number;
+    teacher_percent?: number;
+    /** O'qituvchilar toifalari (yig'indisi = watched_teachers). */
+    teacher_buckets?: { full: number; partial: number; opened: number; none: number; on_leave: number; unlinked: number };
+    partial_missed_lessons?: number;
+    /** Hali tugamagan darslar — hech bir raqamga kirmagan. */
+    pending?: { lessons: number; monitor_lessons: number; teachers: number; as_of: string | null };
   };
   attention: ControlAttention[];
   check_room: ControlAttention[];
@@ -992,7 +1038,17 @@ export type ControlReport = {
     active_teachers: number;
     other_lessons: number;
   }>;
+  /** FAQAT monitorli xonada darsi borlar. */
   teachers: ControlTeacher[];
+  /** Klinika bazasida yoki masofadan dars o'tadiganlar — alohida. */
+  offsite: {
+    teachers: ControlTeacher[];
+    count: number;
+    lessons: number;
+    used: number;
+    places: Array<{ place: string; lessons: number; used: number; teachers: number; percent: number }>;
+    places_total: number;
+  };
   quality: {
     minutes: number;
     worked: number;
@@ -1043,6 +1099,35 @@ export type ControlStudents = {
   }>;
 };
 
+/** Institutning hamma tizimi bitta javobda. */
+export type PlatformsReport = {
+  from: string;
+  to: string;
+  platforms: Array<{
+    key: string;
+    label: string;
+    link: string;
+    /** `true` — raqamlar shu so'rovda hisoblandi; `false` — soatlik nusxadan. */
+    live: boolean;
+    /** `false` — oxirgi yig'ish o'tmagan: raqamlar eski. */
+    ok: boolean;
+    note: string;
+    collected_at: string | null;
+    cards: Array<{ metric: string; title: string; value: number | string; hint: string }>;
+  }>;
+  /** Hali ulanmagan tizimlar — sababi bilan. */
+  missing: Array<{ key: string; label: string; note: string }>;
+};
+
+export function fetchPlatforms(f: ReportFilters): Promise<PlatformsReport> {
+  return get(`/platforms/?${query({ from: f.from, to: f.to })}`);
+}
+
+/** Bosh sahifa uchun: faqat nomlar — raqamlar hisoblanmaydi, shuning uchun tez. */
+export function fetchPlatformNames(f: ReportFilters): Promise<PlatformsReport> {
+  return get(`/platforms/?${query({ from: f.from, to: f.to, names: '1' })}`);
+}
+
 export function fetchControlReport(f: ReportFilters): Promise<ControlReport> {
   return get(`/control/?${query({ from: f.from, to: f.to, department: f.department, q: f.q })}`);
 }
@@ -1080,7 +1165,14 @@ export function fetchControlStudents(f: ReportFilters): Promise<ControlStudents>
 
 export type ControlTeacherDetail = {
   teacher_key: string;
-  profile: { display_name: string; job_title: string; department: string; last_login: string | null };
+  profile: {
+    display_name: string;
+    job_title: string;
+    department: string;
+    last_login: string | null;
+    /** Tanlangan davr ichidagi oxirgi faol kun (davrdan tashqarisi hisobga olinmaydi). */
+    last_active: string | null;
+  };
   summary: ControlTeacher | null;
   materials: {
     handouts: number;

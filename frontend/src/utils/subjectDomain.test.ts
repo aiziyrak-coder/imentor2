@@ -206,3 +206,82 @@ describe('serverdagi haqiqiy kafedra nomlari (87 ta ro‘yxat tekshirildi)', () 
     ).toBe('biomedical');
   });
 });
+
+/**
+ * "Xalq tabobati va farmakologiya" kafedrasi (2026-10-05).
+ *
+ * Kafedra aytdi: bu yerda FAQAT "Klinik farmakologiya" klinik, qolgan hamma
+ * fan klinik emas. Ilgari mavzudagi "davolash" yoki "retsept" so'zi oddiy
+ * farmakologiyani ham bemor kartasiga aylantirib yuborardi.
+ */
+describe('Xalq tabobati va farmakologiya kafedrasi', () => {
+  const dept = { departmentName: 'Xalq tabobati va Farmakologiya', departmentIsClinical: false };
+
+  it('oddiy farmakologiya — davolash haqidagi mavzuda ham bemor kartasi YO‘Q', () => {
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Farmakologiya 5-s DI',
+        topic: 'Arterial gipertenziyani davolashda qo‘llaniladigan dori vositalari',
+      }),
+    ).toBe('biomedical');
+  });
+
+  it('retsept va doza mavzusi ham klinik emas', () => {
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Farmakologiya 3-s OHI',
+        topic: 'Retsept yozish qoidalari va dori dozalarini hisoblash',
+      }),
+    ).toBe('biomedical');
+  });
+
+  it('kasallik nomi bor mavzu ham klinik emas', () => {
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Farmakologiya 6-s DI',
+        topic: 'Yurak yetishmovchiligida qo‘llaniladigan dori moddalar',
+      }),
+    ).toBe('biomedical');
+  });
+
+  it('xalq tabobati mavzulari ham klinik emas', () => {
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Xalq tabobati asoslari',
+        topic: 'Shifobaxsh o‘simliklardan tayyorlanadigan damlamalar',
+      }),
+    ).not.toBe('clinical');
+  });
+
+  it('"Klinik farmakologiya" esa KLINIK bo‘lib qoladi', () => {
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Klinik farmakologiya 9-s DI',
+        topic: 'Antibiotiklarni tanlash va davolash taktikasi',
+      }),
+    ).toBe('clinical');
+    expect(
+      resolveSubjectDomain({
+        ...dept,
+        subjectName: 'Klinika farmakologiya 10-s DI',
+        topic: 'Bemorga dori tanlash',
+      }),
+    ).toBe('clinical');
+  });
+
+  it('rasmiy klinik kafedra ilgarigidek klinik', () => {
+    expect(
+      resolveSubjectDomain({
+        departmentName: 'Pediatriya kafedrasi',
+        departmentIsClinical: true,
+        subjectName: 'Pediatriya 9-s',
+        topic: 'Bronxial astmani davolash',
+      }),
+    ).toBe('clinical');
+  });
+});

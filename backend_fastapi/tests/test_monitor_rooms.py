@@ -12,6 +12,11 @@ from unittest.mock import MagicMock, patch
 from app.services import control_report_service as cr
 from app.services import monitor_room_service as mr
 
+import pytest
+
+# Hodisa = darsni to'liq iMentor'da o'tgani (50 daqiqa qoidasi, qarang conftest).
+pytestmark = pytest.mark.usefixtures("events_are_full_lessons")
+
 DAY = dt.date(2026, 9, 22)
 
 

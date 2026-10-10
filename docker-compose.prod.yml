@@ -43,6 +43,7 @@ x-backend-env: &backend-env
   DEAN_PASSWORD_DEKAN_TPI: ${DEAN_PASSWORD_DEKAN_TPI:-}
   DEAN_PASSWORD_DEKAN_PEDIATRIYA: ${DEAN_PASSWORD_DEKAN_PEDIATRIYA:-}
   DEAN_PASSWORD_DEKAN_STOM: ${DEAN_PASSWORD_DEKAN_STOM:-}
+  DEAN_PASSWORD_DEKAN_XALQARO: ${DEAN_PASSWORD_DEKAN_XALQARO:-}
   ONLINE_TEST_API_BASE_URL: ${ONLINE_TEST_API_BASE_URL:-}
   ONLINE_TEST_API_FALLBACK_URL: ${ONLINE_TEST_API_FALLBACK_URL:-https://online-imtixon.uz}
   ONLINE_TEST_CONSUMER_API_KEY: ${ONLINE_TEST_CONSUMER_API_KEY:-}
@@ -220,8 +221,17 @@ services:
     working_dir: /srv
     command: ["python", "-m", "uvicorn", "face_service.main:app", "--host", "0.0.0.0", "--port", "8200", "--workers", "1"]
     environment:
-      OMP_NUM_THREADS: "4"
-      FACE_MAX_PARALLEL: "4"
+      # 2026-10-02: kirish 10-15 soniya ketardi. Model tez (bitta kadr ~350 ms),
+      # vaqt NAVBATDA ketardi: 4 ta joy, har odam 2 kadr yuboradi, ya'ni bir
+      # vaqtda ATIGI 2 kishi. Bir sinf talaba birdan skanerlaganda navbat
+      # 20 soniyagacha cho'zilib, 846 ta so'rov umuman kutib ulgurmagan (503).
+      # Endi 12 joy, har biri 2 oqim: 32 yadroli serverda 24 tasi ishlaydi
+      # (boshqa loyihalarga joy qoladi), bir vaqtda 6 kishi. Bitta tanish
+      # 350 -> 387 ms ga sekinlashdi, lekin o'tkazuvchanlik 3 barobar oshdi.
+      OMP_NUM_THREADS: "2"
+      FACE_MAX_PARALLEL: "12"
+      # Yuzni qidirish o'lchami — qarang face_service/main.py dagi izoh.
+      FACE_DET_SIZE: "640"
     volumes:
       - ./face_service:/srv/face_service:ro
       - imentor_face_models:/home/appuser/.insightface

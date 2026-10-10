@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError
 from sqlalchemy import func, select
@@ -13,15 +14,25 @@ from app.core.security import create_access_token, create_refresh_token, decode_
 from app.core.staff_login import normalize_listener_login
 from app.core.throttling import throttle_login_account
 from app.models.online_edu import MalakaListener
+from app.models.face_template import FaceTemplate
+from app.models.person_identity import STAFF
 from app.models.staff_location import StaffProfile
+from app.models.student_contingent import StudentContingent
 from app.models.user import User
-from app.schemas.auth import LocalLoginRequest, LoginResponse, TokenRefreshRequest, TokenRefreshResponse
+from app.schemas.auth import (
+    IdLoginRequest,
+    LocalLoginRequest,
+    LoginResponse,
+    TokenRefreshRequest,
+    TokenRefreshResponse,
+)
 from app.schemas.auth_extra import OnlineTestStudentLoginRequest
 from app.schemas.malaka import MalakaLoginRequest
 from app.services import auth_service
 from app.services import password_policy_service as pwd_policy
 from app.services import staff_department as staff_dept
 from app.services import online_test_client as otc
+from app.services import person_identity as pid
 from app.services import staff_pinfl
 from app.services import staff_profile as sp
 from app.services.analytics_service import record_activity_event
@@ -174,6 +185,177 @@ def local_login(
     record_activity_event(db, owner_key=user.username, role=role, event_type="login")
     db.commit()
     return _login_response(db, user, role, must_change=pwd_policy.must_change(db, user.username))
+
+
+# ======================= Parolsiz kirish: JSHSHIR yoki pasport =======================
+#
+# 2026-10-02: xodim ham, talaba ham parol yozmaydi — o'zining JSHSHIRi yoki
+# pasporti bilan kiradi (uchinchi yo'l — yuz skaneri). Raqamlar HEMIS'da YO'Q
+# (tekshirildi: talabada 62, xodimda 33 maydon, bunday maydon yo'q), ular
+# cam.fermi.uz dan FAQAT O'QIB olinadi — qarang `core_personidentity`.
+#
+# Parol bo'lmagani uchun xabar ham umumiy: qaysi raqam topilmagani aytilmaydi,
+# aks holda bu raqam tekshirish vositasiga aylanardi.
+
+ID_DENIED = (
+    "Bu ma'lumot bilan hisob topilmadi. Raqamni tekshirib qayta urining "
+    "yoki kadrlar bo'limiga murojaat qiling."
+)
+
+
+def _staff_owner(db: Session, person) -> str:
+    """Xodimning iMentor hisobi: avval JSHSHIR bog'lanishi, keyin yuz yozuvi."""
+    owner = staff_pinfl.owner_for(db, person.pinfl) if person.pinfl else None
+    if owner:
+        return owner
+    # Pasporti bor, lekin JSHSHIRi yo'q xodim ham kira olsin: yuz shabloni
+    # cam.fermi.uz dagi AYNAN shu odamga bog'langan.
+    row = db.execute(
+        select(FaceTemplate).where(
+            FaceTemplate.source_person_id == person.source_id,
+            FaceTemplate.is_active.is_(True),
+        )
+    ).scalars().first()
+    return (row.owner_key or "") if row is not None else ""
+
+
+def _student_user(db: Session, person) -> tuple[User, str] | None:
+    """Talabaning hisobi; birinchi kirishda ochiladi.
+
+    Kontingentdagi `student_id` bo'yicha topiladi — cam.fermi.uz shu raqamni
+    `hemis_id` ustunida saqlaydi (7031 tasining hammasi mos tushdi).
+    Hisob nomi `ot_<student_id>`: test topshiriqlari ilgaridan shu nom bilan
+    yozilgan, shuning uchun eski natijalar yo'qolmaydi.
+    """
+    sid = (person.hemis_id or "").strip()
+    if not sid:
+        return None
+    row = db.execute(
+        select(StudentContingent).where(StudentContingent.student_id == sid)
+    ).scalars().first()
+    if row is None:
+        return None
+    username = f"ot_{sid}"
+    user = auth_service.get_user_by_username(db, username)
+    if user is None:
+        # Parol o'rniga tasodifiy qiymat: bu hisobga parol bilan kirilmaydi.
+        user = auth_service.create_user(
+            db, username, secrets.token_urlsafe(32),
+            (row.first_name or "").strip(), (row.last_name or "").strip(),
+        )
+        auth_service.set_user_role_group(db, user, "student")
+    return user, sid
+
+
+def _student_by_id(db: Session, student_id: str) -> tuple[User, str] | None:
+    """Talabani KONTINGENTDAN topadi — cam.fermi.uz kerak emas.
+
+    JSHSHIR va pasport faqat cam.fermi.uz da bor, u esa biometrik ro'yxatdan
+    o'tgandan keyin to'ladi. Yangi kelgan va xorijiy talaba u yerda hali yo'q,
+    shuning uchun ular kira olmasdi (2026-10-05 shikoyati). Kontingent esa
+    HEMIS'dan to'g'ridan-to'g'ri keladi va BARCHA talabani qamraydi.
+    """
+    sid = (student_id or "").strip()
+    if not sid:
+        return None
+    row = db.execute(
+        select(StudentContingent).where(StudentContingent.student_id == sid)
+    ).scalars().first()
+    if row is None:
+        return None
+    username = f"ot_{sid}"
+    user = auth_service.get_user_by_username(db, username)
+    if user is None:
+        user = auth_service.create_user(
+            db, username, secrets.token_urlsafe(32),
+            (row.first_name or "").strip(), (row.last_name or "").strip(),
+        )
+        auth_service.set_user_role_group(db, user, "student")
+    return user, sid
+
+
+def _staff_by_id(db: Session, staff_id: str) -> User | None:
+    """Xodimni Xodim ID bo'yicha topadi — iMentor logini aynan shu raqam."""
+    key = (staff_id or "").strip()
+    if not key:
+        return None
+    user = auth_service.get_user_by_username(db, key)
+    if user is None or not user.is_active:
+        return None
+    # Faqat xodim: talaba hisobiga bu yo'l bilan kirilmaydi (uning o'z yo'li bor).
+    return user if auth_service.resolve_user_role_from_db(db, user) in STAFF_ROLES else None
+
+
+def _issue(db: Session, user: User, role: str, student_id: str | None = None) -> LoginResponse:
+    auth_service.touch_last_login(db, user)
+    record_activity_event(db, owner_key=user.username, role=role, event_type="login")
+    db.commit()
+    return _login_response(db, user, role, student_id=student_id)
+
+
+@router.post("/auth/id-login/", response_model=LoginResponse)
+def id_login(
+    payload: IdLoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """JSHSHIR, pasport yoki institut raqami bilan kirish. Parol so'ralmaydi."""
+    denied = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ID_DENIED)
+    pinfl = (payload.pinfl or "").strip()
+    institute_id = (payload.institute_id or "").strip()
+    throttle_login_account(
+        request,
+        institute_id or pinfl or f"{payload.passport_series}{payload.passport_number}",
+    )
+
+    # Institut bergan raqam (Talaba ID / Xodim ID) — HEMIS ma'lumotidan
+    # to'g'ridan-to'g'ri, cam.fermi.uz ga bog'liq emas.
+    if institute_id:
+        staff = _staff_by_id(db, institute_id)
+        if staff is not None:
+            return _issue(db, staff, auth_service.resolve_user_role_from_db(db, staff))
+        found_student = _student_by_id(db, institute_id)
+        if found_student is None:
+            raise denied
+        user, student_id = found_student
+        if not user.is_active:
+            raise denied
+        return _issue(db, user, "student", student_id)
+
+    person = pid.find(
+        db, pinfl=pinfl,
+        series=payload.passport_series, number=payload.passport_number,
+    )
+    if person is None:
+        raise denied
+
+    if person.kind == STAFF:
+        owner = _staff_owner(db, person)
+        user = auth_service.get_user_by_username(db, owner) if owner else None
+        if user is None:
+            raise denied
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=_disabled_account_message(db, user)
+            )
+        role = auth_service.resolve_user_role_from_db(db, user)
+        if not role:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NO_ROLE)
+        return _issue(db, user, role)
+
+    found = _student_user(db, person)
+    if found is None:
+        raise denied
+    user, student_id = found
+    if not user.is_active:
+        raise denied
+    return _issue(db, user, "student", student_id)
+
+
+@router.get("/auth/passport-series/")
+def passport_series() -> dict:
+    """Pasport seriyasi ro'yxati — kirish oynasidagi tanlov uchun."""
+    return {"series": list(pid.SERIES_CHOICES)}
 
 
 @router.post("/auth/token/refresh/", response_model=TokenRefreshResponse)

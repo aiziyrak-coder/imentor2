@@ -166,11 +166,15 @@ export default function OnlineTeacherCabinet({
   if (course) {
     return (
       <div className="space-y-3">
+        {/* Ortga qaytish HAR DOIM ochiq. Ilgari bitta fani bor o'qituvchi shu
+            fanning ichiga tushib qolardi: dastur uni avtomatik ochardi, tugma
+            esa `disabled` va ko'rinmas edi — natijada u "Fanlarim" ro'yxatiga
+            ham, "Fan qo'shish" tugmasiga ham yeta olmasdi va boshqa
+            yo'nalishlarni umuman ko'rmasdi (2026-09-29). */}
         <button
           type="button"
           onClick={() => setCourse(null)}
-          disabled={courses.length <= 1}
-          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-500 hover:text-slate-800 disabled:opacity-0"
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-500 hover:text-slate-800"
         >
           <ArrowLeft size={15} />
           Fanlar

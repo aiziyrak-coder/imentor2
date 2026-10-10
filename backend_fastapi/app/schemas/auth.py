@@ -56,3 +56,18 @@ class TokenRefreshRequest(BaseModel):
 class TokenRefreshResponse(BaseModel):
     access: str
     refresh: str
+
+
+class IdLoginRequest(BaseModel):
+    """Parolsiz kirish: JSHSHIR yoki pasport (seriya ro'yxatdan + raqam).
+
+    Parol maydoni YO'Q — 2026-10-02 da kirish shaxs raqamiga o'tkazildi.
+    """
+
+    pinfl: str = Field(default="", max_length=32)
+    passport_series: str = Field(default="", max_length=8)
+    passport_number: str = Field(default="", max_length=24)
+    #: Institut bergan raqam — talabada Talaba ID, xodimda Xodim ID.
+    #: Yangi kelgan va xorijiy talabalarda JSHSHIR/pasport hali yo'q, shuning
+    #: uchun kirish faqat shu raqam bilan mumkin (2026-10-05).
+    institute_id: str = Field(default="", max_length=32)

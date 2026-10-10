@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import RECTOR_SCOPE, require_rector
-from app.services.dean_access import allowed_departments, authenticate_dean
+from app.api.deps import RECTOR_SCOPE, require_rector, require_rector_wide
+from app.services.dean_access import ExclusionScope, allowed_departments, allowed_groups, authenticate_dean, in_groups
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import create_access_token
@@ -35,6 +35,7 @@ from app.services import rector_coverage_service as cov
 from app.services import rector_detail_service as detail
 from app.services import control_report_service as control
 from app.services import lesson_report_service as lessons
+from app.services import platform_overview as platforms_svc
 from app.services import rector_report_service as svc
 from app.services import monitor_schedule_service as monitor_svc
 
@@ -109,6 +110,7 @@ def rector_login(
         "login": dean.login,
         "label": dean.label,
         "departments": list(dean.departments),
+        "groups": list(dean.groups),
     })
     return {"access": token, "expires_minutes": settings.django_jwt_access_minutes, "kind": "dekan", "label": dean.label, "departments": list(dean.departments)}
 
@@ -123,7 +125,12 @@ def rector_filters(
 ) -> dict:
     """Smart filtrlar uchun ro'yxatlar: kafedra, fan, guruh, o'quv yili, baho."""
     data = svc.filter_options(db)
-    allowed = set(allowed_departments(ctx))
+    scope_groups = allowed_groups(ctx)
+    if scope_groups:
+        data["groups"] = [g for g in data.get("groups", []) if in_groups(g, scope_groups)]
+    scope = allowed_departments(ctx, db)
+    # Hisobotdan chiqarilgan kafedralarni `filter_options` o'zi olib tashlaydi.
+    allowed = set() if isinstance(scope, ExclusionScope) else set(scope)
     if allowed:
         data["departments"] = [d for d in data.get("departments", []) if d in allowed]
         data["scope"] = {"kind": ctx.get("kind"), "label": ctx.get("label"), "departments": data["departments"]}
@@ -140,7 +147,7 @@ def rector_monitor_report(
     monitor_id: str = Query(default=""),
     q: str = Query(default="", max_length=128),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     """Monitor/xona bandligi asosidagi yangi rektor hisoboti.
 
@@ -155,7 +162,7 @@ def rector_monitor_report(
         department=department,
         monitor_id=monitor_id,
         query=q,
-        allowed_departments=allowed_departments(ctx),
+        allowed_departments=allowed_departments(ctx, db),
     )
 
 
@@ -174,8 +181,8 @@ def rector_control(
     o'qituvchilar, kunlik kesim, kafedralar va o'qituvchilar ro'yxati.
     """
     start, end = _range(date_from, date_to)
-    out = control.overview(db, start, end, department=department, query=q)
-    allowed = allowed_departments(ctx)
+    out = control.overview(db, start, end, department=department, query=q, groups=allowed_groups(ctx))
+    allowed = allowed_departments(ctx, db)
     if allowed:
         keys = {monitor_svc._norm(d) for d in allowed}
 
@@ -189,16 +196,34 @@ def rector_control(
     return out
 
 
+@router.get("/rector/platforms/")
+def rector_platforms(
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+    names_only: bool = Query(default=False, alias="names"),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Institut tizimlari.
+
+    iMentor raqamlari jonli hisoblanadi, qolganlari soatlik yig'ilgan
+    nusxadan o'qiladi — boshqa loyihalarning xizmatlariga tegilmaydi.
+    Dekan ham ko'ra oladi: bu raqamlar kafedra kesimida emas, umumiy.
+    """
+    start, end = _range(date_from, date_to)
+    return platforms_svc.overview(db, start, end, names_only=names_only)
+
+
 @router.get("/rector/control/students/")
 def rector_control_students(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector),
 ) -> dict:
     """Talabalar nazorati: test faolligi va guruhlar qamrovi."""
     start, end = _range(date_from, date_to)
-    return control.students(db, start, end)
+    return control.students(db, start, end, only_groups=allowed_groups(ctx))
 
 
 @router.get("/rector/control/people/")
@@ -209,12 +234,13 @@ def rector_control_people(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector),
 ) -> dict:
     """Sahifadagi bitta RAQAM ortidagi odamlar — rektor raqamni bosganda ochiladi."""
     start, end = _range(date_from, date_to)
     try:
-        return control.people(db, start, end, metric=metric, key=key, department=department)
+        return control.people(db, start, end, metric=metric, key=key, department=department,
+                              groups=allowed_groups(ctx))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -225,11 +251,11 @@ def rector_control_teacher(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector),
 ) -> dict:
     """Bitta o'qituvchining batafsil hisoboti — ro'yxatdagi ismga bosilganda."""
     start, end = _range(date_from, date_to)
-    return control.teacher_detail(db, owner_key, start, end)
+    return control.teacher_detail(db, owner_key, start, end, groups=allowed_groups(ctx))
 
 
 @router.get("/rector/control/student/{student_key}/")
@@ -238,11 +264,14 @@ def rector_control_student(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector),
 ) -> dict:
     """Bitta talabaning batafsil hisoboti."""
     start, end = _range(date_from, date_to)
-    return control.student_detail(db, student_key, start, end)
+    try:
+        return control.student_detail(db, student_key, start, end, groups=allowed_groups(ctx))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @router.get("/rector/lessons/teachers/")
@@ -260,8 +289,8 @@ def rector_lesson_teachers(
     bor-yo'qligidan qat'i nazar, va HEMIS'dagi har bir o'qituvchi ko'rinadi.
     """
     start, end = _range(date_from, date_to)
-    allowed = allowed_departments(ctx)
-    out = lessons.teacher_rows(db, start, end, department=department, query=q)
+    allowed = allowed_departments(ctx, db)
+    out = lessons.teacher_rows(db, start, end, department=department, query=q, groups=allowed_groups(ctx))
     if allowed:
         keys = {monitor_svc._norm(d) for d in allowed}
         out["results"] = [
@@ -279,8 +308,8 @@ def rector_lesson_departments(
     ctx: dict = Depends(require_rector),
 ) -> dict:
     start, end = _range(date_from, date_to)
-    rows = lessons.department_rows(db, start, end)
-    allowed = allowed_departments(ctx)
+    rows = lessons.department_rows(db, start, end, groups=allowed_groups(ctx))
+    allowed = allowed_departments(ctx, db)
     if allowed:
         keys = {monitor_svc._norm(d) for d in allowed}
         rows = [r for r in rows
@@ -300,8 +329,9 @@ def rector_lessons(
 ) -> dict:
     """Darslar ro'yxati (bitta o'qituvchi yoki kafedra bo'yicha)."""
     start, end = _range(date_from, date_to)
-    rows = lessons.lesson_rows(db, start, end, teacher=teacher, department=department, only_missed=only_missed)
-    allowed = allowed_departments(ctx)
+    rows = lessons.lesson_rows(db, start, end, teacher=teacher, department=department,
+                               only_missed=only_missed, groups=allowed_groups(ctx))
+    allowed = allowed_departments(ctx, db)
     if allowed:
         keys = {monitor_svc._norm(d) for d in allowed}
         rows = [r for r in rows
@@ -319,7 +349,7 @@ class MonitorScheduleImportRequest(BaseModel):
 def rector_monitor_schedule_import(
     payload: MonitorScheduleImportRequest,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     """Kafedra to'ldirgan haftalik monitor bandligi jadvalini yuklash.
 
@@ -332,7 +362,7 @@ def rector_monitor_schedule_import(
             payload.rows,
             source_file=payload.file_name,
             imported_by=str(ctx.get("login") or ctx.get("kind") or ""),
-            allowed_departments=allowed_departments(ctx),
+            allowed_departments=allowed_departments(ctx, db),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -344,10 +374,10 @@ def rector_overview(
     date_to: str | None = Query(default=None, alias="to"),
     department: str = Query(default=""),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
-    return svc.overview(db, start_day=start, end_day=end, department=department, allowed_departments=allowed_departments(ctx))
+    return svc.overview(db, start_day=start, end_day=end, department=department, allowed_departments=allowed_departments(ctx, db))
 
 
 @router.get("/rector/teachers/")
@@ -358,7 +388,7 @@ def rector_teachers(
     q: str = Query(default="", max_length=128),
     only_active: bool = Query(default=False),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
     rows = svc.teacher_report(
@@ -368,7 +398,7 @@ def rector_teachers(
         department=department,
         query=q,
         only_active=only_active,
-        allowed_departments=allowed_departments(ctx),
+        allowed_departments=allowed_departments(ctx, db),
     )
     return {"from": start.isoformat(), "to": end.isoformat(), "count": len(rows), "results": rows}
 
@@ -379,10 +409,10 @@ def rector_teacher_detail(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
-    return svc.teacher_detail(db, owner_key.strip(), start_day=start, end_day=end, allowed_departments=allowed_departments(ctx))
+    return svc.teacher_detail(db, owner_key.strip(), start_day=start, end_day=end, allowed_departments=allowed_departments(ctx, db))
 
 
 @router.get("/rector/students/{student_key}/")
@@ -391,10 +421,10 @@ def rector_student_detail(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
-    return svc.student_detail(db, student_key.strip(), start_day=start, end_day=end, allowed_departments=allowed_departments(ctx))
+    return svc.student_detail(db, student_key.strip(), start_day=start, end_day=end, allowed_departments=allowed_departments(ctx, db))
 
 
 @router.get("/rector/students/")
@@ -405,7 +435,7 @@ def rector_students(
     q: str = Query(default="", max_length=128),
     band: str = Query(default=""),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
     rows = svc.student_report(
@@ -415,7 +445,7 @@ def rector_students(
         subject_code=subject_code,
         query=q,
         band=band,
-        allowed_departments=allowed_departments(ctx),
+        allowed_departments=allowed_departments(ctx, db),
     )
     return {"from": start.isoformat(), "to": end.isoformat(), "count": len(rows), "results": rows}
 
@@ -427,11 +457,11 @@ def rector_lessons(
     teacher: str = Query(default=""),
     subject_code: str = Query(default=""),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     start, end = _range(date_from, date_to)
     rows = svc.lesson_report(
-        db, start_day=start, end_day=end, teacher=teacher, subject_code=subject_code, allowed_departments=allowed_departments(ctx)
+        db, start_day=start, end_day=end, teacher=teacher, subject_code=subject_code, allowed_departments=allowed_departments(ctx, db)
     )
     return {"from": start.isoformat(), "to": end.isoformat(), "count": len(rows), "results": rows}
 
@@ -441,7 +471,7 @@ def rector_departments(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Kafedralar kesimi: nechta sillabus, mavzu, qaysi material bor-yo'q."""
     start, end = _range(date_from, date_to)
@@ -459,7 +489,7 @@ def rector_departments(
 def rector_gaps(
     limit: int = Query(default=50, ge=1, le=300),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Kamchiliklar: sillabusi yo'q kafedra, mavzusi yo'q fan, materialsiz mavzu."""
     return cov.coverage_gaps(db, limit=limit)
@@ -471,7 +501,7 @@ def rector_trend(
     date_to: str | None = Query(default=None, alias="to"),
     bucket: str = Query(default="day", pattern="^(day|week|month|quarter)$"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Kunlik / haftalik / oylik / choraklik dinamika."""
     start, end = _range(date_from, date_to)
@@ -486,7 +516,7 @@ def rector_metric_detail(
     department: str = Query(default=""),
     limit: int = Query(default=detail.MAX_ROWS, ge=1, le=2000),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Bitta raqamning ortidagi ro'yxat: bu nima, qanday hisoblangan, kim/nima."""
     start, end = _range(date_from, date_to)
@@ -504,7 +534,7 @@ def rector_metric_detail(
 
 
 @router.get("/rector/metrics/")
-def rector_metrics(_: str = Depends(require_rector)) -> dict:
+def rector_metrics(_: str = Depends(require_rector_wide)) -> dict:
     """Tafsiloti bor ko'rsatkichlar ro'yxati — sahifa qaysi raqam bosiladiganini biladi."""
     return {
         "results": [
@@ -523,7 +553,7 @@ def rector_metrics(_: str = Depends(require_rector)) -> dict:
 @router.get("/rector/attendance/live/")
 def rector_attendance_live(
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Ayni daqiqada jadval bo'yicha darsda bo'lishi kerak bo'lganlar va GPS holati."""
     return adm.attendance_live(db)
@@ -534,7 +564,7 @@ def rector_attendance_alerts(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Davr bo'yicha "belgilangan binoda bo'lmagan" ogohlantirishlari."""
     start, end = _range(date_from, date_to)
@@ -547,7 +577,7 @@ def rector_risk(
     anchor: str | None = Query(default=None),
     department: str = Query(default=""),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """O'qituvchi xavf darajasi, bayroqlari va GPS muvofiqligi."""
     return adm.risk_report(
@@ -563,7 +593,7 @@ def rector_subjects(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Fanlar kesimida test natijasi va o'tish foizi."""
     start, end = _range(date_from, date_to)
@@ -575,7 +605,7 @@ def rector_online_groups(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Online va malaka guruhlari: davomat va o'zlashtirish."""
     start, end = _range(date_from, date_to)
@@ -585,7 +615,7 @@ def rector_online_groups(
 @router.get("/rector/content-bank/")
 def rector_content_bank(
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """Butun kontent bazasi hajmi — sana oralig'iga bog'liq emas."""
     return adm.content_bank(db)
@@ -596,7 +626,7 @@ def rector_ai_usage(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    _: str = Depends(require_rector),
+    _: str = Depends(require_rector_wide),
 ) -> dict:
     """AI sarfi: funksiya va model bo'yicha token va taxminiy narx."""
     start, end = _range(date_from, date_to)
@@ -612,11 +642,11 @@ def rector_teachers_csv(
     date_to: str | None = Query(default=None, alias="to"),
     department: str = Query(default=""),
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> Response:
     """O'qituvchilar jadvalini Excel'da ochish uchun."""
     start, end = _range(date_from, date_to)
-    rows = svc.teacher_report(db, start_day=start, end_day=end, department=department, allowed_departments=allowed_departments(ctx))
+    rows = svc.teacher_report(db, start_day=start, end_day=end, department=department, allowed_departments=allowed_departments(ctx, db))
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
@@ -657,9 +687,9 @@ from app.services import rector_intelligence as intelligence
 def rector_intelligence_report(
     filters: Annotated[IntelligenceQuery, Query()],
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
-    return intelligence.build_report(db, filters, allowed_departments=allowed_departments(ctx))
+    return intelligence.build_report(db, filters, allowed_departments=allowed_departments(ctx, db))
 
 
 @router.post("/rector/intelligence/analyze/")
@@ -667,7 +697,7 @@ def rector_intelligence_analysis(
     payload: IntelligenceAnalysisRequest,
     request: Request,
     db: Session = Depends(get_db),
-    ctx: dict = Depends(require_rector),
+    ctx: dict = Depends(require_rector_wide),
 ) -> dict:
     from app.core.throttling import client_ip, enforce
     from app.services.openai_client import OpenAiClientError
@@ -675,7 +705,7 @@ def rector_intelligence_analysis(
     api_key = (settings.openai_api_key or "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="AI tahlili hozir mavjud emas. Raqamli hisobotdan foydalanishingiz mumkin.")
-    report = intelligence.build_report(db, payload, allowed_departments=allowed_departments(ctx))
+    report = intelligence.build_report(db, payload, allowed_departments=allowed_departments(ctx, db))
     db.rollback()  # Release the read transaction before waiting for the model.
     try:
         return intelligence.analyze_report(report, payload, api_key, settings.openai_fast_model)

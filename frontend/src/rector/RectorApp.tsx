@@ -24,6 +24,8 @@ import {
   type ReportFilters,
 } from './rectorApi';
 import ControlReport from './ControlReport';
+import PlatformHome from './PlatformHome';
+import PlatformPage from './PlatformPage';
 import { MetricProvider } from './RectorMetric';
 import { TeacherProfileProvider } from './TeacherProfile';
 import { StudentProfileProvider } from './StudentProfile';
@@ -136,6 +138,8 @@ export default function RectorApp() {
   const [auto, setAuto] = useState(true);
   const [syncedAt, setSyncedAt] = useState<Date>(() => new Date());
   const [departments, setDepartments] = useState<string[]>([]);
+  // Bosh sahifada platforma tanlanadi; `null` — tanlanmagan.
+  const [platform, setPlatform] = useState<string | null>(null);
 
   useEffect(() => {
     if (!signedIn) return;
@@ -240,6 +244,7 @@ export default function RectorApp() {
         </div>
       </header>
 
+      {platform && (
       <div className="mx-auto w-full px-3 pt-4 sm:px-5">
         <div className="rounded-2xl border border-slate-200 bg-white p-3">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -313,12 +318,30 @@ export default function RectorApp() {
           </div>
         </div>
       </div>
+      )}
 
       <main className="mx-auto w-full px-3 py-4 sm:px-5">
         <TeacherProfileProvider filters={filters} onUnauthorized={onUnauthorized}>
         <StudentProfileProvider filters={filters} onUnauthorized={onUnauthorized}>
         <MetricProvider filters={filters} onUnauthorized={onUnauthorized}>
-          <ControlReport filters={filters} onUnauthorized={onUnauthorized} />
+          {/* Bosh sahifa — faqat tizim nomlari. Biri tanlangach, o'sha
+              tizimning hisoboti O'Z sahifasida ochiladi (2026-10-08). */}
+          <div className="space-y-5">
+            {platform === null ? (
+              <PlatformHome
+                filters={filters}
+                onUnauthorized={onUnauthorized}
+                onOpen={setPlatform}
+              />
+            ) : (
+              <PlatformPage
+                platform={platform}
+                filters={filters}
+                onUnauthorized={onUnauthorized}
+                onBack={() => setPlatform(null)}
+              />
+            )}
+          </div>
         </MetricProvider>
         </StudentProfileProvider>
         </TeacherProfileProvider>

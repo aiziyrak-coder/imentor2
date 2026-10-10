@@ -45,8 +45,26 @@ def media_root() -> str:
     return settings.django_media_root or "/app/media"
 
 
-def _safe_filename(filename: str) -> str:
-    return re.sub(r"[^\w.\-]", "_", filename)[:180]
+#: Fayl tizimi nomni 255 BAYT bilan cheklaydi, BELGI bilan emas. Kirill
+#: harfi UTF-8 da ikki bayt, shuning uchun belgi bo'yicha qirqish yetmasdi:
+#: 180 ta kirill harfi 360 bayt bo'lib, yuklash "File name too long" bilan
+#: yiqilardi (2026-10-07). Qolgan joy prefiks uchun: `owner_key`, til, uuid.
+NAME_MAX_BYTES = 190
+
+
+def _fit_bytes(text: str, limit: int) -> str:
+    """Matnni baytlar bo'yicha qirqadi, yarim harf qoldirmaydi."""
+    return text.encode("utf-8")[:limit].decode("utf-8", "ignore")
+
+
+def _safe_filename(filename: str, *, limit: int = NAME_MAX_BYTES) -> str:
+    cleaned = re.sub(r"[^\w.\-]", "_", filename or "")
+    stem, dot, ext = cleaned.rpartition(".")
+    if not dot or not ext or len(ext) > 10:
+        return _fit_bytes(cleaned, limit) or "file"
+    # Kengaytma HAR DOIM saqlanadi: usiz fayl ochilmaydi.
+    stem = _fit_bytes(stem, max(1, limit - len(ext.encode("utf-8")) - 1))
+    return f"{stem}.{ext}" if stem else f"file.{ext}"
 
 
 def _topic_dir(topic_norm: str) -> str:

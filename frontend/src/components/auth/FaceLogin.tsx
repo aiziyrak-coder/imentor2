@@ -21,7 +21,19 @@ type Phase = 'starting' | 'looking' | 'checking' | 'stopped' | 'denied' | 'unsup
 
 /** Avtomatik urinishlar soni — keyin "Qayta urinish" tugmasi (CPU va navbat tejaladi). */
 const AUTO_ATTEMPTS = 4;
-const FRAME_GAP_MS = 350;
+/**
+ * Kadrlar orasidagi va urinishlar orasidagi kutish (2026-10-02 da qisqartirildi).
+ *
+ * Kirish 10-15 soniya ketayotgani haqida shikoyat keldi. Vaqtning kattasi
+ * serverdagi navbat edi (u alohida tuzatildi), lekin shu kutishlar ham to'rt
+ * urinishda 5 soniyadan ortiq qo'shardi. Kadrlar orasida qisqa tanaffus kerak
+ * — ikki kadr BIR XIL bo'lib qolmasligi uchun, lekin 350 ms shart emas.
+ */
+const FRAME_GAP_MS = 180;
+/** Kamera ekspozitsiyaga moslashsin — birinchi kadr qorong'i chiqmasin. */
+const FIRST_WAIT_MS = 400;
+/** Urinishlar orasida: odam joyini to'g'rilashga ulguradi. */
+const RETRY_WAIT_MS = 700;
 const MAX_SIDE = 640;
 
 function sleep(ms: number) {
@@ -80,7 +92,7 @@ export default function FaceLogin({
     try {
       for (let attempt = 0; attempt < AUTO_ATTEMPTS && aliveRef.current; attempt += 1) {
         setPhase('looking');
-        await sleep(attempt === 0 ? 900 : 1300);
+        await sleep(attempt === 0 ? FIRST_WAIT_MS : RETRY_WAIT_MS);
         const video = videoRef.current;
         if (!video || !aliveRef.current) return;
         const first = await grabFrame(video);

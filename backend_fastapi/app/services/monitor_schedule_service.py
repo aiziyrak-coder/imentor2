@@ -601,9 +601,70 @@ def _slot_window(day: dt.date, para: str) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
+#: Dars vaqtida iMentor OCHIQ bo'lganini ko'rsatadigan qaydlar.
+#: `logout` ataylab yo'q: u sessiya tugaganini bildiradi, boshlanganini emas.
+WORKING_EVENTS = ("heartbeat", "page_view", "content_view", "live_test_opened", "login")
+
+
+#: Bitta "heartbeat" qancha vaqtni qoplashi mumkin. Brauzer uzoq turib
+#: qolgan yoki soat sakragan hollarda haddan tashqari uzun oraliq yozilmasin.
+MAX_SPAN_SECONDS = 15 * 60
+
+
+def _work_spans(db: Session, usernames: set[str], start: dt.datetime,
+                end: dt.datetime) -> dict[str, list[tuple[dt.datetime, dt.datetime]]]:
+    """O'qituvchi iMentor'da ISHLAGAN oraliqlar: (boshlandi, tugadi).
+
+    Manba — `heartbeat` qaydlari: ular sahifa ochiq va foydalanuvchi faol
+    bo'lgan davomiylikni olib keladi. Qayd KELGAN vaqt oraliqning oxiri,
+    `duration_sec` esa uzunligi.
+
+    Buning uchun kerak: dars "o'tildi" deyish uchun qancha vaqt ishlanganini
+    bilish shart — bir necha daqiqa kirib chiqish dars emas (2026-10-08).
+    """
+    from app.models.analytics import UserActivityEvent
+
+    out: dict[str, list[tuple[dt.datetime, dt.datetime]]] = {u: [] for u in usernames}
+    if not usernames:
+        return out
+    for owner, when, seconds in db.execute(
+        select(UserActivityEvent.owner_key, UserActivityEvent.occurred_at,
+               UserActivityEvent.duration_sec).where(
+            UserActivityEvent.owner_key.in_(usernames),
+            UserActivityEvent.event_type == "heartbeat",
+            UserActivityEvent.occurred_at >= start,
+            UserActivityEvent.occurred_at < end,
+        )
+    ).all():
+        length = min(max(0, int(seconds or 0)), MAX_SPAN_SECONDS)
+        if not length:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.timezone.utc)
+        out[owner].append((when - dt.timedelta(seconds=length), when))
+    for rows in out.values():
+        rows.sort()
+    return out
+
+
 def _usage_events(db: Session, usernames: set[str], start: dt.datetime, end: dt.datetime) -> dict[str, list]:
-    """O'qituvchi iMentor'ni darsda ishlatgan paytlar: jonli test ochilgani va
-    kompyuterga QR orqali kirgani. Har biri (vaqt, talabalar soni)."""
+    """O'qituvchi iMentor'ni darsda ishlatgan paytlar. Har biri (vaqt, talabalar soni).
+
+    Uch manba:
+      * jonli test ochilgani — talabalar soni shundan keladi;
+      * kompyuterga QR orqali kirgani;
+      * platformadagi HAQIQIY ish — sahifa ochish, material ko'rish, ekran
+        ochiq turgani (`heartbeat`).
+
+    Uchinchisi 2026-10-08 da qo'shildi. Ilgari faqat jonli test va QR
+    hisoblanardi, shuning uchun ma'ruzani iMentor'dan ko'rsatgan o'qituvchi
+    "ishlatmagan" deb chiqardi — jonli ma'lumotda bunday 275 ta dars va
+    qizil ro'yxatga noto'g'ri tushgan 11 ta o'qituvchi bor edi.
+
+    Bu qayd o'qituvchi XONADA bo'lganini isbotlamaydi, faqat o'sha vaqtda
+    iMentor'da ishlaganini — monitor hisobotining boshqa o'lchovlari ham
+    shunday (qarang `lesson_evidence.summarize`).
+    """
     from app.models.device_pairing import DevicePairingSession
     from app.services.rector_report_service import student_key_expr
 

@@ -286,3 +286,52 @@ export async function fetchLiveTeachingStatus(): Promise<LiveTeachingStatusDto> 
     timeoutMs: 15000,
   });
 }
+
+export type DepartmentSubjectDto = {
+  id: number;
+  subject_name: string;
+  subject_code: string;
+  is_active: boolean;
+  report_excluded: boolean;
+};
+
+export type AdminDepartmentDto = {
+  id: number;
+  name: string;
+  code: string;
+  hemis_name: string;
+  is_active: boolean;
+  report_excluded: boolean;
+  teacher_count: number;
+  subjects: DepartmentSubjectDto[];
+};
+
+export async function listAdminDepartments(): Promise<{
+  results: AdminDepartmentDto[];
+  unassigned_subjects: DepartmentSubjectDto[];
+}> {
+  return httpJson(`${apiBaseUrl()}/v1/admin/departments/`, {
+    headers: await authHeaders(),
+    timeoutMs: 20000,
+  });
+}
+
+/** Kafedrani rektor hisobotiga qo'shadi yoki undan chiqaradi. */
+export async function setDepartmentReportExcluded(id: number, excluded: boolean): Promise<void> {
+  await httpJson(`${apiBaseUrl()}/v1/admin/departments/${id}/`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: { report_excluded: excluded },
+    timeoutMs: 20000,
+  });
+}
+
+/** Fanni rektor hisobotiga qo'shadi yoki undan chiqaradi. */
+export async function setSubjectReportExcluded(id: number, excluded: boolean): Promise<void> {
+  await httpJson(`${apiBaseUrl()}/v1/admin/departments/subjects/${id}/`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: { report_excluded: excluded },
+    timeoutMs: 20000,
+  });
+}

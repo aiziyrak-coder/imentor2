@@ -306,6 +306,53 @@ export async function loginStaffWithBackendFallback(
   }
 }
 
+/**
+ * JSHSHIR yoki pasport bilan kirish — PAROLSIZ (2026-10-02).
+ *
+ * Xodim ham, talaba ham shu yo'ldan kiradi; serverda roli aniqlanadi va
+ * yuz orqali kirishdagi kabi bitta "bundle" qaytadi.
+ */
+export async function loginWithIdentity(input: {
+  pinfl?: string;
+  passportSeries?: string;
+  passportNumber?: string;
+  /** Talaba ID yoki Xodim ID — institut bergan raqam. */
+  instituteId?: string;
+}): Promise<LocalStaffUser> {
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/v1/auth/id-login/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pinfl: input.pinfl || '',
+        passport_series: input.passportSeries || '',
+        passport_number: input.passportNumber || '',
+        institute_id: input.instituteId || '',
+      }),
+    });
+  } catch {
+    throw new FaceLoginError(0, '');
+  }
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') detail = body.detail;
+    } catch {
+      /* matnsiz javob */
+    }
+    throw new FaceLoginError(res.status, detail);
+  }
+  const bundle = (await res.json()) as BackendTokenBundle;
+  writeCached(bundle);
+  if (bundle.role === 'student') return establishStudentSession(bundle, bundle.username);
+  const existing = findStoredUserByPhone(bundle.username);
+  return establishLocalSessionFromProfile(
+    buildLocalUserFromBackendLogin(bundle.username, '', bundle, existing),
+  );
+}
+
 /** Yuz orqali kirish xatosi: `status` — server javobi (0 — tarmoq), `detail` — foydalanuvchiga matn. */
 export class FaceLoginError extends Error {
   status: number;

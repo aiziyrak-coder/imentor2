@@ -17,12 +17,14 @@ import { useUiText } from '../../i18n/useUiText';
 /** Oyna ochiq qolib ketsa cheksiz sessiya yaratilmasin: ~1 soatdan keyin to'xtaydi. */
 const MAX_AUTO_REFRESH = 6;
 
-type Props = {
-  /** QR o'rniga login va parol bilan kirish ekraniga o'tish. */
-  onOtherRoles: () => void;
-};
-
-export default function DesktopHodimQrLogin({ onOtherRoles }: Props) {
+/**
+ * Kompyuterda xodim FAQAT shu yerdan kiradi.
+ *
+ * Ilgari "boshqa rollar" havolasi parol oynasini ochardi; u olib tashlandi —
+ * kirish telefonda bo'lishi kerak, chunki joylashuv faqat telefonda qayd
+ * etiladi (2026-10-02). Administrator uchun alohida manzil: `/admin`.
+ */
+export default function DesktopHodimQrLogin() {
   const { t } = useUiText();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -209,13 +211,7 @@ export default function DesktopHodimQrLogin({ onOtherRoles }: Props) {
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={onOtherRoles}
-        className="w-full text-center text-[13px] font-semibold text-black/50 hover:text-sky-700 underline underline-offset-2"
-      >
-        {t('auth.otherRoles')}
-      </button>
+      <p className="w-full text-center text-[12.5px] text-black/45">{t('auth.phoneOnlyHint')}</p>
     </div>
   );
 }

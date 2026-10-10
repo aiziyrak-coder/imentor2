@@ -63,7 +63,7 @@ describe('LoginPage', () => {
 
   it('shows validation error for too short login', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
     await switchToStaffLogin(user);
 
     // 3 belgi — na telefon, na Xodim ID (min 4).
@@ -78,7 +78,7 @@ describe('LoginPage', () => {
 
   it('submits valid credentials and syncs session role', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
     await switchToStaffLogin(user);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '+998 90 111 22 33');
@@ -94,7 +94,7 @@ describe('LoginPage', () => {
 
   it('accepts a staff ID as the login', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
     await switchToStaffLogin(user);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '3442112068');
@@ -109,7 +109,7 @@ describe('LoginPage', () => {
   it('shows wrong-credentials message on auth failure', async () => {
     loginMock.mockRejectedValue(new Error('wrong-password'));
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
     await switchToStaffLogin(user);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '+998 90 111 22 33');
@@ -121,7 +121,7 @@ describe('LoginPage', () => {
 
   it('logs in by JSHSHIR alone when the password is empty', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
     await user.click(screen.getByRole('button', { name: 'Kirish' }));
@@ -133,7 +133,7 @@ describe('LoginPage', () => {
 
   it('JSHSHIR with a password still uses the password login', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
     await user.type(screen.getByPlaceholderText(/parol/i), 'secret');
@@ -147,7 +147,7 @@ describe('LoginPage', () => {
     const { FaceLoginError } = await import('../../utils/backendAuth');
     pinflMock.mockRejectedValue(new FaceLoginError(401, 'Bu JSHSHIR cam.fermi.uz xodimlari ro\'yxatida topilmadi.'));
     const user = userEvent.setup();
-    renderWithProviders(<LoginPage onSwitchToRegister={() => {}} />);
+    renderWithProviders(<LoginPage />);
 
     await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
     await user.click(screen.getByRole('button', { name: 'Kirish' }));

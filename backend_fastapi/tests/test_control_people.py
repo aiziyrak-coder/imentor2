@@ -12,6 +12,11 @@ import pytest
 
 from app.services import control_report_service as cr
 
+import pytest
+
+# Hodisa = darsni to'liq iMentor'da o'tgani (50 daqiqa qoidasi, qarang conftest).
+pytestmark = pytest.mark.usefixtures("events_are_full_lessons")
+
 DAY = dt.date(2026, 9, 22)
 
 
@@ -194,3 +199,23 @@ def test_a_teacher_on_leave_is_marked_but_still_findable():
 def test_unknown_metric_is_rejected():
     with pytest.raises(ValueError):
         cr.people(_db([]), DAY, DAY, metric="yolg'on")
+
+
+def test_the_offsite_number_matches_its_list():
+    """"Monitorsiz joyda ishlaydiganlar" raqami ham bosiladi (2026-10-06).
+
+    Qoida o'zgarmaydi: sahifadagi raqam = ro'yxatdagi odamlar soni.
+    """
+    rows = [
+        lesson(1, user="mon", name="M"),                       # monitorli xonada
+        lesson(2, user="klinika", name="K", monitor=""),       # klinikada
+        lesson(3, user="masofa", name="S", monitor=""),        # masofaviy
+    ]
+    overview, drills = run(rows, {}, ["offsite", "watched"])
+    assert overview["headline"]["offsite_teachers"] == 2
+    assert drills["offsite"]["total"] == 2
+    assert {p["name"] for p in drills["offsite"]["people"]} == {"K", "S"}
+    # Asosiy ro'yxat ularni O'Z ICHIGA OLMAYDI.
+    assert [r["teacher_name"] for r in overview["teachers"]] == ["M"]
+    assert drills["watched"]["total"] == overview["headline"]["watched_teachers"] == 1
+    assert len(overview["offsite"]["teachers"]) == 2

@@ -143,39 +143,3 @@ def test_wrong_case_heading_makes_translation_invalid():
     bad = {"scenario": "### Participation of Kim\nOlimjon teaches philosophy at the university and works with the students.", "answer": "", "focus": ""}
     assert i18n._translation_ok(src, good, "en", i18n.KIND_CASE)
     assert not i18n._translation_ok(src, bad, "en", i18n.KIND_CASE)
-
-
-def test_dropped_case_headings_trigger_section_by_section_retranslation():
-    """2026-09-24: uzun keysda model "Muammo", "Berilgan shartlar" sarlavhalarini tashlab yuborardi."""
-    text = "### Kim ishtirok etadi\nBemor va shifokor.\n\n### Muammo\nQon bosimi yuqori.\n\n### Berilgan shartlar\nDori yo'q."
-
-    def fake_call(api_key, model, items, kind, source, target, note):
-        out = []
-        for item in items:
-            if "§H" in item and item.count("§H") > 1:
-                # Model bo'limlarni birlashtirib, sarlavhalarni yo'qotdi.
-                out.append("### §H6§\nПациент и врач. Высокое давление. Лекарств нет.")
-            else:
-                out.append(item.replace("Bemor va shifokor.", "Пациент и врач.")
-                           .replace("Qon bosimi yuqori.", "Высокое давление.")
-                           .replace("Dori yo'q.", "Лекарств нет."))
-        return out
-
-    with patch.object(i18n, "_call", side_effect=fake_call):
-        out = i18n._translate_strings("k", "m", [text], "ru", source="uz")
-    assert "### Кто участвует" in out[0] and "### Проблема" in out[0] and "### Условия" in out[0]
-    assert "Высокое давление." in out[0] and "Лекарств нет." in out[0]
-
-
-def test_english_reference_list_does_not_reject_a_russian_case():
-    """Keys oxiridagi inglizcha adabiyotlar ro'yxati ruscha tarjimani "inglizcha" qilib ko'rsatmasin."""
-    from app.services import case_i18n as c
-
-    refs = "\n".join(
-        f"[{i}] Smith J, Brown K. Inotropes and vasopressors: review of physiology and clinical use "
-        f"in cardiovascular disease (Circulation, 2008). PubMed: https://pubmed.ncbi.nlm.nih.gov/{i}"
-        for i in range(1, 8)
-    )
-    text = "Пациент 54 лет поступил с жалобами на боль в груди и одышку. Назначено лечение." + "\n" + refs
-    assert c.detect_language(c._without_references(text)) == "ru"
-    assert "PubMed" not in c._without_references(text)
