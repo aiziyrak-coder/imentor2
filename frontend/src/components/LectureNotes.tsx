@@ -25,13 +25,18 @@ import {
 import { useUiText } from '../i18n/useUiText';
 import { formatTopicLessonLabel } from '../utils/topicLessonLabel';
 import { isTopicContextComplete, topicContextKey, resolveTopicNorm } from '../utils/syllabusTopicContext';
-import { readLectureForTopic, writeLectureForTopic } from '../utils/lectureLocalCache';
+import {
+  readLectureForTopic,
+  rememberActiveLectureVersion,
+  writeLectureForTopic,
+} from '../utils/lectureLocalCache';
 import {
   listPreparedForTopicSynced,
   loadPreparedByIdSynced,
   savePreparedContent,
   updatePreparedContentPayload,
   deletePreparedContent,
+  type PreparedContentMeta,
   type PreparedContentSummary,
 } from '../utils/preparedContentStore';
 import { useLocalizedTopic } from '../i18n/useLocalizedTopic';
@@ -44,6 +49,9 @@ import StaffEmptyState from './staff/StaffEmptyState';
 import StaffErrorAlert from './staff/StaffErrorAlert';
 import StaffLoading from './staff/StaffLoading';
 import StaffPanel from './staff/StaffPanel';
+import TranslationGate from './staff/TranslationGate';
+import { useTranslatedPayload } from '../i18n/useTranslatedPayload';
+import type { AppLanguage } from '../i18n/language';
 import { hydrateGenerationScope } from '../utils/subjectDomain';
 import {
   staffBtnGhost,
@@ -65,20 +73,35 @@ export default function LectureNotes() {
     globalTopic ? formatTopicLessonLabel(globalTopic.type, globalTopic.id, t) : '',
   );
 
-  const [loading, setLoading] = useState(false);
+  /** Qaysi mavzu uchun generatsiya ketayotgani (topicKey). Mavzu almashsa
+   *  ham generatsiya o'z mavzusiga bog'liq qoladi — natija boshqa mavzu
+   *  sahifasiga tushib qolmaydi. */
+  const [generatingKey, setGeneratingKey] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [lectureSession, setLectureSession] = useState<LectureNote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState('');
+  /** Tahrir qaysi tildagi matn ustida va tahrir boshlangandagi matn
+   *  (saqlanmagan o'zgarish bor-yo'qligini aniqlash uchun). */
+  const [editLang, setEditLang] = useState<AppLanguage>(language);
+  const [editBase, setEditBase] = useState('');
   const [savedLectures, setSavedLectures] = useState<PreparedContentSummary[]>([]);
   /** Ekrandagi ma'ruza Bazadagi qaysi yozuv — tahrir shu yozuvni yangilaydi. */
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   /** Saqlash yiqilganda — "Qayta saqlash" uchun kutayotgan ish. */
-  const [pendingSave, setPendingSave] = useState<{ topic: string; data: LectureNote } | null>(null);
+  const [pendingSave, setPendingSave] = useState<{
+    topic: string;
+    data: LectureNote;
+    /** Saqlash yiqilgan paytdagi mavzu kaliti va meta — qayta urinish
+     *  o'qituvchi boshqa mavzuga o'tgan bo'lsa ham ASL mavzuga yozadi. */
+    key: string;
+    meta: PreparedContentMeta;
+  } | null>(null);
   const [retryingSave, setRetryingSave] = useState(false);
   const [openingSaved, setOpeningSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const setLectureContent = globalLecture.setContent;
 
@@ -87,6 +110,75 @@ export default function LectureNotes() {
   const staffTopic = useLocalizedTopic(topicFromSyllabus && globalTopic ? globalTopic : null);
 
   const topicKey = topicContextKey(globalTopic) || topic.trim();
+  const loading = generatingKey !== null && generatingKey === topicKey;
+  /** Boshqa mavzu uchun generatsiya ketmoqda — bir vaqtda bittasi. */
+  const busyElsewhere = generatingKey !== null && generatingKey !== topicKey;
+  const topicKeyRef = useRef(topicKey);
+  topicKeyRef.current = topicKey;
+  const editDirty = Boolean(isEditing && lectureSession && editedContent !== editBase);
+
+  // Ma'ruza FAQAT interfeys tilida ko'rsatiladi: tarjima tayyor bo'lmasa
+  // "Tarjima qilinmoqda…" chiqadi (server fonda tarjima qilib qo'ygan bo'ladi).
+  const {
+    view: lectureView,
+    status: rawLectureStatus,
+    retry: retryTranslation,
+  } = useTranslatedPayload(lectureSession, activeVersionId, language, (next) => setLectureSession(next));
+  // Bazadagi yozuv hali yuklanayotgan bo'lsa — bu "saqlanmagan" emas, kutish.
+  const lectureStatus = rawLectureStatus === 'unsaved' && openingSaved ? 'translating' : rawLectureStatus;
+  const cacheNormNow = resolveTopicNorm(globalTopic);
+
+  // Ko'rsatilgan (shu tildagi) matn keshlanadi — keyingi ochilishda darhol chiqadi.
+  useEffect(() => {
+    if (lectureStatus !== 'ready' || !lectureView?.content) return;
+    setLectureContent(lectureView.content);
+    if (cacheNormNow) writeLectureForTopic(`${cacheNormNow}@${language}`, lectureView.content);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lectureView?.content, lectureStatus, language, cacheNormNow]);
+
+  /** Oxirgi commit holati — mavzu almashganda saqlanmagan tahrirni ESKI
+   *  mavzuga yozish uchun (effekt ichida yangilanadi, shuning uchun
+   *  cleanup paytida hali oldingi mavzuni ko'rsatadi). */
+  const lastCommittedRef = useRef<{
+    dirty: boolean;
+    editedContent: string;
+    editLang: AppLanguage;
+    session: LectureNote | null;
+    versionId: string | null;
+    globalTopic: typeof globalTopic;
+  } | null>(null);
+  useEffect(() => {
+    lastCommittedRef.current = {
+      dirty: editDirty,
+      editedContent,
+      editLang,
+      session: lectureSession,
+      versionId: activeVersionId,
+      globalTopic,
+    };
+  });
+
+  // Tahrir paytida interfeys tili almashtirildi — tahrir o'z tilida
+  // saqlanadi (yo'qolmaydi), sahifa yangi tildagi matnga o'tadi.
+  const prevLanguageRef = useRef(language);
+  useEffect(() => {
+    if (prevLanguageRef.current === language) return;
+    prevLanguageRef.current = language;
+    const prev = lastCommittedRef.current;
+    if (prev?.dirty && prev.session) {
+      const next = buildEditedLecture(prev.session, prev.editLang, prev.editedContent);
+      setLectureSession(next);
+      void autoSaveEdit(prev.session, prev.editedContent, prev.versionId, prev.globalTopic, prev.editLang);
+    }
+    setIsEditing(false);
+  }, [language]);
+
+  // Taqdimot bo'limi o'qituvchi TANLAGAN ma'ruza versiyasidan foydalanadi.
+  useEffect(() => {
+    const norm = resolveTopicNorm(globalTopic);
+    if (norm) rememberActiveLectureVersion(norm, activeVersionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVersionId]);
 
   const refreshHistory = useCallback(() => {
     const lookup = globalTopic ?? topic;
@@ -97,12 +189,23 @@ export default function LectureNotes() {
     void listPreparedForTopicSynced('lecture', lookup, { shared: true }).then(setSavedLectures);
   }, [topic, globalTopic]);
 
+  /** O'qituvchi "kontekst" maydonini o'zi o'zgartirganmi — bo'lmasa u
+   *  interfeys tili bilan birga yangilanadi (eski tilda qolib ketmasin). */
+  const descriptionTouchedRef = useRef(false);
   useEffect(() => {
     if (globalTopic) {
       setTopic(globalTopic.title);
+      descriptionTouchedRef.current = false;
       setDescription(formatTopicLessonLabel(globalTopic.type, globalTopic.id, t));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalTopic]);
+  useEffect(() => {
+    if (globalTopic && !descriptionTouchedRef.current) {
+      setDescription(formatTopicLessonLabel(globalTopic.type, globalTopic.id, t));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
 
   // Mavzu ochilganda shu fan/mavzudagi OXIRGI ma'ruza avtomatik chiqadi.
   useEffect(() => {
@@ -118,10 +221,11 @@ export default function LectureNotes() {
       return;
     }
     const cachedNorm = resolveTopicNorm(globalTopic);
-    const cached = cachedNorm ? readLectureForTopic(cachedNorm) : '';
+    // Kesh TIL bo'yicha: boshqa tildagi eski matn bir lahzaga ham chiqmasin.
+    const cached = cachedNorm ? readLectureForTopic(`${cachedNorm}@${language}`) : '';
     if (cached) {
-      setLectureSession({ topic: globalTopic?.title || topic, content: cached });
-      setEditedContent(cached);
+      setLectureSession({ topic: globalTopic?.title || topic, content: cached, primaryLanguage: language });
+      setActiveVersionId(null);
       setLectureContent(cached);
     } else {
       setLectureSession(null);
@@ -129,6 +233,8 @@ export default function LectureNotes() {
       setLectureContent('');
       setActiveVersionId(null);
     }
+    setIsEditing(false);
+    setError(null);
     setOpeningSaved(true);
     void (async () => {
       const rows = await listPreparedForTopicSynced('lecture', lookup, { shared: true });
@@ -143,44 +249,109 @@ export default function LectureNotes() {
       if (session?.content) {
         setActiveVersionId(rows[0].id);
         setLectureSession(session);
-        setEditedContent(session.content);
-        setLectureContent(session.content);
-        if (cachedNorm) writeLectureForTopic(cachedNorm, session.content);
       }
       setOpeningSaved(false);
     })();
     return () => {
       cancelled = true;
+      // Tahrir rejimida saqlanmagan o'zgarish bilan mavzu almashtirildi —
+      // ish indamay yo'qolmasin: eski mavzuning yozuviga saqlab qo'yamiz.
+      const prev = lastCommittedRef.current;
+      if (prev?.dirty && prev.session) {
+        void autoSaveEdit(prev.session, prev.editedContent, prev.versionId, prev.globalTopic, prev.editLang);
+      }
     };
     // faqat tanlangan mavzu kaliti — har harfda qayta yuklamaslik uchun
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicKey]);
 
+  /**
+   * Tahrirlangan ma'ruza payload'i.
+   *
+   * Asosiy tildagi matn tahrirlansa — tarjimalar eskiradi va olib tashlanadi
+   * (server ularni fonda qaytadan tarjima qiladi). Tarjima tahrirlansa —
+   * faqat o'sha til yangilanadi, asosiy matn va boshqa tillar o'zgarmaydi.
+   */
+  function buildEditedLecture(session: LectureNote, lang: AppLanguage, content: string): LectureNote {
+    const primary = session.primaryLanguage;
+    if (!primary || primary === lang) {
+      return { topic: session.topic, content, primaryLanguage: lang };
+    }
+    const translations = { ...(session.translations || {}) };
+    translations[lang] = { ...(translations[lang] || {}), content };
+    return { ...session, translations };
+  }
+
+  async function autoSaveEdit(
+    session: LectureNote,
+    content: string,
+    versionId: string | null,
+    ctx: typeof globalTopic,
+    lang: AppLanguage,
+  ) {
+    const next = buildEditedLecture(session, lang, content);
+    try {
+      const patched = versionId ? await updatePreparedContentPayload(versionId, next) : false;
+      if (!patched) {
+        await savePreparedContent('lecture', session.topic, next, buildPreparedContentMeta(ctx));
+      }
+      const norm = resolveTopicNorm(ctx);
+      if (norm) writeLectureForTopic(`${norm}@${lang}`, content);
+      pushAppNotification({
+        title: t('common.doneTitle'),
+        body: t('lecture.editAutoSaved'),
+        titleKey: 'common.doneTitle',
+        bodyKey: 'lecture.editAutoSaved',
+        level: 'success',
+      });
+    } catch (err) {
+      console.error('Lecture auto-save failed', err);
+      pushAppNotification({
+        title: t('common.errorTitle'),
+        body: t('common.saveFailedKeepWork'),
+        titleKey: 'common.errorTitle',
+        bodyKey: 'common.saveFailedKeepWork',
+        level: 'error',
+      });
+    }
+  }
+
   const handleGenerate = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!topic.trim()) return;
-    setLoading(true);
+    if (!topic.trim() || generatingKey !== null) return;
+    if (editDirty && !window.confirm(t('lecture.regenerateConfirmEdited'))) return;
+    // Generatsiya boshlangan mavzu — natija va saqlash shu mavzuga bog'lanadi.
+    const startKey = topicKey;
+    const startTopic = topic;
+    const startContext = globalTopic;
+    const meta = buildPreparedContentMeta(startContext);
+    const cacheNorm = resolveTopicNorm(startContext);
+    const stillHere = () => topicKeyRef.current === startKey;
+    setGeneratingKey(startKey);
     setError(null);
+    setIsEditing(false);
     setStreamingContent('');
     try {
       const contentLanguage = contentLanguageFor(globalTopic, language);
       // Keys va test bilan BIR XIL qaror: serverdagi rasmiy klinik kafedra
       // bayrog'i va fan kodi ham hisobga olinadi (2026-09-26). Ilgari ma'ruza
       // faqat nom qolipiga qarardi va keys/testdan boshqa domen chiqishi mumkin edi.
-      const domain = (await hydrateGenerationScope({ topic, context: globalTopic })).domain;
-      const data = await aiService.generateLectureNotes(
-        topic,
+      const domain = (await hydrateGenerationScope({ topic: startTopic, context: startContext })).domain;
+      const generated = await aiService.generateLectureNotes(
+        startTopic,
         description,
         contentLanguage,
-        globalTopic?.subjectCode,
+        startContext?.subjectCode,
         (textSoFar) => setStreamingContent(textSoFar),
         domain,
       );
-      setLectureSession(data);
-      setEditedContent(data.content);
-      setLectureContent(data.content);
-      const cacheNorm = resolveTopicNorm(globalTopic);
-      if (cacheNorm) writeLectureForTopic(cacheNorm, data.content);
+      // Asosiy til belgilanadi — server qolgan ikki tilga fonda tarjima qiladi.
+      const data: LectureNote = { ...generated, primaryLanguage: contentLanguage };
+      if (cacheNorm) writeLectureForTopic(`${cacheNorm}@${contentLanguage}`, data.content);
+      if (stillHere()) {
+        setActiveVersionId(null);
+        setLectureSession(data);
+      }
       // Kalit sifatida SARLAVHA emas, tuzilmali topicNorm ishlatiladi
       // (sillabus::yo'nalish::mavzu kodi) — aks holda mavzu nomi tarjima
       // qilinganda saqlangan ma'ruza topilmay qolardi.
@@ -188,32 +359,40 @@ export default function LectureNotes() {
       // yiqilsa "generatsiya xatosi" deb ko'rsatmaymiz, aks holda
       // foydalanuvchi tayyor matnni yo'qotdim deb o'ylaydi.
       try {
-        const savedId = await savePreparedContent(
-          'lecture',
-          topic,
-          data,
-          buildPreparedContentMeta(globalTopic),
-        );
-        setActiveVersionId(savedId);
-        pushAppNotification({
-          title: t('common.doneTitle'),
-          body: t('lecture.readyToast'),
-          titleKey: 'common.doneTitle',
-          bodyKey: 'lecture.readyToast',
-          level: 'success',
-        });
-        refreshHistory();
+        const savedId = await savePreparedContent('lecture', startTopic, data, meta);
+        if (stillHere()) {
+          setActiveVersionId(savedId);
+          pushAppNotification({
+            title: t('common.doneTitle'),
+            body: t('lecture.readyToast'),
+            titleKey: 'common.doneTitle',
+            bodyKey: 'lecture.readyToast',
+            level: 'success',
+          });
+          refreshHistory();
+        } else {
+          pushAppNotification({
+            title: t('common.doneTitle'),
+            body: t('common.readyOtherTopic', { title: startTopic }),
+            titleKey: 'common.doneTitle',
+            bodyKey: 'common.readyOtherTopic',
+            bodyParams: { title: startTopic },
+            topicSyllabusId: startContext?.syllabusId,
+            level: 'success',
+          });
+        }
       } catch (saveErr) {
         console.error('Lecture save failed', saveErr);
         // Ish ekranda turibdi — foydalanuvchi bir bosishda qayta saqlay olsin.
-        setPendingSave({ topic, data });
-        setError(t('common.saveFailedKeepWork'));
+        // Kalit va meta shu yerda qotiriladi: qayta urinish ASL mavzuga yozadi.
+        setPendingSave({ topic: startTopic, data, key: startKey, meta });
+        if (stillHere()) setError(t('common.saveFailedKeepWork'));
       }
     } catch (err) {
       console.error('Lecture generation error:', err);
-      setError(t('lecture.errorGenerate'));
+      if (stillHere()) setError(t('lecture.errorGenerate'));
     } finally {
-      setLoading(false);
+      setGeneratingKey(null);
       setStreamingContent('');
     }
   };
@@ -223,8 +402,7 @@ export default function LectureNotes() {
     if (!session) return;
     setActiveVersionId(summary.id);
     setLectureSession(session);
-    setEditedContent(session.content);
-    globalLecture.setContent(session.content);
+    setIsEditing(false);
   };
 
   /** Yiqilgan saqlashni qayta urinish — tayyor matn yo'qolmasin. */
@@ -237,12 +415,14 @@ export default function LectureNotes() {
           'lecture',
           pendingSave.topic,
           pendingSave.data,
-          buildPreparedContentMeta(globalTopic),
+          pendingSave.meta,
         );
-        setActiveVersionId(savedId);
+        if (pendingSave.key === topicKeyRef.current) {
+          setActiveVersionId(savedId);
+          refreshHistory();
+        }
         setPendingSave(null);
         setError(null);
-        refreshHistory();
       } catch (err) {
         console.error('Lecture retry save failed', err);
         setError(t('common.saveFailedKeepWork'));
@@ -278,8 +458,8 @@ export default function LectureNotes() {
   };
 
   const handleCopy = async () => {
-    if (!lectureSession) return;
-    const ok = await copyTextToClipboard(lectureSession.content);
+    if (!lectureView || lectureStatus !== 'ready') return;
+    const ok = await copyTextToClipboard(lectureView.content);
     if (!ok) {
       // Ilgari xato faqat console'ga chiqardi — foydalanuvchi tugma
       // ishlamayotganini bilmasdi.
@@ -334,7 +514,10 @@ export default function LectureNotes() {
             className={staffInput}
             placeholder={t('lecture.descriptionPlaceholder')}
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              descriptionTouchedRef.current = true;
+              setDescription(e.target.value);
+            }}
           />
         </label>
       </StaffTopicHeader>
@@ -348,7 +531,7 @@ export default function LectureNotes() {
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={loading || !topic.trim()}
+            disabled={loading || busyElsewhere || !topic.trim()}
             className={`${staffBtnPrimary} mt-5`}
           >
             {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
@@ -357,11 +540,15 @@ export default function LectureNotes() {
         </div>
       )}
 
-      {error && (
+      {busyElsewhere && (
+        <p className="text-[12.5px] font-medium text-slate-500">{t('common.busyOtherTopic')}</p>
+      )}
+
+      {(error || pendingSave?.key === topicKey) && (
         <StaffErrorAlert
-          message={error}
-          actionLabel={pendingSave ? t('common.retrySave') : undefined}
-          onAction={pendingSave ? handleRetrySave : undefined}
+          message={error || t('common.saveFailedKeepWork')}
+          actionLabel={pendingSave?.key === topicKey ? t('common.retrySave') : undefined}
+          onAction={pendingSave?.key === topicKey ? handleRetrySave : undefined}
           actionBusy={retryingSave}
         />
       )}
@@ -396,12 +583,33 @@ export default function LectureNotes() {
           <StaffPanel className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             {/* Sarlavha interfeys tilida — sessiyada asl (o'zbekcha) matn turadi. */}
             <p className={`text-[16px] font-bold line-clamp-2 ${STAFF_HEADING}`}>
-              {staffTopic && staffTopic.title && lectureSession.topic === globalTopic?.title
+              {staffTopic?.translating
+                ? t('common.translating')
+                : staffTopic && staffTopic.title && lectureSession.topic === globalTopic?.title
                 ? staffTopic.title
-                : lectureSession.topic}
+                : lectureView?.topic || lectureSession.topic}
             </p>
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setIsEditing(!isEditing)} className={staffBtnGhost}>
+              <button
+                type="button"
+                disabled={lectureStatus !== 'ready'}
+                onClick={() => {
+                  if (isEditing) {
+                    setIsEditing(false);
+                    return;
+                  }
+                  // Shu tildagi saqlanmagan qoralama bo'lsa — davom ettiriladi.
+                  const keepDraft = editLang === language && editedContent !== editBase && editBase !== '';
+                  if (!keepDraft) {
+                    const text = lectureView?.content || '';
+                    setEditedContent(text);
+                    setEditBase(text);
+                    setEditLang(language);
+                  }
+                  setIsEditing(true);
+                }}
+                className={`${staffBtnGhost} disabled:opacity-50`}
+              >
                 <FileText size={15} />
                 {isEditing ? t('lecture.view') : t('lecture.edit')}
               </button>
@@ -410,13 +618,18 @@ export default function LectureNotes() {
               <button
                 type="button"
                 onClick={() => void handleGenerate()}
-                disabled={loading}
+                disabled={loading || busyElsewhere}
                 className={`${staffBtnGhost} disabled:opacity-50`}
               >
                 <RefreshCw size={15} />
                 {t('lecture.regenerate')}
               </button>
-              <button type="button" onClick={handleCopy} className={staffBtnGhost}>
+              <button
+                type="button"
+                onClick={handleCopy}
+                disabled={lectureStatus !== 'ready'}
+                className={`${staffBtnGhost} disabled:opacity-50`}
+              >
                 {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
                 {copied ? t('lecture.copied') : t('lecture.copy')}
               </button>
@@ -425,6 +638,7 @@ export default function LectureNotes() {
                   shuning uchun avval ko'rish rejimiga qaytariladi. */}
               <button
                 type="button"
+                disabled={lectureStatus !== 'ready'}
                 onClick={() => {
                   if (isEditing) {
                     setIsEditing(false);
@@ -433,7 +647,7 @@ export default function LectureNotes() {
                   }
                   window.print();
                 }}
-                className={staffBtnPrimary}
+                className={`${staffBtnPrimary} disabled:opacity-50`}
               >
                 <Download size={15} />
                 {t('lecture.print')}
@@ -453,7 +667,7 @@ export default function LectureNotes() {
               <button
                 type="button"
                 onClick={() => void handleGenerate()}
-                disabled={loading}
+                disabled={loading || busyElsewhere}
                 className={`${staffBtnPrimary} shrink-0 disabled:opacity-50`}
               >
                 <RefreshCw size={15} />
@@ -467,22 +681,20 @@ export default function LectureNotes() {
               <div className="space-y-4">
                 <textarea
                   value={editedContent}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setEditedContent(v);
-                    globalLecture.setContent(v);
-                  }}
+                  onChange={(e) => setEditedContent(e.target.value)}
                   className={`${staffInput} min-h-[480px] font-sans leading-relaxed`}
                 />
                 <div className="flex justify-end">
                   <button
                     type="button"
+                    disabled={savingEdit}
                     onClick={async () => {
+                      if (savingEdit) return;
+                      setSavingEdit(true);
                       // O'qituvchi matnni o'zi to'ldirib saqlasa — "chala" belgisi olinadi.
-                      const { incomplete: _wasIncomplete, ...rest } = lectureSession;
-                      const next = { ...rest, content: editedContent };
+                      // Tarjima tahrirlansa — faqat o'sha til yangilanadi.
+                      const next = buildEditedLecture(lectureSession, editLang, editedContent);
                       setLectureSession(next);
-                      globalLecture.setContent(editedContent);
                       try {
                         // MUHIM: meta (topicNorm) uzatilishi shart — busiz yozuv
                         // sillabus kaliti bilan emas, oddiy sarlavha bilan
@@ -501,23 +713,29 @@ export default function LectureNotes() {
                           );
                           setActiveVersionId(newId);
                         }
+                        setEditBase(editedContent);
                         refreshHistory();
                         setIsEditing(false);
                       } catch (err) {
                         console.error('Lecture edit save failed', err);
                         setError(t('common.saveFailedKeepWork'));
+                      } finally {
+                        setSavingEdit(false);
                       }
                     }}
-                    className={staffBtnPrimary}
+                    className={`${staffBtnPrimary} disabled:opacity-50`}
                   >
+                    {savingEdit && <Loader2 size={15} className="animate-spin" />}
                     {t('lecture.saveChanges')}
                   </button>
                 </div>
               </div>
             ) : (
-              <article ref={printRef} className={staffProse}>
-                <LectureMarkdown>{lectureSession.content}</LectureMarkdown>
-              </article>
+              <TranslationGate status={lectureStatus} onRetry={retryTranslation}>
+                <article ref={printRef} className={staffProse}>
+                  <LectureMarkdown>{lectureView?.content || ''}</LectureMarkdown>
+                </article>
+              </TranslationGate>
             )}
           </StaffPanel>
 

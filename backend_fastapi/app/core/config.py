@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     django_allow_legacy_prepared_content_api: bool = False
 
     django_ai_education_rate: str = "60/hour"
+    # Tarjima: til almashganda bir necha material birdan so'raladi; tayyor tarjima AI'siz qaytadi.
+    django_ai_translate_rate: str = "300/hour"
     django_ai_startup_rate: str = "40/hour"
     django_login_rate: str = "20/minute"
     django_live_test_anon_rate: str = "120/minute"
@@ -73,6 +75,12 @@ class Settings(BaseSettings):
 
     # Yuz orqali kirish xizmati (docker-compose `face_api`, faqat ichki tarmoq).
     face_api_url: str = "http://face_api:8200"
+
+    # cam.fermi.uz: JSHSHIR bilan kirishni tasdiqlash (docs/cam-fermi-verify-staff.md).
+    # Ikkalasi bo'lmasa bu kirish yo'li o'chiq (503), boshqa yo'llar o'zgarmaydi.
+    cam_verify_url: str = ""
+    cam_verify_api_key: str = ""
+    cam_verify_timeout: float = 10.0
 
     @property
     def database_url(self) -> str:

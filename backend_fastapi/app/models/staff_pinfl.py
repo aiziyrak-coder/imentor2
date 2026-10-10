@@ -24,7 +24,8 @@ class StaffPinfl(Base):
     # Bog'langan iMentor hisobi (`auth_user.username`). Bo'sh — hali bog'lanmagan.
     owner_key: Mapped[str] = mapped_column(String(128), default="", index=True)
     # "face" — shu odamning yuzi bog'langan hisob; "name" — ism-familiya bo'yicha yagona moslik;
-    # "admin" — qo'lda bog'langan (sinxronlash o'zgartirmaydi).
+    # "admin" — qo'lda bog'langan; "cam" — JSHSHIR bilan kirishda cam.fermi.uz tasdig'idan
+    # (ikkalasini ham sinxronlash o'zgartirmaydi).
     link_source: Mapped[str] = mapped_column(String(16), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     synced_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

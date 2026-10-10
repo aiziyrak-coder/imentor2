@@ -6,6 +6,8 @@ import json
 import re
 import unicodedata
 
+from app.services.dean_access import ExclusionScope
+
 CYRILLIC = dict(zip(
     'абвгдеёзийклмнопрстуфхцчэюяқғҳў',
     ['a','b','v','g','d','e','yo','z','i','y','k','l','m','n','o','p','r','s','t','u','f','x','ts','ch','e','yu','ya','q','g','h','o'],
@@ -155,6 +157,7 @@ def build_report(db, filters, allowed_departments: list[str] | None = None) -> d
     start, end = filters.date_from, filters.date_to
     current = teacher_report(db, start_day=start, end_day=end)
     allowed_set = {normalize_name(d) for d in (allowed_departments or []) if d}
+    exclusion_only = isinstance(allowed_departments, ExclusionScope)
     if allowed_set:
         current = [r for r in current if normalize_name(r.get('department', '')) in allowed_set]
     previous_start = start - dt.timedelta(days=(end - start).days + 1)
@@ -183,7 +186,7 @@ def build_report(db, filters, allowed_departments: list[str] | None = None) -> d
         'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(),
         'total': len(current), 'count': len(rows), 'rows': rows,
         'summary': summarize(rows), 'filters': filters.model_dump(mode='json'),
-        'scope': {'kind': 'dekan' if allowed_set else 'rektor', 'departments': list(allowed_departments or [])},
+        'scope': {'kind': 'dekan' if allowed_set and not exclusion_only else 'rektor', 'departments': [] if exclusion_only else list(allowed_departments or [])},
         'status_counts': status_counts,
         'board_inventory': {'source_url': inventory()['source_url'], 'checked_on': inventory()['checked_on']},
         'signal_labels': SIGNALS,

@@ -12,7 +12,7 @@ import {
   youtubeIdFromUrl,
   type TopicVideo,
 } from '../utils/topicVideoApi';
-import { HttpError } from '../api/httpClient';
+import { backendErrorMessage } from '../utils/apiError';
 import { useYoutubeTitle } from '../utils/youtubeTitle';
 import StaffPageLayout from './staff/StaffPageLayout';
 import StaffTopicHeader from './staff/StaffTopicHeader';
@@ -111,11 +111,11 @@ function VideoCard({
  *
  * Ilgari videoni faqat admin biriktirardi (Admin → Videolar). Endi o'qituvchi
  * taqdimot yuklagani kabi mavzuga YouTube havolasini o'zi qo'shadi va o'zi
- * qo'shganini o'chiradi (server `can_delete` bilan belgilaydi). Video mavzuga
- * biriktiriladi — shu fanni o'tadigan boshqa o'qituvchilarga ham ko'rinadi.
+ * qo'shganini o'chiradi (server `can_delete` bilan belgilaydi). Server faqat
+ * o'qituvchining O'Z videolarini qaytaradi (`_only_own`).
  */
 export default function TopicVideos() {
-  const { t } = useUiText();
+  const { t, language } = useUiText();
   const globalTopic = useContext(GlobalTopicContext);
   const { openSyllabus } = useContext(AppNavigationContext);
   const localizedTopic = useLocalizedTopic(globalTopic);
@@ -127,6 +127,7 @@ export default function TopicVideos() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const topicKey = topicContextKey(globalTopic);
   const requestSeq = useRef(0);
 
@@ -142,6 +143,7 @@ export default function TopicVideos() {
     }
     const seq = ++requestSeq.current;
     setLoading(true);
+    setLoadError(false);
     try {
       const rows = await fetchTopicVideos({
         syllabusId,
@@ -151,6 +153,11 @@ export default function TopicVideos() {
       if (seq !== requestSeq.current) return;
       setVideos(rows);
       setActiveId(null);
+    } catch {
+      if (seq !== requestSeq.current) return;
+      // Boshqa mavzuning videolari ekranda qolib ketmasin.
+      setVideos([]);
+      setLoadError(true);
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
@@ -159,6 +166,14 @@ export default function TopicVideos() {
   useEffect(() => {
     void loadVideos();
   }, [loadVideos]);
+
+  // Mavzu almashganda oldingi mavzuning "Video qo'shildi" xabari va
+  // yarim yozilgan havola qolib ketmasin.
+  useEffect(() => {
+    setMessage(null);
+    setUrl('');
+    setTitle('');
+  }, [topicKey]);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,8 +198,8 @@ export default function TopicVideos() {
       setMessage({ ok: true, text: t('video.added') });
       await loadVideos();
     } catch (err) {
-      const detail = err instanceof HttpError ? (err.body as { detail?: unknown } | null)?.detail : null;
-      setMessage({ ok: false, text: typeof detail === 'string' && detail ? detail : t('video.addFailed') });
+      // Server xabari faqat interfeys tilida bo'lsa ko'rsatiladi.
+      setMessage({ ok: false, text: backendErrorMessage(err, language) || t('video.addFailed') });
     } finally {
       setSaving(false);
     }
@@ -286,6 +301,10 @@ export default function TopicVideos() {
       {loading ? (
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-slate-300" size={36} />
+        </div>
+      ) : loadError ? (
+        <div className="mx-auto max-w-sm px-4 py-16 text-center">
+          <p className="text-[13px] font-medium leading-relaxed text-rose-600">{t('video.errorLoad')}</p>
         </div>
       ) : videos.length === 0 ? (
         <div className="mx-auto max-w-sm px-4 py-16 text-center">

@@ -114,8 +114,6 @@ describe('TestQuestions — o‘qituvchi ekrani, jonli sessiya', () => {
     renderTeacher();
     await openSavedVersion();
     fireEvent.click(screen.getByRole('button', { name: /Jonli sessiyani boshlash/ }));
-    // Sessiya boshlangach natijalar jadvali — savollarga o'tamiz.
-    fireEvent.click(await screen.findByRole('button', { name: /Javoblarni tahlil qilish/ }));
 
     expect(await screen.findByText(/ekranda to'g'ri javoblar va tahlil yashirilgan/)).toBeInTheDocument();
     expect(screen.getByText(/Xotira asosi qaysi jarayon/)).toBeInTheDocument();
@@ -132,7 +130,6 @@ describe('TestQuestions — o‘qituvchi ekrani, jonli sessiya', () => {
     renderTeacher();
     await openSavedVersion();
     fireEvent.click(screen.getByRole('button', { name: /Jonli sessiyani boshlash/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Javoblarni tahlil qilish/ }));
     fireEvent.click(await screen.findByRole('button', { name: /To'g'ri javoblarni ko'rsatish/ }));
     expect(confirmSpy).toHaveBeenCalled();
     expect(await screen.findByText('MAXFIY_TAHLIL matni')).toBeInTheDocument();

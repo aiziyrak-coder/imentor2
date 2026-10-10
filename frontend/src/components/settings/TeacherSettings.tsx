@@ -32,6 +32,8 @@ import {
 } from '../../utils/staffSelfApi';
 import { getCurrentLocalUser, updateCurrentLocalUser } from '../../utils/localStaffAuth';
 import { useSettingsText, type SettingsText } from './teacherSettingsText';
+import { useLocalizedNames } from '../../utils/nameI18n';
+import { useUiText } from '../../i18n/useUiText';
 
 /**
  * O'qituvchi sozlamalari — hamma narsani o'zi qiladi (2026-09-24).
@@ -131,6 +133,9 @@ function Message({ kind, children }: { kind: 'ok' | 'error' | 'info'; children: 
 
 function WorkplaceCard() {
   const s = useSettingsText();
+  const { language } = useUiText();
+  // Kafedra nomlari interfeys tilida; tarjima kelguncha "…" turadi.
+  const names = useLocalizedNames(language, [], true);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [form, setForm] = useState({ first_name: '', last_name: '', job_title: '', department_id: 0 });
@@ -230,7 +235,7 @@ function WorkplaceCard() {
             >
               <option value="">{s.choose}</option>
               {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+                <option key={d.id} value={d.id}>{names.departmentName(d.name) ?? '…'}</option>
               ))}
             </select>
           </label>
@@ -330,6 +335,8 @@ const STATUS_KEY: Record<LibraryItem['status'], keyof SettingsText> = {
 
 function LibraryPanel() {
   const s = useSettingsText();
+  const { language } = useUiText();
+  const names = useLocalizedNames(language, [], true);
   const [data, setData] = useState<{ department: string; items: LibraryItem[] } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kind, setKind] = useState<'book' | 'protocol'>('book');
@@ -407,7 +414,10 @@ function LibraryPanel() {
       <section className={CARD}>
         <h3 className="text-[17px] font-bold text-slate-900">{s.uploadDoc}</h3>
         <p className="mt-1 text-[13px] text-slate-500">
-          {s.department}: <b className="text-slate-700">{data?.department || '—'}</b>
+          {s.department}:{' '}
+          <b className="text-slate-700">
+            {data?.department ? names.departmentName(data.department) ?? '…' : '—'}
+          </b>
         </p>
         <form onSubmit={submit} className="mt-4 space-y-3">
           <div className="inline-flex rounded-xl bg-slate-100 p-1">

@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useUiText } from './useUiText';
-import { localizedSubjectName, localizedTopicTitle, requestSyllabusTranslation } from '../utils/syllabusI18n';
+import {
+  localizedSubjectName,
+  localizedTopicTitle,
+  requestSyllabusTranslation,
+  subjectNameMissing,
+  syllabusTranslationState,
+  topicTitleMissing,
+} from '../utils/syllabusI18n';
+import { useSyllabusTranslationTick } from './useSyllabusTranslationState';
 import {
   cacheSyllabusRows,
   getCachedSyllabusRow,
@@ -50,11 +58,18 @@ export function useLocalizedTopic(topic: SyllabusTopicContext | null): StaffTopi
 
   // Direct navigation and leaving the subject page must not strand a missing translation.
   useEffect(() => {
-    if (!row || !topic || (row.instruction_language || 'uz') === language) return;
-    if (!row.topics_i18n?.[language]?.[topic.title]) {
+    if (!row || !topic) return;
+    if (topicTitleMissing(row, topic.title, language) || subjectNameMissing(row, language)) {
       void requestSyllabusTranslation(row.id, language);
     }
   }, [row, topic, language]);
+
+  // Tarjima kelguncha sarlavha o'rnida "Tarjima qilinmoqda…" belgisi turadi.
+  const tick = useSyllabusTranslationTick();
+  const translating =
+    Boolean(row && topic) &&
+    syllabusTranslationState(row?.id, language) === 'pending' &&
+    (topicTitleMissing(row, topic?.title || '', language) || subjectNameMissing(row, language));
 
   return useMemo(() => {
     if (!topic) return null;
@@ -64,6 +79,8 @@ export function useLocalizedTopic(topic: SyllabusTopicContext | null): StaffTopi
       title: localizedTopicTitle(row, topic.title, language),
       subjectName: row ? localizedSubjectName(row, language) : topic.subjectName,
       variantLabel: topic.variantLabel,
+      translating,
     };
-  }, [topic, row, language]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topic, row, language, translating, tick]);
 }

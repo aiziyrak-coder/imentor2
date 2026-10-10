@@ -22,3 +22,20 @@ export function writeLectureForTopic(topicNorm: string, content: string): void {
     /* quota */
   }
 }
+
+/**
+ * O'qituvchi "Ma'ruza matni"da hozir ochib turgan versiya (shu sessiya
+ * davomida, xotirada). Taqdimot shu versiyadan quriladi — ilgari doim eng
+ * oxirgisi olinardi, o'qituvchi eski versiyani tanlagan bo'lsa ham.
+ */
+const activeLectureVersionByNorm = new Map<string, string>();
+
+export function rememberActiveLectureVersion(topicNorm: string, versionId: string | null): void {
+  if (!topicNorm) return;
+  if (versionId) activeLectureVersionByNorm.set(topicNorm, versionId);
+  else activeLectureVersionByNorm.delete(topicNorm);
+}
+
+export function activeLectureVersion(topicNorm: string): string | null {
+  return topicNorm ? activeLectureVersionByNorm.get(topicNorm) ?? null : null;
+}

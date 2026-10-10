@@ -3,8 +3,11 @@ import { Loader2, AlertCircle, Phone, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ensureDefaultRoleDemosExist, isValidStaffLogin } from '../../utils/localStaffAuth';
 import {
+  FaceLoginError,
   getBackendAccessToken,
+  isPinfl,
   loginStaffWithBackendFallback,
+  loginWithPinfl,
   syncSessionRoleFromServer,
 } from '../../utils/backendAuth';
 import { useUiText } from '../../i18n/useUiText';
@@ -45,10 +48,20 @@ export default function LoginPage({ onWantsHodimQr, onWantsFace }: LoginPageProp
     }
     setLoading(true);
     try {
-      await loginStaffWithBackendFallback(phone, password);
+      // JSHSHIR va bo'sh parol — cam.fermi.uz tasdig'i bilan kirish. Parol yozilgan
+      // bo'lsa avvalgidek: JSHSHIR/login + parol.
+      if (isPinfl(phone) && !password) {
+        await loginWithPinfl(phone);
+      } else {
+        await loginStaffWithBackendFallback(phone, password);
+      }
       await getBackendAccessToken();
       await syncSessionRoleFromServer();
     } catch (err: unknown) {
+      if (err instanceof FaceLoginError) {
+        setError(err.detail || t('auth.loginError'));
+        return;
+      }
       const code = err instanceof Error ? err.message : '';
       if (code === 'user-not-found' || code === 'wrong-password') {
         setError(t('auth.wrongCredentialsRegister'));

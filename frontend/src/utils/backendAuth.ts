@@ -394,6 +394,42 @@ export async function loginWithFaceFrames(frames: Blob[]): Promise<LocalStaffUse
   );
 }
 
+/** JSHSHIR: 14 ta raqam (bo'sh joylarsiz). */
+export function isPinfl(value: string): boolean {
+  return /^\d{14}$/.test(value.replace(/\s+/g, ''));
+}
+
+/** JSHSHIR bilan kirish (parolsiz): server cam.fermi.uz'dan tasdiq oladi, hisob bo'lmasa ochadi. */
+export async function loginWithPinfl(pinflInput: string): Promise<LocalStaffUser> {
+  const pinfl = pinflInput.replace(/\s+/g, '');
+  let res: Response;
+  try {
+    res = await fetch(`${apiBaseUrl()}/v1/auth/pinfl-login/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinfl }),
+    });
+  } catch {
+    throw new FaceLoginError(0, '');
+  }
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') detail = body.detail;
+    } catch {
+      /* matnsiz javob */
+    }
+    throw new FaceLoginError(res.status, detail);
+  }
+  const bundle = (await res.json()) as BackendTokenBundle;
+  writeCached(bundle);
+  const existing = findStoredUserByPhone(bundle.username);
+  return establishLocalSessionFromProfile(
+    buildLocalUserFromBackendLogin(bundle.username, '', bundle, existing),
+  );
+}
+
 /** Ro‘yxatdan o‘tish: avval server, keyin mahalliy profil. */
 export async function registerStaffWithBackend(input: {
   phoneDisplay: string;

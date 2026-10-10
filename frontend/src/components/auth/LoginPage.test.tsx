@@ -32,12 +32,19 @@ vi.mock('../../utils/localStaffAuth', async (importOriginal) => {
 const loginMock = vi.fn();
 const tokenMock = vi.fn();
 const syncMock = vi.fn();
+const pinflMock = vi.fn();
 
-vi.mock('../../utils/backendAuth', () => ({
-  loginStaffWithBackendFallback: (...args: unknown[]) => loginMock(...args),
-  getBackendAccessToken: () => tokenMock(),
-  syncSessionRoleFromServer: () => syncMock(),
-}));
+vi.mock('../../utils/backendAuth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/backendAuth')>();
+  return {
+    FaceLoginError: actual.FaceLoginError,
+    isPinfl: actual.isPinfl,
+    loginStaffWithBackendFallback: (...args: unknown[]) => loginMock(...args),
+    loginWithPinfl: (...args: unknown[]) => pinflMock(...args),
+    getBackendAccessToken: () => tokenMock(),
+    syncSessionRoleFromServer: () => syncMock(),
+  };
+});
 
 describe('LoginPage', () => {
   beforeEach(() => {
@@ -46,6 +53,7 @@ describe('LoginPage', () => {
     loginMock.mockResolvedValue({ phoneDigits: '998901112233', role: 'hodim' });
     tokenMock.mockResolvedValue('access-token');
     syncMock.mockResolvedValue(undefined);
+    pinflMock.mockResolvedValue({ phoneDigits: '3442412062', role: 'hodim' });
   });
 
   // Talaba tabi olib tashlangan — sahifa darhol xodim formasi bilan ochiladi.
@@ -109,5 +117,41 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Kirish' }));
 
     expect(await screen.findByText(/Login yoki parol noto'g'ri/i)).toBeInTheDocument();
+  });
+
+  it('logs in by JSHSHIR alone when the password is empty', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+
+    await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
+    await user.click(screen.getByRole('button', { name: 'Kirish' }));
+
+    await waitFor(() => expect(pinflMock).toHaveBeenCalledWith('42005954100011'));
+    expect(loginMock).not.toHaveBeenCalled();
+    expect(syncMock).toHaveBeenCalled();
+  });
+
+  it('JSHSHIR with a password still uses the password login', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+
+    await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
+    await user.type(screen.getByPlaceholderText(/parol/i), 'secret');
+    await user.click(screen.getByRole('button', { name: 'Kirish' }));
+
+    await waitFor(() => expect(loginMock).toHaveBeenCalledWith('42005954100011', 'secret'));
+    expect(pinflMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the server reason when JSHSHIR is not confirmed', async () => {
+    const { FaceLoginError } = await import('../../utils/backendAuth');
+    pinflMock.mockRejectedValue(new FaceLoginError(401, 'Bu JSHSHIR cam.fermi.uz xodimlari ro\'yxatida topilmadi.'));
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />);
+
+    await user.type(screen.getByPlaceholderText(/Xodim ID|3442112068/i), '42005954100011');
+    await user.click(screen.getByRole('button', { name: 'Kirish' }));
+
+    expect(await screen.findByText(/cam.fermi.uz xodimlari ro'yxatida topilmadi/)).toBeInTheDocument();
   });
 });

@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import RECTOR_SCOPE, require_rector, require_rector_wide
-from app.services.dean_access import allowed_departments, allowed_groups, authenticate_dean, in_groups
+from app.services.dean_access import ExclusionScope, allowed_departments, allowed_groups, authenticate_dean, in_groups
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import create_access_token
@@ -129,7 +129,9 @@ def rector_filters(
     scope_groups = allowed_groups(ctx)
     if scope_groups:
         data["groups"] = [g for g in data.get("groups", []) if in_groups(g, scope_groups)]
-    allowed = set(allowed_departments(ctx, db))
+    scope = allowed_departments(ctx, db)
+    # Hisobotdan chiqarilgan kafedralarni `filter_options` o'zi olib tashlaydi.
+    allowed = set() if isinstance(scope, ExclusionScope) else set(scope)
     if allowed:
         data["departments"] = [d for d in data.get("departments", []) if d in allowed]
         data["scope"] = {"kind": ctx.get("kind"), "label": ctx.get("label"), "departments": data["departments"]}

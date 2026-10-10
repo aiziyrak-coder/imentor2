@@ -62,6 +62,16 @@ export function revokeHandoutBlobUrl(id: number): void {
   }
 }
 
+/** Joriy mavzuda yo'q tarqatmalarning fayllarini xotiradan bo'shatadi. */
+export function pruneHandoutBlobCache(keepIds: number[]): void {
+  const keep = new Set(keepIds);
+  for (const [id, url] of [...handoutBlobCache]) {
+    if (keep.has(id)) continue;
+    URL.revokeObjectURL(url);
+    handoutBlobCache.delete(id);
+  }
+}
+
 export function resolveHandoutFileUrl(fileUrl: string): string {
   if (!fileUrl) return '';
   try {

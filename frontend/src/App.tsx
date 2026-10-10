@@ -24,6 +24,7 @@ import {
   Users,
   MapPin,
   Building2,
+  Landmark,
   Files,
   Library,
   BookMarked,
@@ -45,7 +46,8 @@ import {
   type UserRole,
 } from './utils/localStaffAuth';
 import { clearBackendAuthTokens, getBackendAccessToken, setUnauthorizedHandler, syncSessionRoleFromServer, syncStaffPhotoFromServer } from './utils/backendAuth';
-import { clearSyllabusRowCache } from './utils/syllabusRowCache';
+import { clearSyllabusRowCache, getCachedSyllabusRow } from './utils/syllabusRowCache';
+import { localizedSubjectName, localizedTopicTitle } from './utils/syllabusI18n';
 import { resolveProfilePhotoUrl } from './utils/profilePhotoApi';
 import {
   type AppLanguage,
@@ -90,6 +92,7 @@ import AdminLiveTestResultsPage from './components/admin/AdminLiveTestResultsPag
 import AdminStaffLocationConsole from './components/admin/AdminStaffLocationConsole';
 import AdminLiveTeachingBoard from './components/admin/AdminLiveTeachingBoard';
 import AdminCampusBuildingsPage from './components/admin/AdminCampusBuildingsPage';
+import AdminDepartmentsPage from './components/admin/AdminDepartmentsPage';
 import AdminSyllabusCatalog from './components/admin/AdminSyllabusCatalog';
 import AdminOnlineEdu from './components/admin/AdminOnlineEdu';
 import AdminCourseAssignments from './components/admin/AdminCourseAssignments';
@@ -124,6 +127,7 @@ type View =
   | 'admin-cases'
   | 'admin-tests'
   | 'admin-live-test-results'
+  | 'admin-departments'
   | 'admin-syllabuses'
   | 'admin-course-assignments'
   | 'admin-online-edu'
@@ -153,6 +157,7 @@ const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-cases': BriefcaseMedical,
   'admin-tests': ClipboardList,
   'admin-live-test-results': Users,
+  'admin-departments': Landmark,
   'admin-syllabuses': BookOpen,
   'admin-course-assignments': GraduationCap,
   'admin-online-edu': Monitor,
@@ -188,6 +193,7 @@ const ADMIN_NAV_IDS: View[] = [
   'admin-staff-location',
   'admin-live-teaching',
   'admin-campus-buildings',
+  'admin-departments',
   'admin-syllabuses',
   'admin-course-assignments',
   'admin-online-edu',
@@ -301,6 +307,8 @@ type AppNotification = {
   /** Tarjima kalitlari — bo'lsa, tarix JORIY tilda ko'rsatiladi. */
   titleKey?: UiTextKey;
   bodyKey?: UiTextKey;
+  bodyParams?: Record<string, string | number>;
+  topicSyllabusId?: number;
 };
 
 const NOTIFICATIONS_STORAGE_KEY = 'imentor-notifications-v1';
@@ -324,6 +332,21 @@ function persistActiveView(view: View): void {
   } catch {
     /* quota */
   }
+}
+
+/** Bildirishnoma parametrlaridagi fan/mavzu nomini joriy tilga o'giradi (tarjima bo'lsa). */
+function localizeNotificationParams(
+  n: Pick<AppNotification, 'bodyParams' | 'topicSyllabusId'>,
+  lang: AppLanguage,
+): Record<string, string | number> | undefined {
+  const params = n.bodyParams;
+  if (!params || n.topicSyllabusId == null) return params;
+  const row = getCachedSyllabusRow(n.topicSyllabusId);
+  if (!row) return params;
+  const out = { ...params };
+  if (typeof out.title === 'string') out.title = localizedTopicTitle(row, out.title, lang);
+  if (typeof out.subject === 'string') out.subject = localizedSubjectName(row, lang);
+  return out;
 }
 
 function readStoredNotifications(): AppNotification[] {
@@ -403,6 +426,8 @@ export default function App() {
       level: detail.level ?? 'info',
       ...(detail.titleKey ? { titleKey: detail.titleKey } : {}),
       ...(detail.bodyKey ? { bodyKey: detail.bodyKey } : {}),
+      ...(detail.bodyParams ? { bodyParams: detail.bodyParams } : {}),
+      ...(detail.topicSyllabusId != null ? { topicSyllabusId: detail.topicSyllabusId } : {}),
     };
     setNotifications((prev) => [next, ...prev].slice(0, 80));
   }, []);
@@ -475,6 +500,9 @@ export default function App() {
         name: user.displayName || translate(language, 'shell.staffDefaultName'),
       }),
       titleKey: 'shell.welcomeTitle',
+      // Ism parametr sifatida saqlanadi — tarix joriy tilda qayta yoziladi.
+      bodyKey: 'shell.welcomeBody',
+      bodyParams: { name: user.displayName || translate(language, 'shell.staffDefaultName') },
       level: 'success',
     });
   }, [user?.uid, user?.displayName, addNotification]);
@@ -611,9 +639,10 @@ export default function App() {
     setActiveView('syllabus');
   }, []);
 
-  const handleSelectTopic = (topic: SyllabusTopicContext) => {
+  const handleSelectTopic = (topic: SyllabusTopicContext, opts?: { silent?: boolean }) => {
     setSelectedTopic(topic);
     persistSelectedTopic(topic);
+    if (opts?.silent) return;
     addNotification({
       title: translate(language, 'shell.topicSelectedTitle'),
       // Mavzu nomi ichida — kalit bilan qayta tarjima qilinmaydi.
@@ -623,6 +652,10 @@ export default function App() {
         title: topic.title,
       }),
       titleKey: 'shell.topicSelectedTitle',
+      // Mavzu va fan nomi tarixda JORIY tilda ko'rsatiladi (sillabus tarjimasidan).
+      bodyKey: 'shell.topicSelectedBody',
+      bodyParams: { subject: topic.subjectName, id: topic.id, title: topic.title },
+      topicSyllabusId: topic.syllabusId,
     });
   };
 
@@ -662,6 +695,8 @@ export default function App() {
         return <AdminTestsLibrary />;
       case 'admin-live-test-results':
         return <AdminLiveTestResultsPage />;
+      case 'admin-departments':
+        return <AdminDepartmentsPage />;
       case 'admin-syllabuses':
         return <AdminSyllabusCatalog />;
       case 'admin-online-edu':
@@ -1068,7 +1103,9 @@ export default function App() {
                             {n.titleKey ? translate(language, n.titleKey) : n.title}
                           </p>
                           <p className="text-[12px] text-black/60 mt-0.5 break-words">
-                            {n.bodyKey ? translate(language, n.bodyKey) : n.body}
+                            {n.bodyKey
+                              ? translate(language, n.bodyKey, localizeNotificationParams(n, language))
+                              : n.body}
                           </p>
                           <p className="text-[10px] text-black/35 mt-1">
                             {new Date(n.createdAt).toLocaleString(localeForLanguage(language))}

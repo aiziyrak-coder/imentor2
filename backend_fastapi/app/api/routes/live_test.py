@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -24,6 +25,7 @@ from app.services.analytics_service import create_student_attempt_from_submissio
 from app.services.pagination import paginate
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
 # Admin natijalar sahifasida fan biriktirilmagan (eski) testlar guruhi uchun kalit.
@@ -72,6 +74,11 @@ def upsert_live_test(
     existing = _get_session(db, key)
     if existing and existing.owner_key != owner:
         raise HTTPException(status_code=409, detail="Session key already in use.")
+    if existing is not None and svc.answer_key_locked(existing, payload.questions):
+        raise HTTPException(
+            status_code=409,
+            detail="Answer key is locked: the session is closed or already has submissions.",
+        )
 
     created_ms = payload.created_at_ms
     if created_ms is None:
@@ -85,6 +92,13 @@ def upsert_live_test(
     subject_code = payload.subject_code.strip()
 
     if existing is None:
+        # Yangi test ochilayotganda shu o'qituvchining yopilmay qolgan eski
+        # sessiyalari yakunlanadi — ulardagi qoralamalar natijaga aylanadi.
+        try:
+            svc.finalize_expired_sessions(db, owner, SESSION_TTL)
+        except Exception:  # eski sessiya muammosi yangi testni to'xtatmasin
+            db.rollback()
+            logger.exception("live-test: muddati o'tgan sessiyalarni yakunlab bo'lmadi (%s)", owner)
         existing = LiveTestSession(
             session_key=key,
             owner_key=owner,
@@ -206,18 +220,20 @@ def submit_answer(
     obj = _get_session(db, session_key)
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
-    if _closed(obj):
-        raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
     student_id = auth.student_id
     if not student_id:
         raise HTTPException(status_code=403, detail="Talaba ID topilmadi. OnlineTest orqali qayta kiring.")
 
-    participant_key = payload.participant_key.strip()
+    participant_key = _own_key(obj, payload.participant_key.strip(), student_id)
+    # Avval "topshirilganmi": test yopilganda qoralamasi avtomatik topshirilgan
+    # talaba "sessiya yakunlangan" xatosini emas, "qabul qilindi"ni ko'rsin.
     if any(s.student_id == student_id for s in obj.submissions):
         return {"ok": True, "already_submitted": True}
     if participant_key and any(s.participant_key == participant_key for s in obj.submissions):
         return {"ok": True, "already_submitted": True}
+    if _closed(obj):
+        raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
     first_name = payload.first_name.strip() or (auth.user.first_name or "").strip() or "Talaba"
     last_name = payload.last_name.strip() or (auth.user.last_name or "").strip() or student_id
@@ -249,17 +265,70 @@ def submit_answer(
             duration_sec=duration,
         )
         db.commit()
-    except Exception:
+    except IntegrityError:
+        # Ikki marta bosilgan "topshirish": birinchisi yozilgan.
         db.rollback()
         return {"ok": True, "already_submitted": True}
+    except Exception:
+        # Ilgari HAR QANDAY xato "allaqachon topshirilgan" deb qaytarilardi:
+        # talaba "qabul qilindi"ni ko'rardi, javoblari esa saqlanmagan bo'lardi.
+        db.rollback()
+        logger.exception("live-test: topshiriq saqlanmadi (sessiya=%s, talaba=%s)", obj.session_key, student_id)
+        raise HTTPException(status_code=500, detail="Javoblar saqlanmadi. Qayta urinib ko'ring.")
 
-    if participant_key:
-        drafts = [d for d in obj.drafts if d.participant_key == participant_key]
-        for d in drafts:
-            db.delete(d)
-        db.commit()
+    # Shu talabaning barcha qoralamalari (boshqa oyna/qurilmadagisi ham) o'chadi.
+    for d in [d for d in obj.drafts
+              if (participant_key and d.participant_key == participant_key) or d.student_id == student_id]:
+        db.delete(d)
+    db.commit()
 
     return {"ok": True}
+
+
+def _own_key(obj: LiveTestSession, participant_key: str, student_id: str) -> str:
+    """Brauzer kaliti boshqa talabaga tegishli bo'lsa — shu talabaning o'z kaliti.
+
+    Bitta telefondan ikki talaba yechsa brauzer kaliti bir xil bo'ladi:
+    ikkinchisi "allaqachon topshirilgan" javobini olib, yecha olmay qolardi.
+    """
+    if not participant_key or not student_id:
+        return participant_key
+    taken = any(
+        x.participant_key == participant_key and (x.student_id or "") not in ("", student_id)
+        for x in [*obj.submissions, *obj.drafts]
+    )
+    return f"s{student_id}_{participant_key}"[:64] if taken else participant_key
+
+
+def _find_draft(db: Session, session_id: int, participant_key: str, student_id: str) -> LiveTestDraft | None:
+    draft = db.execute(
+        select(LiveTestDraft).where(
+            LiveTestDraft.session_id == session_id,
+            LiveTestDraft.participant_key == participant_key,
+        )
+    ).scalar_one_or_none()
+    if draft is None and student_id:
+        # Boshqa oyna yoki qurilma: shu talabaning qoralamasi davom ettiriladi,
+        # ikkinchisi ochilmaydi (aks holda u yopilishda alohida "talaba" bo'lardi).
+        draft = db.execute(
+            select(LiveTestDraft)
+            .where(LiveTestDraft.session_id == session_id, LiveTestDraft.student_id == student_id)
+            .order_by(LiveTestDraft.updated_at.desc())
+        ).scalars().first()
+    return draft
+
+
+def _fill_draft(draft: LiveTestDraft, payload: LiveTestDraftUpsertRequest, auth: AuthContext, student_id: str) -> None:
+    incoming = list(payload.answers or [])
+    # Sahifa qayta ochilganda brauzer bo'sh javoblar yuborardi va saqlangan
+    # ish o'chib ketardi. Bo'sh ro'yxat belgilangan javoblarni o'chirmaydi.
+    if svc.answered_count(incoming) or not svc.answered_count(draft.answers):
+        draft.answers = incoming
+    draft.first_name = payload.first_name.strip() or draft.first_name or (auth.user.first_name or "").strip()
+    draft.last_name = payload.last_name.strip() or draft.last_name or (auth.user.last_name or "").strip()
+    if student_id:
+        draft.student_id = student_id
+    draft.updated_at = dt.datetime.now(dt.timezone.utc)
 
 
 @router.post("/live-tests/{session_key}/drafts/")
@@ -273,36 +342,32 @@ def upsert_draft(
     obj = _get_session(db, session_key)
     if obj is None:
         raise HTTPException(status_code=404, detail="Not found.")
-    if _closed(obj):
-        raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
-    student_id = auth.student_id
+    student_id = (auth.student_id or "").strip()
     if student_id and any(s.student_id == student_id for s in obj.submissions):
         return {"ok": True, "already_submitted": True}
 
     participant_key = payload.participant_key.strip()
     if not participant_key:
         raise HTTPException(status_code=400, detail="participant_key required.")
+    participant_key = _own_key(obj, participant_key, student_id)
     if any(s.participant_key == participant_key for s in obj.submissions):
         return {"ok": True, "already_submitted": True}
+    if _closed(obj):
+        raise HTTPException(status_code=403, detail="Test sessiyasi yakunlangan.")
 
-    draft = db.execute(
-        select(LiveTestDraft).where(
-            LiveTestDraft.session_id == obj.id,
-            LiveTestDraft.participant_key == participant_key,
-        )
-    ).scalar_one_or_none()
+    draft = _find_draft(db, obj.id, participant_key, student_id)
     if draft is None:
         draft = LiveTestDraft(
             session_id=obj.id,
             participant_key=participant_key,
+            first_name="",
+            last_name="",
+            answers=[],
             updated_at=dt.datetime.now(dt.timezone.utc),
         )
         db.add(draft)
-    draft.first_name = payload.first_name.strip()
-    draft.last_name = payload.last_name.strip()
-    draft.answers = list(payload.answers or [])
-    draft.updated_at = dt.datetime.now(dt.timezone.utc)
+    _fill_draft(draft, payload, auth, student_id)
     try:
         db.commit()
     except IntegrityError:
@@ -310,20 +375,14 @@ def upsert_draft(
         # ham "qoralama yo'q" deb ko'rib, ikkitasini qo'shardi — ikkinchisi
         # 500 bilan yiqilardi (2026-10-07). Endi borini yangilaymiz.
         db.rollback()
-        existing = db.execute(
-            select(LiveTestDraft).where(
-                LiveTestDraft.session_id == obj.id,
-                LiveTestDraft.participant_key == participant_key,
-            )
-        ).scalar_one_or_none()
-        if existing is None:
+        draft = _find_draft(db, obj.id, participant_key, student_id)
+        if draft is None:
             raise
-        existing.first_name = payload.first_name.strip()
-        existing.last_name = payload.last_name.strip()
-        existing.answers = list(payload.answers or [])
-        existing.updated_at = dt.datetime.now(dt.timezone.utc)
+        _fill_draft(draft, payload, auth, student_id)
         db.commit()
-    return {"ok": True}
+    # Saqlangan javoblar qaytadi: sahifa qayta ochilganda yoki boshqa
+    # qurilmada talaba to'xtagan joyidan davom etadi.
+    return {"ok": True, "answers": list(draft.answers or [])}
 
 
 @router.post("/live-tests/{session_key}/finalize/")
