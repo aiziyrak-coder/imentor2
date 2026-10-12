@@ -305,6 +305,9 @@ export type FilterOptions = {
   groups: string[];
   academic_years: string[];
   bands: Array<{ key: string; label: string }>;
+  /** Kirgan odamning doirasi. `groups` to'ldirilgan bo'lsa — guruh bilan
+   *  cheklangan dekan: kafedra kesimida ishlaydigan bo'limlar unga 403. */
+  scope?: { kind?: string; label?: string; departments?: string[]; groups?: string[] };
 };
 
 export type TeacherDetail = TeacherRow & {
@@ -984,6 +987,10 @@ export type ControlReport = {
     monitor_used: number;
     monitor_percent: number;
     band: 'good' | 'warn' | 'bad' | 'none';
+    /** Katta foiz: iMentor ishlatilgan darslar (to'liq + yetarsiz). */
+    monitor_touched?: number;
+    monitor_touched_percent?: number;
+    touch_band?: 'good' | 'warn' | 'bad' | 'none';
     watched_teachers: number;
     idle_teachers: number;
     other_lessons: number;

@@ -13,7 +13,7 @@ def lesson(pk, *, dep="Fiziologiya", subject="Fiziologiya"):
     return SimpleNamespace(
         id=pk, hemis_id=str(pk), lesson_date=DAY, para="1-para", start_time="08:30", end_time="09:50",
         teacher_username="u1", department_name=dep, subject_name=subject, group_name="DI-101",
-        lesson_type="Ma'ruza", auditorium_name="204", monitor_id="",
+        lesson_type="Amaliy", auditorium_name="204", monitor_id="",
     )
 
 

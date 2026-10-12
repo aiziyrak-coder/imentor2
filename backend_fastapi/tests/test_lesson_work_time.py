@@ -24,7 +24,7 @@ def lesson(pk, *, user="u1", group="DI-101", monitor="MON-1", room="204", start=
     return SimpleNamespace(
         id=pk, hemis_id=str(pk), lesson_date=DAY, weekday="Chorshanba", para="4-para",
         start_time=start, end_time=end, employee_id="1", teacher_name="A", teacher_username=user,
-        department_name="Fiziologiya", subject_name="Fiziologiya", group_name=group, lesson_type="Ma'ruza",
+        department_name="Fiziologiya", subject_name="Fiziologiya", group_name=group, lesson_type="Amaliy",
         auditorium_name=room, building_name="Bino", monitor_id=monitor,
     )
 

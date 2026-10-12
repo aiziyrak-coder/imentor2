@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import ControlReport from './ControlReport';
 import MonitorDay from './MonitorDay';
+import MonitorReport from './MonitorReport';
+import LessonReport from './LessonReport';
+import RectorIntelligence from './RectorIntelligence';
 import { fetchPlatforms, type PlatformsReport, type ReportFilters } from './rectorApi';
 
 /**
@@ -10,20 +13,41 @@ import { fetchPlatforms, type PlatformsReport, type ReportFilters } from './rect
  * iMentor uchun bu to'liq nazorat hisoboti; qolgan tizimlar uchun ularning
  * o'z ko'rsatkichlari. Hamma tizim bitta sahifaga jamlanmaydi (2026-10-08).
  */
+/** iMentor sahifasining bo'limlari.
+ *
+ * `0f0f6a8` da tab paneli olib tashlanganda monitor xonalari, dars jadvali
+ * va AI tahlili sahifalari kodda qolgan, lekin HECH KIM ko'rmaydigan bo'lib
+ * qolgandi. Bosh sahifa oldingidek faqat platforma kartalari — bo'limlar
+ * esa tanlangan platformaning O'Z sahifasi ichida (2026-10-11).
+ */
+const VIEWS = [
+  ['umumiy', 'Umumiy hisobot', false],
+  ['kun', 'Kun bo‘yicha (har dars alohida)', false],
+  ['xonalar', 'Monitor xonalari', true],
+  ['jadval', 'Dars jadvali', false],
+  ['tahlil', 'AI tahlil', true],
+] as const;
+
+type ViewKey = (typeof VIEWS)[number][0];
+
 export default function PlatformPage({
   platform,
   filters,
+  wide = true,
   onUnauthorized,
   onBack,
 }: {
   platform: string;
   filters: ReportFilters;
+  /** Butun institut kesimida ko'ra oladimi. Guruh bilan cheklangan dekan
+   *  uchun kafedra kesimidagi bo'limlar 403 — tugmasi ko'rsatilmaydi. */
+  wide?: boolean;
   onUnauthorized: () => void;
   onBack: () => void;
 }) {
   const [data, setData] = useState<PlatformsReport | null>(null);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'umumiy' | 'kun'>('umumiy');
+  const [view, setView] = useState<ViewKey>('umumiy');
 
   useEffect(() => {
     let alive = true;
@@ -76,26 +100,24 @@ export default function PlatformPage({
       {platform === 'imentor' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
-            {([['umumiy', 'Umumiy hisobot'], ['kun', 'Kun bo‘yicha (har dars alohida)']] as const).map(
-              ([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setView(key)}
-                  className={`rounded-lg px-3 py-1.5 text-[12.5px] font-semibold ${
-                    view === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.07]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ),
-            )}
+            {VIEWS.filter(([, , wideOnly]) => wide || !wideOnly).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setView(key)}
+                className={`rounded-lg px-3 py-1.5 text-[12.5px] font-semibold ${
+                  view === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.07]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          {view === 'umumiy' ? (
-            <ControlReport filters={filters} onUnauthorized={onUnauthorized} />
-          ) : (
-            <MonitorDay day={filters.to} onUnauthorized={onUnauthorized} />
-          )}
+          {view === 'umumiy' && <ControlReport filters={filters} onUnauthorized={onUnauthorized} />}
+          {view === 'kun' && <MonitorDay day={filters.to} onUnauthorized={onUnauthorized} />}
+          {view === 'xonalar' && <MonitorReport filters={filters} onUnauthorized={onUnauthorized} />}
+          {view === 'jadval' && <LessonReport filters={filters} onUnauthorized={onUnauthorized} />}
+          {view === 'tahlil' && <RectorIntelligence filters={filters} onUnauthorized={onUnauthorized} />}
         </div>
       ) : error ? (
         <p className="rounded-2xl bg-rose-50 px-4 py-3 text-[13px] text-rose-700 ring-1 ring-rose-200">

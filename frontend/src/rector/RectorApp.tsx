@@ -138,6 +138,10 @@ export default function RectorApp() {
   const [auto, setAuto] = useState(true);
   const [syncedAt, setSyncedAt] = useState<Date>(() => new Date());
   const [departments, setDepartments] = useState<string[]>([]);
+  // Guruh bilan cheklangan dekan (xalqaro fakultet): kafedra kesimida
+  // ishlaydigan bo'limlar unga 403 qaytaradi, shuning uchun tugmasi ham
+  // ko'rsatilmaydi (2026-10-11).
+  const [wide, setWide] = useState(true);
   // Bosh sahifada platforma tanlanadi; `null` — tanlanmagan.
   const [platform, setPlatform] = useState<string | null>(null);
 
@@ -145,7 +149,11 @@ export default function RectorApp() {
     if (!signedIn) return;
     let alive = true;
     fetchFilters()
-      .then((f) => alive && setDepartments(f.departments || []))
+      .then((f) => {
+        if (!alive) return;
+        setDepartments(f.departments || []);
+        setWide((f.scope?.groups || []).length === 0);
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -337,6 +345,7 @@ export default function RectorApp() {
               <PlatformPage
                 platform={platform}
                 filters={filters}
+                wide={wide}
                 onUnauthorized={onUnauthorized}
                 onBack={() => setPlatform(null)}
               />
