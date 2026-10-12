@@ -35,6 +35,9 @@ export type LiveTestSubmissionRow = {
   lastName: string;
   answers: number[];
   submittedAt: number;
+  /** Server hisoblagan ball — sessiyaning o'z kaliti bo'yicha (eski serverda yo'q). */
+  correct?: number;
+  total?: number;
 };
 
 export type LiveTestFinalizeResult = {
@@ -118,6 +121,8 @@ function mapSubmissionRows(
     first_name: string;
     last_name: string;
     answers: number[];
+    correct?: number;
+    total?: number;
     submitted_at: string;
   }>
 ): LiveTestSubmissionRow[] {
@@ -126,6 +131,7 @@ function mapSubmissionRows(
     lastName: r.last_name,
     answers: Array.isArray(r.answers) ? r.answers : [],
     submittedAt: Date.parse(r.submitted_at),
+    ...(typeof r.correct === 'number' && typeof r.total === 'number' ? { correct: r.correct, total: r.total } : {}),
   }));
 }
 

@@ -73,6 +73,7 @@ import {
   countAnswered,
   createLiveTestSessionOnServer,
   type StudentTestQuestion,
+  type LiveTestSubmissionRow,
 } from '../utils/liveTestApi';
 import { postActivityEvents } from '../utils/analyticsApi';
 import {
@@ -132,6 +133,10 @@ interface TestSubmissionDoc {
   lastName: string;
   answers: number[];
   submittedAt: number;
+  /** Server hisoblagan ball. Bo'lsa — jadval SHUNI ko'rsatadi: brauzerdagi
+   *  test nusxasi sessiyadagidan boshqa versiya bo'lishi mumkin. */
+  correct?: number;
+  total?: number;
 }
 
 const LOCAL_TEST_SESSION_PREFIX = LIVE_SESSION_PREFIX;
@@ -411,13 +416,15 @@ export default function TestQuestions() {
   sessionClosedRef.current = sessionClosed;
 
   const mapServerSubmissions = React.useCallback(
-    (rows: Array<{ firstName: string; lastName: string; answers: number[]; submittedAt: number }>) =>
+    (rows: LiveTestSubmissionRow[]) =>
       rows.map((r) => ({
         sessionId: teacherSessionId,
         firstName: r.firstName,
         lastName: r.lastName,
         answers: r.answers,
         submittedAt: r.submittedAt,
+        correct: r.correct,
+        total: r.total,
       })),
     [teacherSessionId]
   );
@@ -713,15 +720,7 @@ export default function TestQuestions() {
         // Server javob berdi — u YAGONA haqiqat manbai. Ilgari ro'yxat bo'sh
         // bo'lsa localStorage'ga tushilardi va boshqa sessiyaning eski
         // yozuvlari "topshirganlar" bo'lib ko'rinardi.
-        setSubmissions(
-          remote.map((r) => ({
-            sessionId: teacherSessionId,
-            firstName: r.firstName,
-            lastName: r.lastName,
-            answers: r.answers,
-            submittedAt: r.submittedAt,
-          })),
-        );
+        setSubmissions(mapServerSubmissions(remote));
       } catch {
         // Faqat server javob bermaganda — offline zaxira.
         if (!cancelled) setSubmissions(loadLocalNow());
@@ -1044,6 +1043,7 @@ export default function TestQuestions() {
           lastName: s.lastName,
           answers: s.answers,
           submittedAt: s.submittedAt,
+          correct: s.correct,
         })),
         displayedTest && testStatus === 'ready' ? viewLang : language,
       );
@@ -1554,8 +1554,8 @@ export default function TestQuestions() {
                     </thead>
                     <tbody>
                       {submissions.map((s, idx) => {
-                        const score = calculateScore(s.answers, testSession.questions);
-                        const total = testSession.questions.length;
+                        const score = s.correct ?? calculateScore(s.answers, testSession.questions);
+                        const total = s.total ?? testSession.questions.length;
                         const grade = scoreToGrade(score, total);
                         return (
                         <tr key={idx} className="border-b border-slate-900/[0.05] last:border-b-0">

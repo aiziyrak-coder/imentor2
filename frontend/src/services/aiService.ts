@@ -972,25 +972,72 @@ export function shuffleQuestionOptions(input: {
   };
 }
 
+/**
+ * Model qaytargan to'g'ri javob raqamini o'qiydi. Model ba'zan raqamni matn
+ * ("2"), harf ("C", "C)") yoki variant matnining o'zi bilan beradi. Ilgari
+ * bularning hammasi jimgina 0 ga (A variantga) aylanardi va talabalar to'g'ri
+ * javob uchun ham "xato" olardi. Aniqlab bo'lmasa — null (savol tashlanadi).
+ */
+export function parseCorrectOptionIndex(raw: unknown, options: string[], fallbackText?: unknown): number | null {
+  const n = options.length;
+  if (typeof raw === 'number' && Number.isInteger(raw)) return raw >= 0 && raw < n ? raw : null;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (/^\d+$/.test(t)) {
+      const v = Number(t);
+      return v >= 0 && v < n ? v : null;
+    }
+    const letter = /^([A-Ea-e])(?:[).:\s]|$)/.exec(t);
+    if (letter) {
+      const v = letter[1].toUpperCase().charCodeAt(0) - 65;
+      return v < n ? v : null;
+    }
+  }
+  const text = typeof fallbackText === 'string' && fallbackText.trim() ? fallbackText : typeof raw === 'string' ? raw : '';
+  const want = text.trim().toLowerCase();
+  if (want) {
+    const hit = options.findIndex((o) => (o || '').trim().toLowerCase() === want);
+    if (hit >= 0) return hit;
+  }
+  return null;
+}
+
 function normalizeTestSession(
   topic: string,
   data: TestSession,
   requestedCount: number,
   bookReferences: MedicalReference[] = [],
+  /**
+   * Variantlarni aralashtirish FAQAT yangi generatsiyada. Tayyor testni qayta
+   * normallashtirish (manba qo'shish, yakuniy tozalash) tartibni O'ZGARTIRMAYDI:
+   * ilgari fondagi kitob manbalari bosqichi variantlarni qayta aralashtirardi —
+   * talabalar bir tartibni ko'rib javob berar, kalit esa boshqa tartibda bo'lardi.
+   */
+  shuffle = false,
 ): TestSession {
   const questions = (data.questions || [])
-    .slice(0, requestedCount)
-    .map((q) => {
-      const options = (q.options || []).slice(0, 5);
-      while (options.length < 5) options.push(`Variant ${options.length + 1}`);
-      const correctOptionIndex =
-        typeof q.correctOptionIndex === 'number' && q.correctOptionIndex >= 0 && q.correctOptionIndex < 5
-          ? q.correctOptionIndex
-          : 0;
-      const optionExplanations = (q.optionExplanations || [])
+    .flatMap((q) => {
+      const raw = q as TestQuestion & { answer?: unknown; correctAnswer?: unknown };
+      const options = (q.options || [])
         .slice(0, 5)
+        .map((o, oi) => stripOptionLetterPrefix(String(o ?? '').trim(), oi));
+      const correctOptionIndex = parseCorrectOptionIndex(
+        raw.correctOptionIndex,
+        options,
+        raw.correctAnswer ?? raw.answer,
+      );
+      // Kalitsiz, matnsiz yoki variantlari yetmaydigan savol testga kirmaydi:
+      // ilgari bo'sh variantlar "Variant 4" bilan to'ldirilib, kalit A ga qo'yilardi.
+      if (correctOptionIndex === null || !(q.question || '').trim()) return [];
+      if (options.length < 4 || options.some((o) => !o)) return [];
+      return [{ q, options, correctOptionIndex }];
+    })
+    .slice(0, requestedCount)
+    .map(({ q, options, correctOptionIndex }) => {
+      const optionExplanations = (q.optionExplanations || [])
+        .slice(0, options.length)
         .map((e) => stripUnfilledSourceTemplate(e || ''));
-      while (optionExplanations.length < 5) optionExplanations.push('');
+      while (optionExplanations.length < options.length) optionExplanations.push('');
       const hasOptionExplanations = optionExplanations.some((e) => e.length > 0);
       // Avval savolda bor manba (per-question), keyin umumiy bookReferences.
       const existingRefs = Array.isArray(q.references) ? q.references.filter((r) => r && (r.title || r.url)) : [];
@@ -999,11 +1046,12 @@ function normalizeTestSession(
       // 10 savoldan 10 tasida correctOptionIndex=0). Bunday testda talaba
       // hammasiga A belgilab 100% oladi. Variantlarni aralashtirib, to'g'ri
       // javob o'rnini shu bilan birga qayta hisoblaymiz.
-      const shuffled = shuffleQuestionOptions({
-        options: options.map((o, oi) => stripOptionLetterPrefix((o || '').trim(), oi)),
+      const base = {
+        options,
         correctOptionIndex,
         optionExplanations: hasOptionExplanations ? optionExplanations : undefined,
-      });
+      };
+      const shuffled = shuffle ? shuffleQuestionOptions(base) : base;
       return {
         question: (q.question || '').trim(),
         options: shuffled.options,
@@ -1948,7 +1996,7 @@ export const aiService = {
         },
         parse: (t) => parseJSONSafe<TestSession>(t),
       });
-      return { ...normalizeTestSession(topic, { ...parsed, difficulty, domain }, requestedCount, bookReferences) };
+      return { ...normalizeTestSession(topic, { ...parsed, difficulty, domain }, requestedCount, bookReferences, true) };
     };
 
     /** Savol matnlari so'ralgan tilda ekanini tekshiradi. */
@@ -1960,6 +2008,38 @@ export const aiService = {
         d,
         (s.questions || []).flatMap((q) => [q.question, q.explanation, ...(q.options || [])]),
       );
+
+    /**
+     * Test kamida `safeCount` (odatda 10) savoldan iborat bo'lishi kerak.
+     * Model ba'zan kamroq qaytaradi, yaroqsiz savollar esa tashlanadi —
+     * yetishmagani alohida so'rov bilan to'ldiriladi (mavjudlari takrorlanmaydi).
+     */
+    const topUp = async (s: TestSession): Promise<TestSession> => {
+      let out = s;
+      for (let attempt = 0; attempt < 2 && (out.questions?.length || 0) < safeCount; attempt += 1) {
+        const have = out.questions || [];
+        const missing = safeCount - have.length;
+        const existing = have.map((q, i) => `${i + 1}. ${q.question}`).join('\n');
+        try {
+          const more = await generate(
+            missing + 2,
+            existing
+              ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n`
+              : '',
+          );
+          const seen = new Set(have.map((q) => q.question.trim().toLowerCase()));
+          const fresh = (more.questions || []).filter((q) => !seen.has(q.question.trim().toLowerCase()));
+          out = {
+            ...out,
+            questions: [...have, ...fresh].slice(0, safeCount),
+            references: out.references?.length ? out.references : more.references,
+          };
+        } catch (err) {
+          console.warn('Yetishmagan test savollarini to\'ldirib bo\'lmadi:', err);
+        }
+      }
+      return out;
+    };
 
     try {
       let data = await generate(safeCount);
@@ -2013,10 +2093,11 @@ export const aiService = {
           console.warn('Test mavzu bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
         }
       }
+      data = await topUp(data);
       return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);
-      const data = await generate(Math.min(safeCount, 10));
+      const data = await topUp(await generate(Math.min(safeCount, 10)));
       return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
     }
   },

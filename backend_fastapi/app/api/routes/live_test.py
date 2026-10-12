@@ -244,7 +244,9 @@ def submit_answer(
         student_id=student_id,
         first_name=first_name,
         last_name=last_name,
-        answers=list(payload.answers),
+        # Javoblar soni savollar soniga keltiriladi: ortiqchasi kesiladi,
+        # yetishmagani va yaroqsizi -1 (javobsiz) bo'ladi.
+        answers=svc.normalize_answers(list(payload.answers), len(svc.questions_of(obj))),
         submitted_at=dt.datetime.now(dt.timezone.utc),
     )
     db.add(sub)
