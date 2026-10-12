@@ -48,6 +48,11 @@ x-backend-env: &backend-env
   ONLINE_TEST_API_FALLBACK_URL: ${ONLINE_TEST_API_FALLBACK_URL:-https://online-imtixon.uz}
   ONLINE_TEST_CONSUMER_API_KEY: ${ONLINE_TEST_CONSUMER_API_KEY:-}
   ONLINE_TEST_HOST_HEADER: ${ONLINE_TEST_HOST_HEADER:-}
+  # cam.fermi.uz: xodimni JSHSHIR bilan tasdiqlash va talabani jonli qidirish.
+  CAM_VERIFY_URL: ${CAM_VERIFY_URL:-}
+  CAM_VERIFY_API_KEY: ${CAM_VERIFY_API_KEY:-}
+  CAM_STUDENT_API_URL: ${CAM_STUDENT_API_URL:-}
+  CAM_STUDENT_API_KEY: ${CAM_STUDENT_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   # HEMIS — dars jadvalining haqiqiy manbasi, faqat o'qiladi.
   HEMIS_API_URL: ${HEMIS_API_URL:-}
