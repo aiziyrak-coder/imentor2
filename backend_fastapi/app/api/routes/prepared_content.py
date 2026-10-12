@@ -407,10 +407,11 @@ def translate_prepared_content(
         raise HTTPException(status_code=404, detail="Topilmadi.")
     if item.kind not in TRANSLATABLE_KINDS:
         raise HTTPException(status_code=400, detail="This material type cannot be translated.")
-    translated = translate_saved_content(db, item, lang)
-    if not _can_view_item(translated, db, auth):
-        raise HTTPException(status_code=404, detail="Topilmadi.")
-    return _out(translated)
+    # Ruxsat yuqorida, AYNAN shu yozuv uchun tekshirilgan. Ikkinchi marta
+    # tekshirib bo'lmaydi: tarjima paytida bazaga ulanish yopiladi
+    # (`db.close()`), `auth.user` sessiyadan uziladi va undan o'qish
+    # DetachedInstanceError -> 500 berardi (2026-10-12 jurnalida).
+    return _out(translate_saved_content(db, item, lang))
 
 
 @router.patch("/prepared-content/{pk}/", response_model=PreparedContentOut)
