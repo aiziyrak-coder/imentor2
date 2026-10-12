@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, get_current_auth, require_roles
 from app.core.db import get_db
+from app.models.analytics import UserActivityEvent
 from app.models.live_test import LiveTestSession
 from app.schemas.analytics import ActivityEventsBatchIn, LiveTestEventsBatchIn
 from app.services.analytics_service import attach_live_test_events, ip_hash, record_activity_event
@@ -22,6 +25,23 @@ AUTH_ROLES = ("admin", "klinika_admin", "hodim", "student")
 #: Oshgani rad etilmaydi — qirqiladi, shunda qolgan vaqt saqlanib qoladi.
 MAX_EVENT_SEC = 900
 
+#: Navbatdan kechikib kelgan qayd ASL vaqtiga qaytariladi. Mijoz soatiga
+#: ishonilmaydi (sinf kompyuterlarida soat ko'pincha noto'g'ri): mijoz
+#: qayd paytini (`client_ts_ms`) ham, yuborish paytini (`sent_at_ms`) ham
+#: O'Z soati bilan beradi — ularning farqi kechikish, u server soatidan
+#: ayiriladi. Shunda kompyuter soati qancha xato bo'lmasin, natija to'g'ri.
+MAX_DELAY = dt.timedelta(hours=24)
+
+
+def _occurred_at(client_ts_ms: int | None, sent_at_ms: int | None, now: dt.datetime) -> dt.datetime:
+    if not client_ts_ms or not sent_at_ms:
+        return now
+    delay = dt.timedelta(milliseconds=sent_at_ms - client_ts_ms)
+    # Bir necha soniyalik kechikish — oddiy yuborish, vaqt o'zgartirilmaydi.
+    if delay < dt.timedelta(seconds=30) or delay > MAX_DELAY:
+        return now
+    return now - delay
+
 
 @router.post("/analytics/events/")
 def ingest_activity_events(
@@ -37,10 +57,25 @@ def ingest_activity_events(
 
     owner = auth.user.username
     ip = request.client.host if request.client else ""
+    now = dt.datetime.now(dt.timezone.utc)
     count = 0
     for ev in payload.events[:50]:
         et = (ev.event_type or "").strip()
         if et not in ("heartbeat", "page_view", "live_test_opened", "content_view", "logout"):
+            continue
+        when = _occurred_at(ev.client_ts_ms, payload.sent_at_ms, now)
+        # Navbatdan qayta yuborilgan (javobi yo'lda yo'qolgan) qayd ikki marta
+        # sanalmasin. Mijoz har qaydga noyob `meta.qid` beradi; qayta yuborilgani
+        # doim kechikkan bo'ladi, shuning uchun faqat shundaylari tekshiriladi.
+        qid = str((ev.meta or {}).get("qid") or "")[:64]
+        if qid and when != now and db.execute(
+            select(UserActivityEvent.id).where(
+                UserActivityEvent.owner_key == owner,
+                UserActivityEvent.event_type == et,
+                UserActivityEvent.occurred_at >= now - MAX_DELAY - dt.timedelta(minutes=5),
+                UserActivityEvent.meta["qid"].astext == qid,
+            ).limit(1)
+        ).first():
             continue
         meta = dict(ev.meta or {})
         if payload.page:
@@ -53,6 +88,7 @@ def ingest_activity_events(
             event_type=et,
             duration_sec=min(max(0, ev.duration_sec), MAX_EVENT_SEC),
             meta=meta,
+            occurred_at=when,
         )
         count += 1
     db.commit()
