@@ -23,74 +23,82 @@ class DeanAccess:
         return (os.environ.get(f"DEAN_PASSWORD_{self.login.upper()}") or "").strip()
 
 
+#: Fakultet va kafedralar — institutning rasmiy ro'yxati bo'yicha
+#: ("Farg'ona jamoat salomatligi tibbiyot institutida faoliyat olib
+#: borayotgan fakultetlar va kafedralar nomi", 2026-10-12 da berilgan).
+#:
+#: Ilgari bu yerda kafedralar aralashib ketgandi: Biotibbiyot va tillar
+#: stomatologiya dekanida, Fiziologiya/Gistologiya/Tibbiy kimyo pediatriya
+#: dekanida turardi, Xalq tabobati va Urologiya kabi kafedralar esa hech
+#: kimda yo'q edi. Endi har bir dekan FAQAT o'z fakultetining kafedralarini
+#: ko'radi.
+#:
+#: Nomlar HEMIS va katalogdagi yozilishiga `match_departments` orqali
+#: moslashtiriladi — shuning uchun bu yerda rasmiy ro'yxatdagi yozuv turadi.
 DEANS: dict[str, DeanAccess] = {
-    "dekan_davolash": DeanAccess(
-        login="dekan_davolash",
-        label="Davolash ishi dekani",
-        # Fakultet 2026-10-05 da aniqlagan ro'yxat. Yozilishi muhim emas —
-        # `match_departments` nomlarni moslashtiradi (pastga qarang).
-        departments=(
-            "Akusherlik va ginekologiya",
-            "Fakultativ va gospital jarrohlik",
-            "Gospital terapiya",
-            "Ichki kasalliklar propedevtikasi",
-            "Normal anatomiya",
-            "Terapiya UASH",
-            "Travmatologiya",
-            "Umumiy xirurgiya",
-        ),
-    ),
     "dekan_tpi": DeanAccess(
         login="dekan_tpi",
-        label="Tibbiy profilaktika ishi dekani",
+        label="Tibbiy profilaktika va jamoat salomatligi fakulteti dekani",
         departments=(
             "Kommunal va mehnat gigiyenasi",
-            "Ovqatlanish, bolalar va o�smirlar gigiyenasi",
-            "Ovqatlanish, Bolalar va o 'smirlar gigienasi",
+            "Ovqatlanish, bolalar va o‘smirlar gigienasi",
+            "Preventiv tibbiyot asoslari, jamoat salomatligi, jismoniy tarbiya va sport",
             "Epidemiologiya va yuqumli kasalliklar, hamshiralik ishi",
-            "Epidemiologiya va yuqumli kasalliklar hamshiralik ishi",
-            "Mikrobiologiya,virusologiya,immunologiya",
-            "Preventiv",
+            "Mikrobiologiya, virusologiya va immunologiya",
+            "Xalq tabobati va farmakologiya",
+            "M.Qoraboyev nomidagi Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari",
+            # HEMIS'da kafedra ism-sharifsiz yozilgan (1336 dars) — rasmiy
+            # nomdagi "M.Qoraboyev" so'zi bo'lmagani uchun aynan moslik
+            # topilmaydi, shuning uchun ma'lumotdagi yozuv ham turadi.
+            "Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari",
+        ),
+    ),
+    "dekan_davolash": DeanAccess(
+        login="dekan_davolash",
+        label="Davolash fakulteti dekani",
+        departments=(
+            "Ichki kasalliklar propedevtikasi",
+            "Fakultativ terapiya (UASH)",
+            "Travmatologiya va ortopediya",
+            "Yu.Nishanov nomidagi Normal anatomiya",
+            # HEMIS'da familiya boshqacha yozilgan: "Nishonov" (1810 dars).
+            "Yu. Nishonov nomidagi Normal anatomiya",
+            "Gospital terapiya (laboratoriya)",
+            "Umumiy jarrohlik",
+            "Fakultet va gospital jarrohlik",
+            "Akusherlik va ginekologiya",
         ),
     ),
     "dekan_pediatriya": DeanAccess(
         login="dekan_pediatriya",
-        label="Pediatriya dekani",
+        label="Pediatriya fakulteti dekani",
         departments=(
+            "Urologiya va onkologiya",
+            "Nevrologiya va psixiatriya",
             "Pediatriya",
-            "Pediatriya 1",
-            "Pediatriya 2",
-            "Fiziologiya",
-            "Gistologiya va biologiya",
-            "GISTOLOGIYA BIOLOGIYA",
-            "Tibbiy va biologik kimyo",
+            "Anesteziologiya va reanimotologiya, Pediatriya 2",
+            "Stomatologiya va otoloringologiya",
+            "Dermatovenerologiya va allergologiya",
+            "Endokrinologiya, gemotologiya",
         ),
     ),
-    "dekan_stom": DeanAccess(
-        login="dekan_stom",
-        label="Stomatologiya dekani",
+    "dekan_xalqaro": DeanAccess(
+        login="dekan_xalqaro",
+        label="Xalqaro fakulteti dekani",
+        # Rasmiy ro'yxatda bu fakultetga yetti kafedra biriktirilgan.
+        # Ilgari bu dekan GURUH ("MD-") bilan cheklangandi, chunki o'shanda
+        # uning kafedrasi yo'q deb hisoblangandi; ro'yxat buni rad etdi.
         departments=(
-            "Stomatologiya va otorinolaringologiya",
-            "Stomatologiya va otorinoloringologiya",
-            "Biotibbiyot muhandisligi, biofizika va axborot texnologiyalari",
+            "O‘zbek va xorijiy tillar",
+            "Lotin tili, pedagogika va psixologiya",
+            "Tibbiy va biologik kimyo",
             "Ijtimoiy fanlar",
-            "Lotin tili",
-            "Lotin tilli, pedagogika va psixalogiya",
-            "O�zbek va xorijiy tillar",
-            "O'zbek va xorijiy tillar kafedrasi",
+            "Gistologiya va biologiya",
+            "Fiziologiya",
+            "Patologik fiziologiya va patologik anatomiya",
         ),
     ),
 }
-
-
-#: Xalqaro fakultet: guruhlari "MD-" bilan boshlanadi (bazada tekshirilgan,
-#: 2026-10-09: 119 guruh, 27 kafedra dars beradi).
-DEANS["dekan_xalqaro"] = DeanAccess(
-    login="dekan_xalqaro",
-    label="Xalqaro fakultet dekani",
-    departments=(),
-    groups=("MD-",),
-)
 
 
 def authenticate_dean(login: str, password: str) -> DeanAccess | None:

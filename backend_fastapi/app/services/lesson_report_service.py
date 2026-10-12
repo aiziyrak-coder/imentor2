@@ -188,10 +188,43 @@ def is_over(lesson: HemisLesson, now: dt.datetime) -> bool:
     return _window(lesson)[1] - AFTER <= now
 
 
+#: Hisobotda SANALMAYDIGAN dars turlari. Ma'ruza va laboratoriya iMentor
+#: orqali o'tilmaydi (rektor, 2026-10-12), shuning uchun ular foizni
+#: pasaytirib, o'qituvchini bekordan ayblardi. Dars jadvali bo'limida
+#: ular o'z o'rnida turadi — chiqariladigani faqat BAHO.
+#:
+#: `IMENTOR_SKIP_LESSON_TYPES` bilan o'zgartiriladi (vergul bilan).
+SKIP_LESSON_TYPES = tuple(
+    x.strip() for x in (os.environ.get("IMENTOR_SKIP_LESSON_TYPES")
+                        or "ma'ruza, laboratoriya").split(",") if x.strip()
+)
+
+
+def _type_key(value: str) -> str:
+    """Dars turi kaliti: kichik harf, apostrofsiz."""
+    text_ = str(value or "").lower()
+    for ch in "ʻ‘’`'":
+        text_ = text_.replace(ch, "")
+    return " ".join(text_.split())
+
+
+#: Tayyorlangan kalitlar — har darsda qayta hisoblanmasin.
+_SKIP_KEYS = frozenset(_type_key(x) for x in SKIP_LESSON_TYPES)
+
+
+def is_counted(lesson: HemisLesson) -> bool:
+    """Bu dars hisobotda baholanadimi (ma'ruza va laboratoriya — yo'q)."""
+    return _type_key(getattr(lesson, "lesson_type", "")) not in _SKIP_KEYS
+
+
 def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
              teacher: str = "", groups: tuple[str, ...] = (),
-             pending: bool = False) -> list[HemisLesson]:
-    """Davrdagi darslar. `pending=False` — faqat TUGAGANLARI (baholanadiganlari)."""
+             pending: bool = False, all_types: bool = False) -> list[HemisLesson]:
+    """Davrdagi darslar. `pending=False` — faqat TUGAGANLARI (baholanadiganlari).
+
+    `all_types=True` — ma'ruza va laboratoriya ham kerak bo'lgan joy uchun
+    (dars jadvali bo'limi): u hisobot emas, jadvalning o'zini ko'rsatadi.
+    """
     q = select(HemisLesson).where(HemisLesson.lesson_date >= start_day, HemisLesson.lesson_date <= end_day)
     if teacher:
         q = q.where(HemisLesson.teacher_username == teacher)
@@ -203,6 +236,8 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     if groups:
         # Xalqaro fakultet dekani: faqat o'z guruhlariga o'tilgan darslar.
         rows = [r for r in rows if in_groups(r.group_name, groups)]
+    if not all_types:
+        rows = [r for r in rows if is_counted(r)]
     # Guruh qatorlari bitta darsga yig'iladi — hisobot darslarni sanaydi.
     rows = merge_group_rows(rows)
     if department:
@@ -523,8 +558,10 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
                 department: str = "", only_missed: bool = False, limit: int = 2000) -> list[dict]:
     """Darslar ro'yxati — kim, qachon, qaysi fan, ishlatildimi."""
     # Tugamagan darslar ham ko'rsatiladi, lekin belgi bilan — ular hali baholanmaydi.
+    # Ma'ruza va laboratoriya ham KO'RINADI (jadvalning o'zi shunday), lekin
+    # `counted: false` bilan: ular foizga kirmaydi (2026-10-12).
     lessons = _lessons(db, start_day, end_day, department=department, teacher=teacher, groups=groups,
-                       pending=True)
+                       pending=True, all_types=True)
     used = _used_map(db, lessons)
     now = current_time()
     lessons.sort(key=lambda x: (x.lesson_date, x.para, x.teacher_name))
@@ -532,7 +569,8 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
     for lesson in lessons:
         hit = used.get(lesson.id)
         waiting = not is_over(lesson, now)
-        if only_missed and (hit or waiting):
+        counted = is_counted(lesson)
+        if only_missed and (hit or waiting or not counted):
             continue
         out.append({
             "id": lesson.id,
@@ -551,6 +589,9 @@ def lesson_rows(db: Session, start_day: dt.date, end_day: dt.date, *, teacher: s
             "building": lesson.building_name,
             "monitor_id": lesson.monitor_id,
             "used": bool(hit),
+            # Ma'ruza/laboratoriya hisobotda baholanmaydi — sahifa shuni
+            # belgilab qo'yadi, aks holda "o'tilmagan" bo'lib ko'rinardi.
+            "counted": counted,
             # Dars hali tugamagan — "qayd yo'q" deb hukm qilinmaydi.
             "pending": waiting and not hit,
             "students": hit[1] if hit else 0,

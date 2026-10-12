@@ -217,7 +217,18 @@ function MetricDialog({
       >
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
           <div className="min-w-0">
-            <p className="text-[15px] font-bold text-slate-900">{data?.title || 'Yuklanmoqda…'}</p>
+            <p className="text-[15px] font-bold text-slate-900">
+              {data?.title || 'Yuklanmoqda…'}
+              {/* Sarlavhada SON turishi shart: sahifadagi raqam dars soni,
+                  ro'yxat esa o'qituvchilar bo'lishi mumkin — ikkisi mos
+                  kelmasa rektor ziddiyat deb o'ylaydi (2026-10-11). */}
+              {data && typeof data.total === 'number' && (
+                <span className="ml-1.5 font-semibold tabular-nums text-slate-500">
+                  — {data.total} ta
+                  {data.total > data.rows.length ? ` (${data.rows.length} tasi ko‘rsatildi)` : ''}
+                </span>
+              )}
+            </p>
             <p className="text-[11.5px] text-slate-500">
               {filters.from} — {filters.to}
               {filters.department ? ` · ${filters.department}` : ''}
@@ -281,7 +292,7 @@ function MetricDialog({
                 <>
                   <p className="px-1 text-[12.5px] text-slate-500">
                     {data.total <= data.shown
-                      ? `${data.total} ta yozuv — raqam aynan shulardan iborat.`
+                      ? `${data.total} ta yozuv — ro‘yxat to‘liq.`
                       : data.total > CSV_LIMIT
                         ? `${data.total} yozuvdan birinchi ${data.shown} tasi ko‘rsatilgan; CSV eng ko‘pi ${CSV_LIMIT} tasini beradi.`
                         : `${data.total} yozuvdan birinchi ${data.shown} tasi ko‘rsatilgan — to‘liq ro‘yxatni CSV tugmasi beradi.`}

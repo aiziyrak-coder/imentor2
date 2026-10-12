@@ -137,6 +137,10 @@ def rector_filters(
         data["scope"] = {"kind": ctx.get("kind"), "label": ctx.get("label"), "departments": data["departments"]}
     else:
         data["scope"] = {"kind": ctx.get("kind"), "label": ctx.get("label"), "departments": []}
+    # Guruh bilan cheklangan dekan (xalqaro fakultet) uchun kafedra kesimida
+    # ishlaydigan bo'limlar 403 qaytaradi — sahifa o'sha tugmalarni
+    # ko'rsatmasligi uchun doira shu yerda aytiladi (2026-10-11).
+    data["scope"]["groups"] = list(allowed_groups(ctx))
     return data
 
 
@@ -236,11 +240,15 @@ def rector_monitor_day(
         target = dt.date.fromisoformat(day) if day else lessons.current_time().date()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Sana YYYY-MM-DD ko'rinishida bo'lishi kerak.") from exc
+    out = monitor_day.day_report(db, target, faculty=faculty, department=department,
+                                 monitor_id=monitor_id, teacher=teacher,
+                                 groups=allowed_groups(ctx))
+    # Kafedra chegarasi (dekan doirasi yoki admin hisobotdan chiqargan
+    # kafedralar) kafedra TANLANGANDA ham amal qiladi: ilgari `department`
+    # berilsa chegara umuman qo'llanmasdi va chiqarilgan kafedrani aniq
+    # tanlab ko'rish mumkin edi (2026-10-11).
     allowed = allowed_departments(ctx, db)
-    if allowed and not department:
-        # Dekan uchun: kafedra tanlanmagan bo'lsa ham o'z kafedralaridan tashqarisi chiqmasin.
-        out = monitor_day.day_report(db, target, faculty=faculty, monitor_id=monitor_id,
-                                     teacher=teacher, groups=allowed_groups(ctx))
+    if allowed:
         keys = {monitor_svc._norm(d) for d in allowed}
 
         def ok(name: str) -> bool:
@@ -250,10 +258,7 @@ def rector_monitor_day(
         out["lessons"] = [r for r in out["lessons"] if ok(r["department"])]
         out["teachers"] = [r for r in out["teachers"] if ok(r["department"])]
         out["filters"]["departments"] = [d for d in out["filters"]["departments"] if ok(d)]
-        return out
-    return monitor_day.day_report(db, target, faculty=faculty, department=department,
-                                  monitor_id=monitor_id, teacher=teacher,
-                                  groups=allowed_groups(ctx))
+    return out
 
 
 @router.get("/rector/control/students/")

@@ -75,8 +75,9 @@ function WorkBuckets({
       drill: `Kirib chiqqan (${nearMinutes} daqiqadan kam)`, note: `${briefTeachers} o‘qituvchi`,
     },
     {
-      key: 'none', value: buckets.none, bar: 'bg-slate-200', dot: 'bg-slate-300',
-      label: 'Dars vaqtida umuman ochilmagan', metric: '', drill: '', note: '',
+      key: 'none', value: buckets.none, bar: 'bg-rose-400', dot: 'bg-rose-400',
+      label: 'Dars vaqtida umuman ochilmagan', metric: 't_none',
+      drill: 'Dars vaqtida iMentor’ni umuman ochmaganlar', note: '',
     },
   ];
   return (
@@ -903,6 +904,7 @@ export function ControlReportView({
   // shu yerda butun mazmun, jumladan talabalar bo'limi ham yo'qolardi (2026-09-28).
   const noLessons = !h.total_lessons;
   const tone = BAND_TEXT[h.band] || BAND_TEXT.none;
+  const touchTone = BAND_TEXT[h.touch_band || h.band] || BAND_TEXT.none;
   const peak = Math.max(5, ...data.daily.map((d) => d.percent));
 
   return (
@@ -925,20 +927,26 @@ export function ControlReportView({
             <p className="text-[12.5px] font-semibold uppercase tracking-wide text-slate-500">
               Monitorli xonadagi darslarda iMentor ishlatilishi
             </p>
+            {/* BITTA foiz: iMentor ishlatilgan darslar ulushi — to'liq
+                o'tilganlar va vaqti yetmaganlar birgalikda (rektor talabi,
+                2026-10-12). "To'liq o'tilgan" ulushi pastdagi jumlada. */}
             <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="-mx-1 px-1">
-              <p className={`mt-1 text-[44px] font-bold leading-none tabular-nums ${tone.text}`}>{h.monitor_percent}%</p>
+              <p className={`mt-1 text-[44px] font-bold leading-none tabular-nums ${touchTone.text}`}>
+                {h.monitor_touched_percent ?? h.monitor_percent}%
+              </p>
             </Stat>
             <p className="text-[12px] text-slate-500">
-              Dars “o‘tilgan” deb faqat kamida{' '}
-              <b className="text-slate-700">{h.min_lesson_minutes} daqiqa</b> ishlangan bo‘lsa sanaladi —
-              qisqa kirib chiqish hisoblanmaydi.
+              Foiz — iMentor <b className="text-slate-700">ishlatilgan</b> darslar ulushi:
+              to‘liq o‘tilganlar va vaqti yetmaganlar birgalikda. Dars
+              “to‘liq o‘tilgan” deb faqat kamida{' '}
+              <b className="text-slate-700">{h.min_lesson_minutes} daqiqa</b> ishlangan bo‘lsa sanaladi.
             </p>
             <p className="mt-1 text-[13px] text-slate-500">
-              <Stat metric="monitor_lessons" label="Monitorli xonada darsi bor o‘qituvchilar" className="px-1">
+              <Stat metric="monitor_lessons" label="Shu darslarni o‘tadigan o‘qituvchilar" className="px-1">
                 {h.monitor_lessons}
               </Stat>{' '}
               ta darsdan{' '}
-              <Stat metric="monitor_used" label="Monitorli darsda iMentor ochganlar" className="px-1">
+              <Stat metric="monitor_used" label="Shu darslarni iMentor’da o‘tgan o‘qituvchilar" className="px-1">
                 <b className="text-slate-700">{h.monitor_used}</b>
               </Stat>{' '}
               tasida to‘liq o‘tilgan
@@ -988,11 +996,11 @@ export function ControlReportView({
             <div>
               <p className="text-slate-500">Monitorsiz darslar</p>
               <p className="text-[19px] font-bold tabular-nums text-slate-900">
-                <Stat metric="other_used" label="Monitorsiz darsda iMentor ochganlar" className="px-1">
+                <Stat metric="other_used" label="Monitorsiz darsda ishlagan o‘qituvchilar" className="px-1">
                   {h.other_used}
                 </Stat>
                 /
-                <Stat metric="other_lessons" label="Monitorsiz xonada darsi bor" className="px-1">
+                <Stat metric="other_lessons" label="Monitorsiz xonada darsi bor o‘qituvchilar" className="px-1">
                   {h.other_lessons}
                 </Stat>
               </p>

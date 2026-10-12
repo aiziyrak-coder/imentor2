@@ -115,9 +115,14 @@ def _teacher_stats(lessons: list[HemisLesson], used: dict[int, tuple[bool, int]]
         if lesson.monitor_id:
             row["monitor_lessons"] += 1
             row["rooms"].add(lesson.auditorium_name)
-            # Activity by another account is only room-level context. It cannot
-            # prove this teacher could use this monitor or attended the lesson.
-            if lesson.id in (rooms.get(lesson.monitor_id) or {}).get("active_lesson_ids", set()):
+            # Xonada BOSHQA o'qituvchi ishlaganmi: shu monitor ishlab turgani
+            # isboti. Ilgari bu yerda darsning O'ZI xonaning faol darslari
+            # ro'yxatida bormi deb qaralardi — u esa faqat o'qituvchining
+            # o'zi ishlatgan darslarini o'z ichiga oladi, shuning uchun
+            # ishlatmagan o'qituvchi uchun HAR DOIM nol chiqardi va ayblov
+            # ro'yxati hech qachon to'lmasdi (2026-10-11).
+            others = (rooms.get(lesson.monitor_id) or {}).get("used_teachers", set())
+            if others - {lesson.teacher_username}:
                 row["other_account_active_lessons"] += 1
             if hit:
                 row["monitor_used"] += 1
@@ -154,7 +159,13 @@ def _teacher_row(row: dict) -> dict:
         "last_used": row["last_used"].isoformat() if row["last_used"] else None,
         # Compatibility name retained; this is context, not proof of guilt.
         "proven_lessons": row["other_account_active_lessons"],
-        "excuse": "check_room",
+        # Bahonasi bormi: shu o'qituvchining darslaridan birida XONADA
+        # boshqa kimdir ishlagan bo'lsa, monitor o'sha paytda ishlab turgan
+        # bo'ladi — ya'ni "monitor yo'q edi" degan bahona o'tmaydi.
+        # Ilgari bu maydon DOIMO "check_room" edi, shuning uchun ayblov
+        # ro'yxati hech qachon to'lmasdi va kun bo'yicha sahifa bilan
+        # qarama-qarshi chiqardi (2026-10-11).
+        "excuse": "blamed" if row["other_account_active_lessons"] else "check_room",
         "assessment": "usage_record_missing_review_required",
     }
 
@@ -378,8 +389,8 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
     # Room activity by somebody else is never treated as an individual verdict.
     # "Qayd yo'q" faqat dars vaqtida UMUMAN ochmaganlarga tegishli: kirib,
     # lekin darsni to'liq o'tmaganlarda qayd bor — ular alohida toifada.
-    blamed = []
-    check_room = [r for r in idle if r["state"] == "none"]
+    blamed = [r for r in idle if r["excuse"] == "blamed"]
+    check_room = [r for r in idle if r["excuse"] != "blamed"]
     states = {name: sum(1 for r in watched if r["state"] == name) for name in TEACHER_STATES}
     teachers_used = states["full"] + states["partial"]
 
@@ -476,6 +487,17 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
             "monitor_used": monitor_used,
             "monitor_percent": _pct(monitor_used, monitor_lessons),
             "band": _band(_pct(monitor_used, monitor_lessons)) if monitor_lessons else "none",
+            # Sahifadagi KATTA foiz: iMentor ishlatilgan darslar ulushi —
+            # to'liq o'tilganlar va vaqti yetmaganlar birgalikda. Rektor
+            # bitta foiz so'radi va "yashil + sariq yig'indisi" dedi
+            # (2026-10-12). "To'liq o'tilgan" ulushi `monitor_percent` da
+            # qoladi va pastdagi jumlada ko'rinadi.
+            "monitor_touched": monitor_used + sum(r.get("short_lessons", 0) for r in rows),
+            "monitor_touched_percent": _pct(
+                monitor_used + sum(r.get("short_lessons", 0) for r in rows), monitor_lessons),
+            "touch_band": _band(_pct(
+                monitor_used + sum(r.get("short_lessons", 0) for r in rows), monitor_lessons)
+            ) if monitor_lessons else "none",
             "watched_teachers": len(watched),
             "idle_teachers": len(idle),
             # O'qituvchi kesimi: darsi borlardan nechtasi kamida bitta darsni
@@ -515,8 +537,12 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
             "near_minutes": NEAR_MINUTES,
             "min_lesson_minutes": lr.MIN_LESSON_MINUTES,
         },
+        # Ro'yxat kesiladi (sahifa 700 qatorni ko'tarmaydi), shuning uchun
+        # jami son ham yuboriladi: "raqam = ro'yxat" qoidasi buzilmasin.
         "attention": [_attention_row(r) for r in blamed[:60]],
+        "attention_total": len(blamed),
         "check_room": [_attention_row(r) for r in check_room[:40]],
+        "check_room_total": len(check_room),
         "rooms": mr.payload(rooms),
         "room_summary": mr.summary(rooms),
         "source": _source(lessons, rows),
@@ -629,9 +655,9 @@ def people(db: Session, start_day: dt.date, end_day: dt.date, *, metric: str, ke
         idle = [r for r in rows if r["monitor_lessons"] > 0 and r["monitor_used"] == 0
                 and r["linked"] and not r["on_leave"]]
         if name == "blamed":
-            idle = [r for r in idle if r["excuse"] == "none"]
+            idle = [r for r in idle if r["excuse"] == "blamed"]
         elif name == "check_room":
-            idle = [r for r in idle if r["state"] == "none"]
+            idle = [r for r in idle if r["excuse"] != "blamed"]
         add(idle, lambda r: r["monitor_lessons"], "dars")
     elif name in ("t_used", "t_full", "t_partial", "t_opened", "t_none"):
         want = ("full", "partial") if name == "t_used" else (name[2:],)
