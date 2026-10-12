@@ -207,3 +207,12 @@ def test_report_is_computed_once_within_the_cache_window(monkeypatch):
         cr.people(_db(rows), DAY, DAY, metric="t_none")
     assert spans.call_count == 1
     assert [r["teacher_name"] for r in second["teachers"]] == ["A"]
+
+
+def test_source_shows_last_sync_even_when_filter_leaves_no_lessons():
+    """Kafedra filtri darslarni bo'shatsa ham "oxirgi yangilanish" ko'rinadi (2026-10-12)."""
+    last = dt.datetime(2026, 10, 12, 6, 48, tzinfo=dt.timezone.utc)
+    db = MagicMock()
+    db.execute.return_value.scalar.return_value = last
+    assert cr._source([], [], db)["synced_at"] == last.isoformat()
+    assert cr._source([], [])["synced_at"] is None
