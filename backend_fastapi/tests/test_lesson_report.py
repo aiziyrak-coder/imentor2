@@ -19,7 +19,7 @@ def lesson(pk, *, user="3442112018", name="MADOLIMOV A. M.", para="3-para", star
     return SimpleNamespace(
         id=pk, hemis_id=str(pk), lesson_date=day, weekday="Seshanba", para=para,
         start_time=start, end_time=end, employee_id="461", teacher_name=name, teacher_username=user,
-        department_name=dep, subject_name=subject, group_name=group, lesson_type="Ma'ruza",
+        department_name=dep, subject_name=subject, group_name=group, lesson_type="Amaliy",
         auditorium_name="204", building_name="Oq uy binosi", monitor_id=monitor,
     )
 

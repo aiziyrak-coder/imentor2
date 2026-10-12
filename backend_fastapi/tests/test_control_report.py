@@ -19,7 +19,7 @@ def lesson(pk, *, user="u1", name="AZIZOV A. A.", monitor="MON-001", para="3-par
     return SimpleNamespace(
         id=pk, hemis_id=str(pk), lesson_date=day, weekday="Seshanba", para=para,
         start_time=start, end_time=end, employee_id="461", teacher_name=name, teacher_username=user,
-        department_name=dep, subject_name="Fiziologiya", group_name="DI-101", lesson_type="Ma'ruza",
+        department_name=dep, subject_name="Fiziologiya", group_name="DI-101", lesson_type="Amaliy",
         auditorium_name=room, building_name="Oq uy binosi", monitor_id=monitor,
     )
 
@@ -174,8 +174,11 @@ def test_every_teacher_falls_into_exactly_one_bucket():
     assert h["partial_missed_lessons"] == 1
     part = next(r for r in out["teachers"] if r["teacher_key"] == "part")
     assert (part["state"], part["monitor_used"], part["monitor_missed"]) == ("partial", 1, 1)
-    # "Qayd yo'q" ro'yxatida faqat umuman ochmagan — kirib chiqqanda qayd bor.
-    assert [r["teacher_name"] for r in out["check_room"]] == ["N"]
+    # Shu monitorda boshqalar ishlagan, demak monitor ishlab turgan: darsni
+    # o'tmaganlar (kirib chiqqan K ham, umuman ochmagan N ham) "xonani
+    # tekshirish" emas, ayblanadiganlar ro'yxatida (serverdagi qoida, 2026-10-11).
+    assert sorted(r["teacher_name"] for r in out["attention"]) == ["K", "N"]
+    assert out["check_room"] == []
 
 
 def test_lessons_that_have_not_ended_yet_are_not_judged():
