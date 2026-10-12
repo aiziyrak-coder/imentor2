@@ -69,7 +69,12 @@ def answer_key_locked(session, new_questions: list) -> bool:
     Aks holda server ballni yangi kalit bo'yicha hisoblab, allaqachon
     topshirganlarning natijasi orqaga qarab o'zgarib ketardi.
     """
-    if not (session.is_closed or session.submissions):
+    # Qoralama bor — talabalar savollarni ochib, javob belgilashni boshlagan.
+    # Ilgari qulf faqat birinchi topshiriqdan keyin ishlardi: shu orada
+    # o'qituvchi boshqa versiyani ochsa (yoki fon variantlarni qayta
+    # aralashtirsa), talabalar eski savollarga bergan javoblar YANGI kalit
+    # bo'yicha baholanardi.
+    if not (session.is_closed or session.submissions or getattr(session, "drafts", None)):
         return False
     payload = session.payload if isinstance(session.payload, dict) else {}
     return answer_key_signature(payload.get("questions", [])) != answer_key_signature(new_questions)
@@ -121,16 +126,22 @@ def is_complete_draft(answers: list, question_count: int) -> bool:
 
 
 def submissions_payload(session: LiveTestSession) -> list[dict]:
-    return [
-        {
+    """O'qituvchi jadvali uchun. Ball SERVERDA, sessiyaning o'z kaliti bo'yicha
+    hisoblanadi — brauzerdagi test nusxasi boshqa versiya bo'lishi mumkin."""
+    questions = questions_of(session)
+    out = []
+    for s in session.submissions:
+        correct, total = score_submission(questions, s.answers)
+        out.append({
             "first_name": s.first_name,
             "last_name": s.last_name,
             "student_id": s.student_id or "",
             "answers": s.answers,
+            "correct": correct,
+            "total": total,
             "submitted_at": s.submitted_at.isoformat(),
-        }
-        for s in session.submissions
-    ]
+        })
+    return out
 
 
 def normalize_answers(raw, question_count: int) -> list[int]:

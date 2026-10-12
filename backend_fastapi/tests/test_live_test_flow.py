@@ -173,3 +173,28 @@ def test_second_student_on_the_same_phone_is_not_blocked():
     with patch.object(lt, "create_student_attempt_from_submission"):
         assert _submit(obj, db, student="s2", key="p1") == {"ok": True}
     assert added[0].student_id == "s2" and added[0].participant_key == "ss2_p1"
+
+
+def test_answer_key_is_locked_once_students_start_answering():
+    """Qoralama bor — talabalar savollarni ko'rgan: kalit almashtirilmaydi."""
+    from types import SimpleNamespace
+    from app.services import live_test_service as svc
+
+    old = [{"question": "Q1", "options": ["a", "b", "c", "d"], "correctOptionIndex": 1}]
+    new = [{"question": "Q1", "options": ["b", "a", "c", "d"], "correctOptionIndex": 0}]
+    session = SimpleNamespace(is_closed=False, submissions=[], drafts=[object()], payload={"questions": old})
+    assert svc.answer_key_locked(session, new)
+    session.drafts = []
+    assert not svc.answer_key_locked(session, new)
+
+
+def test_teacher_table_gets_server_score():
+    import datetime as dt
+    from types import SimpleNamespace
+    from app.services import live_test_service as svc
+
+    qs = [{"question": "Q", "options": ["a", "b"], "correctOptionIndex": 1}] * 2
+    sub = SimpleNamespace(first_name="A", last_name="B", student_id="1", answers=[1, 0],
+                          submitted_at=dt.datetime(2026, 10, 12, tzinfo=dt.timezone.utc))
+    (row,) = svc.submissions_payload(SimpleNamespace(payload={"questions": qs}, submissions=[sub]))
+    assert (row["correct"], row["total"]) == (1, 2)

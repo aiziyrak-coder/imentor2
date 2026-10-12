@@ -12,6 +12,8 @@ export interface TestSubmissionRow {
   lastName: string;
   answers: number[];
   submittedAt: number;
+  /** Server hisoblagan ball — bo'lsa, PDF shuni yozadi (ekrandagi jadval bilan bir xil). */
+  correct?: number;
 }
 
 function t(lang: AppLanguage, key: UiTextKey, params?: Record<string, string | number>): string {
@@ -135,7 +137,7 @@ function buildResultsHtml(session: TestSession, submissions: TestSubmissionRow[]
   const locale = localeForLanguage(lang);
   const total = session.questions.length;
   const sorted = [...submissions].sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
-  const scores = sorted.map((s) => calculateScore(s.answers, session.questions));
+  const scores = sorted.map((s) => s.correct ?? calculateScore(s.answers, session.questions));
   const grades = scores.map((score) => scoreToGrade(score, total));
   const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '—';
   const avgGrade = grades.length
