@@ -61,6 +61,7 @@ import { type AppNotificationEventDetail } from './utils/notifications';
 import AppToastHost from './components/AppToastHost';
 import { isPublicStudentTestUrl } from './utils/liveTestApi';
 import { useActivityTelemetry } from './hooks/useActivityTelemetry';
+import { useNewVersionAvailable } from './hooks/useNewVersionAvailable';
 import { postActivityEvents } from './utils/analyticsApi';
 
 // Components
@@ -541,6 +542,7 @@ export default function App() {
 
   const userRole = user ? normalizeUserRole(user) : null;
   const telemetryFailed = useActivityTelemetry(!!user && !!userRole, activeView);
+  const newVersion = useNewVersionAvailable();
 
   const handleLogout = async () => {
     if (user && userRole) {
@@ -789,6 +791,14 @@ export default function App() {
       {/* Global alertlar — yuqori o'ng burchak, 20 soniyada o'zi yo'qoladi.
           Talaba QR rejimida ham ko'rinsin, shuning uchun eng tashqarida. */}
       <AppToastHost />
+      {newVersion && (
+        <div role="status" className="fixed top-3 left-1/2 z-[110] flex -translate-x-1/2 items-center gap-3 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+          iMentor yangilandi — to‘g‘ri ishlashi uchun sahifani yangilang.
+          <button type="button" onClick={() => window.location.reload()} className="rounded-lg bg-white px-3 py-1 text-[13px] font-semibold text-blue-700">
+            Yangilash
+          </button>
+        </div>
+      )}
       {telemetryFailed && <div role="alert" className="fixed bottom-3 left-3 right-3 z-[100] rounded-xl bg-amber-100 p-3 text-sm text-amber-950 shadow-lg">
         {telemetryFailed === 'auth'
           ? 'Kirish muddati tugagan — sahifani yangilab, qayta kiring. Shu paytgacha ishlagan vaqtingiz saqlanib turibdi va kirgandan keyin hisobotga yoziladi.'
