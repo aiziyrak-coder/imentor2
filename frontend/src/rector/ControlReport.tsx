@@ -889,11 +889,14 @@ export function ControlReportView({
   students,
   onOpen,
   onDrill,
+  department = '',
 }: {
   data: Report;
   students: ControlStudents | null;
   onOpen?: (p: Person) => void;
   onDrill?: (t: DrillTarget) => void;
+  /** Yuqoridagi kafedra filtri — bo'sh natija sababini to'g'ri aytish uchun. */
+  department?: string;
 }) {
   // Namuna ma'lumot bilan ko'rilganda (harness) hech narsa ochilmaydi.
   const open = onOpen ?? (() => {});
@@ -910,7 +913,17 @@ export function ControlReportView({
     <div className="space-y-5">
       <Source data={data} />
 
-      {noLessons && (
+      {/* Kafedra tanlangan bo'lsa "dars yo'q" ko'pincha shu filtrdan: ilgari
+          xabar "dam olish kuni" derdi va rektor hisobot buzilgan deb o'ylardi
+          (2026-10-12: "Lotin tili" tanlangan, dushanba kuni 0 dars). */}
+      {noLessons && department && (
+        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+          <b>«{department}»</b> kafedrasida tanlangan davrda HEMIS jadvali bo‘yicha dars yo‘q. Butun institutni
+          ko‘rish uchun yuqorida «Barcha kafedralar»ni tanlang yoki «Filtrlarni tozalash»ni bosing.
+          Quyidagi talabalar ko‘rsatkichlari kafedra bo‘yicha filtrlanmaydi.
+        </p>
+      )}
+      {noLessons && !department && (
         <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
           Tanlangan davrda HEMIS jadvalida dars yo‘q (dam olish kuni yoki bayram bo‘lishi mumkin).
           Quyidagi talabalar va material ko‘rsatkichlari baribir ko‘rsatilmoqda — boshqa sanani tanlang.
@@ -1155,7 +1168,13 @@ export default function ControlReport({ filters, onUnauthorized }: Props) {
   if (!report.data) return null;
   return (
     <>
-      <ControlReportView data={report.data} students={students.data} onOpen={setPerson} onDrill={setDrill} />
+      <ControlReportView
+        data={report.data}
+        students={students.data}
+        onOpen={setPerson}
+        onDrill={setDrill}
+        department={filters.department}
+      />
       {drill && (
         <StatDrill
           target={drill}

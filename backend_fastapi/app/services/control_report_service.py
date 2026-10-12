@@ -165,13 +165,19 @@ def _attention_row(r: dict) -> dict:
                               "other_used", "other_lessons", "proven_lessons", "excuse", "employee_id")}
 
 
-def _source(lessons: list[HemisLesson], rows: list[dict]) -> dict:
+def _source(lessons: list[HemisLesson], rows: list[dict], db: Session | None = None) -> dict:
     """Ma'lumot qayerdan: HEMIS nusxasi qachon olingan va nimani qamragan.
 
     Rektor ham, o'qituvchi ham raqamning manbasini ko'rib turishi kerak —
     shunda bahs "hisobot noto'g'ri" emas, "HEMIS'da shunday yozilgan" bo'ladi.
     """
     synced = [x.synced_at for x in lessons if getattr(x, "synced_at", None)]
+    if not synced and db is not None:
+        # Filtrdan keyin dars qolmasa ham HEMIS nusxasi qachon olingani ko'rinsin:
+        # aks holda "oxirgi yangilanish —" sinxron ishlamagandek ko'rinardi.
+        last = db.execute(select(func.max(HemisLesson.synced_at))).scalar()
+        if isinstance(last, dt.datetime):
+            synced = [last]
     rooms_without_monitor = {x.auditorium_name for x in lessons if not x.monitor_id and x.auditorium_name}
     return {
         "synced_at": max(synced).isoformat() if synced else None,
@@ -519,7 +525,7 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
         "check_room": [_attention_row(r) for r in check_room[:40]],
         "rooms": mr.payload(rooms),
         "room_summary": mr.summary(rooms),
-        "source": _source(lessons, rows),
+        "source": _source(lessons, rows, db),
         "daily": daily,
         "departments": departments,
         "teachers": monitored_rows,
