@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError
@@ -33,11 +34,13 @@ from app.services import password_policy_service as pwd_policy
 from app.services import staff_department as staff_dept
 from app.services import online_test_client as otc
 from app.services import person_identity as pid
+from app.services import cam_students
 from app.services import staff_pinfl
 from app.services import staff_profile as sp
 from app.services.analytics_service import record_activity_event
 
 router = APIRouter()
+logger = logging.getLogger("imentor.auth")
 settings = get_settings()
 
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
@@ -274,6 +277,25 @@ def _student_by_id(db: Session, student_id: str) -> tuple[User, str] | None:
     return user, sid
 
 
+def _student_from_cam(db: Session, pinfl: str) -> tuple[User, str] | None:
+    """cam.fermi.uz `/students/lookup` orqali. Javobda talaba ID'si bo'lmasa —
+    kontingentdan JSHSHIR bo'yicha. Ishlamasa jim: oddiy "topilmadi" bo'ladi."""
+    try:
+        found = cam_students.lookup(pinfl)
+    except cam_students.CamStudentsUnavailable as exc:
+        logger.warning("cam.fermi.uz talaba qidiruvi ishlamadi: %s", exc)
+        return None
+    if found is None:
+        return None
+    sid = found.student_id
+    if not sid:
+        row = db.execute(
+            select(StudentContingent).where(StudentContingent.pinfl == pinfl)
+        ).scalars().first()
+        sid = (row.student_id or "").strip() if row is not None else ""
+    return _student_by_id(db, sid) if sid else None
+
+
 def _staff_by_id(db: Session, staff_id: str) -> User | None:
     """Xodimni Xodim ID bo'yicha topadi — iMentor logini aynan shu raqam."""
     key = (staff_id or "").strip()
@@ -326,6 +348,15 @@ def id_login(
         db, pinfl=pinfl,
         series=payload.passport_series, number=payload.passport_number,
     )
+    if person is None and pid.is_pinfl(pinfl):
+        # Nusxada yo'q — nusxadan keyin cam.fermi.uz'da ro'yxatdan o'tgan talaba
+        # bo'lishi mumkin: jonli so'raymiz (2026-10-12).
+        found_live = _student_from_cam(db, pinfl)
+        if found_live is not None:
+            user, student_id = found_live
+            if not user.is_active:
+                raise denied
+            return _issue(db, user, "student", student_id)
     if person is None:
         raise denied
 
@@ -529,3 +560,9 @@ def public_kafedralar() -> list[dict]:
         )
     rows.sort(key=lambda r: r["name"])
     return rows
+
+
+@router.get("/admin/cam-students/health/")
+def cam_students_health(_: AuthContext = Depends(require_roles("admin"))) -> dict:
+    """cam.fermi.uz talabalar API kaliti ishlayaptimi (kalitning o'zi qaytarilmaydi)."""
+    return cam_students.health()

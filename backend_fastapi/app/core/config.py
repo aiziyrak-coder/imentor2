@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     cam_verify_url: str = ""
     cam_verify_api_key: str = ""
     cam_verify_timeout: float = 10.0
+    # cam.fermi.uz iMentor integratsiyasi (talabalar): https://camapi.fermi.uz/api/v1/integration
+    # Talaba JSHSHIR bilan kirganda iMentor'dagi nusxada topilmasa, jonli so'raladi.
+    cam_student_api_url: str = ""
+    cam_student_api_key: str = ""
+    cam_student_timeout: float = 8.0
 
     @property
     def database_url(self) -> str:
