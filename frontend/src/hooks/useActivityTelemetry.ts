@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { postActivityEvents } from '../utils/analyticsApi';
+import { postActivityEvents, type TelemetryStatus } from '../utils/analyticsApi';
 
 /**
  * Foydalanuvchi qaysi bo'limda qancha vaqt turganini o'lchaydi.
@@ -37,12 +37,32 @@ const IDLE_MS = 5 * 60_000;
 /** Bundan qisqa bo'lak yuborilmaydi (tarmoqni bo'shga band qilmaslik uchun). */
 const MIN_FLUSH_SEC = 5;
 
-export function useActivityTelemetry(enabled: boolean, page: string): boolean {
-  const [failed, setFailed] = useState(false);
+/** Shuncha ketma-ket xatodan keyin ogohlantirish chiqadi. Bitta uzilish
+ *  (masalan server qayta ishga tushayotgan daqiqa) foydalanuvchini
+ *  bezovta qilmasin: vaqt navbatda saqlanadi va keyin yuboriladi. */
+const FAILURES_BEFORE_WARNING = 3;
+
+/** `null` — hammasi joyida; `'network'` — ulanish yo'q; `'auth'` — qayta kirish kerak. */
+export type TelemetryProblem = null | 'network' | 'auth';
+
+export function useActivityTelemetry(enabled: boolean, page: string): TelemetryProblem {
+  const [problem, setProblem] = useState<TelemetryProblem>(null);
   useEffect(() => {
-    setFailed(false);
+    setProblem(null);
     if (!enabled) return;
-    const status = (event: Event) => setFailed(!(event as CustomEvent<boolean>).detail);
+    let failures = 0;
+    const status = (event: Event) => {
+      const detail = (event as CustomEvent<TelemetryStatus>).detail;
+      if (detail?.ok) {
+        failures = 0;
+        setProblem(null);
+        return;
+      }
+      failures += 1;
+      // Kirish muddati tugagani o'z-o'zidan tuzalmaydi — darhol aytamiz.
+      if (detail?.reason === 'auth') setProblem('auth');
+      else if (failures >= FAILURES_BEFORE_WARNING) setProblem('network');
+    };
     window.addEventListener('imentor:telemetry-status', status);
     return () => window.removeEventListener('imentor:telemetry-status', status);
   }, [enabled]);
@@ -139,5 +159,5 @@ export function useActivityTelemetry(enabled: boolean, page: string): boolean {
   }, [enabled, page]);
 
   pageRef.current = page;
-  return failed;
+  return problem;
 }

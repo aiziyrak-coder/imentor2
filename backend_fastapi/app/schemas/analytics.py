@@ -16,6 +16,8 @@ class ActivityEventIn(BaseModel):
 class ActivityEventsBatchIn(BaseModel):
     events: list[ActivityEventIn] = Field(default_factory=list, max_length=50)
     page: str = ""
+    #: Yuborish payti — MIJOZ soati bilan. `client_ts_ms` bilan farqi kechikish.
+    sent_at_ms: int | None = None
 
 
 class LiveTestEventIn(BaseModel):

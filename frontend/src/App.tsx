@@ -790,7 +790,9 @@ export default function App() {
           Talaba QR rejimida ham ko'rinsin, shuning uchun eng tashqarida. */}
       <AppToastHost />
       {telemetryFailed && <div role="alert" className="fixed bottom-3 left-3 right-3 z-[100] rounded-xl bg-amber-100 p-3 text-sm text-amber-950 shadow-lg">
-        Faollik qaydi serverga yetib bormadi. Internet va kirish holatini tekshiring. Hisobotda bu vaqt to‘liq ko‘rinmasligi mumkin.
+        {telemetryFailed === 'auth'
+          ? 'Kirish muddati tugagan — sahifani yangilab, qayta kiring. Shu paytgacha ishlagan vaqtingiz saqlanib turibdi va kirgandan keyin hisobotga yoziladi.'
+          : 'Server bilan aloqa yo‘q. Ishlagan vaqtingiz qurilmada saqlanmoqda va aloqa tiklanganda hisobotga yoziladi.'}
       </div>}
       {/* Student QR: always fullscreen test only (no shell), even if staff session exists */}
       {isPublicStudentTestUrl() ? (
