@@ -57,13 +57,11 @@ const ICON_BG_CLASS: Record<CaseStudyFocus, string> = {
 };
 
 export function caseFocusAccentBorderClass(focus: CaseStudyFocus | undefined): string {
-  if (!focus) return 'border-l-black/15';
-  return ACCENT_BORDER_CLASS[focus];
+  return (focus && ACCENT_BORDER_CLASS[focus]) || 'border-l-black/15';
 }
 
 export function caseFocusIconBgClass(focus: CaseStudyFocus | undefined): string {
-  if (!focus) return 'bg-black/5 text-black/50';
-  return ICON_BG_CLASS[focus];
+  return (focus && ICON_BG_CLASS[focus]) || 'bg-black/5 text-black/50';
 }
 
 export function caseFocusLabel(
@@ -73,12 +71,11 @@ export function caseFocusLabel(
 ): string {
   if (!focus) return '';
   const table = isPatientFree(domain) ? LABELS_ACADEMIC : LABELS;
-  return table[lang][focus] || table.uz[focus];
+  return table[lang]?.[focus] || table.uz[focus] || '';
 }
 
 export function caseFocusBadgeClass(focus: CaseStudyFocus | undefined): string {
-  if (!focus) return 'bg-black/5 text-black/60 border-black/10';
-  return BADGE_CLASS[focus];
+  return (focus && BADGE_CLASS[focus]) || 'bg-black/5 text-black/60 border-black/10';
 }
 
 /**

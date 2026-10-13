@@ -531,7 +531,10 @@ export default function CaseStudies() {
           <TranslationGate status={caseStatus} onRetry={retryCaseTranslation}>
           <div className="space-y-4">
             {orderedQuestions.map((q, i) => {
-              const FocusIcon = q.focus ? CASE_FOCUS_ICONS[q.focus] : Stethoscope;
+              // Model yoki eski saqlangan keys ro'yxatda yo'q `focus` qaytarsa
+              // ikonka undefined bo'lib, butun sahifa React #130 bilan yiqilardi
+              // (2026-10-12/13 jurnalida 38 marta, sinf doskalarida).
+              const FocusIcon = (q.focus && CASE_FOCUS_ICONS[q.focus]) || Stethoscope;
               const revealed = revealedAnswers[i];
               return (
                 <StaffPanel
