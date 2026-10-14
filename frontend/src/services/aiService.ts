@@ -112,10 +112,28 @@ const ACADEMIC_CLINICAL_RETRY_BAN =
   'OLDINGI NATIJA YAROQSIZ: klinik bemor, diabet, HbA1c, metformin yoki shifokor aralashgan. ' +
   'Butunlay qayta yozing — faqat fan/mavzu/ma\'ruza. Bemor yo\'q.';
 
+/** O'zbekcha anatomik nom ↔ lotincha (Nomina Anatomica) adashuvi: model
+ *  "chakka suyagi"ni os zygomaticum deb yozib yuborgan. Tibbiy domenlarda
+ *  har bir lotincha atama o'zbekcha nom bilan aynan mos bo'lishi shart. */
+const MEDICAL_TERMINOLOGY_RULE =
+  'TERMINOLOGIYA ANIQLIGI (MAJBURIY): har bir o\'zbekcha anatomik/tibbiy atamaga qavsda beriladigan ' +
+  'lotincha nom xalqaro Terminologia Anatomica bo\'yicha AYNAN o\'sha tuzilmaga tegishli bo\'lsin. ' +
+  'Ko\'p adashtiriladigan juftliklar: chakka suyagi = os temporale; yonoq suyagi = os zygomaticum; ' +
+  'peshona suyagi = os frontale; tepa suyagi = os parietale; ensa suyagi = os occipitale; ' +
+  'ponasimon suyak = os sphenoidale; g\'alvirsimon suyak = os ethmoidale; yuqori jag\' = maxilla; ' +
+  'pastki jag\' = mandibula; burun suyagi = os nasale; ko\'z yosh suyagi = os lacrimale; ' +
+  'tanglay suyagi = os palatinum; dimog\' suyagi = vomer; til osti suyagi = os hyoideum; ' +
+  'to\'sh suyagi = sternum; kurak = scapula; o\'mrov = clavicula; yelka suyagi = humerus; ' +
+  'bilak suyagi = radius; tirsak suyagi = ulna; son suyagi = femur; katta boldir = tibia; ' +
+  'kichik boldir = fibula; tizza qopqog\'i = patella. Shuningdek tuzilmaning joylashuvi va ' +
+  'vazifasi o\'sha suyak/a\'zoga mos bo\'lsin (masalan chakka suyagi kalla skeletining yon-pastki ' +
+  'qismida, eshitish va muvozanat a\'zosini saqlaydi — yuz suyagi emas). Lotincha nomga ishonchingiz ' +
+  'komil bo\'lmasa, uni yozmang — noto\'g\'ri atamadan ko\'ra atamasiz yaxshiroq. ';
+
 function sysRole(domain: SubjectDomain): string {
   if (domain === 'academic') return SYS_ACADEMIC;
-  if (domain === 'biomedical') return SYS_BIOMEDICAL;
-  return SYS_MEDICAL;
+  if (domain === 'biomedical') return `${SYS_BIOMEDICAL} ${MEDICAL_TERMINOLOGY_RULE}`;
+  return `${SYS_MEDICAL} ${MEDICAL_TERMINOLOGY_RULE}`;
 }
 
 /** Bemorsiz domenlarda qayta urinishda beriladigan taqiq — har domenga o'zi. */
