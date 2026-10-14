@@ -308,6 +308,16 @@ def get_latest_prepared_content(
     return PreparedContentLatestOut(payload=item.payload)
 
 
+def _reject_empty_test(kind: str, payload: object) -> None:
+    """Savolsiz test saqlanmaydi: undan jonli sessiya ochib bo'lmaydi va
+    o'qituvchi tushunarsiz "Sessiyani boshlab bo'lmadi"ni ko'radi (2026-10-13)."""
+    if kind != "test":
+        return
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    if not isinstance(questions, list) or not questions:
+        raise HTTPException(status_code=422, detail="Testda savol yo'q — qayta yarating.")
+
+
 @router.post("/prepared-content/", response_model=PreparedContentOut, status_code=status.HTTP_201_CREATED)
 def create_prepared_content(
     payload: PreparedContentIn,
@@ -315,6 +325,7 @@ def create_prepared_content(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentOut:
+    _reject_empty_test(payload.kind, payload.payload)
     topic_norm = (payload.topic_norm or "").strip().lower() or payload.topic.lower()
 
     syllabus = None
@@ -434,6 +445,7 @@ def update_prepared_content_payload(
         raise HTTPException(status_code=404, detail="Topilmadi.")
     # Asosiy matn tahrirlangan-u, tarjimalar o'shaligicha qolgan bo'lsa — ular eskirgan:
     # olib tashlanadi; kerakli til tanlanganda qayta tarjima qilinadi (aks holda ruscha nusxa eski matnni ko'rsatardi).
+    _reject_empty_test(item.kind, body.payload)
     item.payload = merge_on_update(item.kind, item.payload, body.payload)
     db.commit()
     db.refresh(item)

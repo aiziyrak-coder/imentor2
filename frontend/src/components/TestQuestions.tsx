@@ -819,6 +819,12 @@ export default function TestQuestions() {
   /** Jonli sessiyani (QR) ataylab boshlash. */
   const handleStartLiveSession = async () => {
     if (!testSession || teacherSessionId) return;
+    // Savolsiz (buzuq) saqlangan versiya: server baribir rad etadi (422) —
+    // o'qituvchiga sababni aniq aytamiz.
+    if (!testSession.questions?.length) {
+      setError(t('test.errorNoQuestions'));
+      return;
+    }
     setStartingSession(true);
     setError(null);
     try {
