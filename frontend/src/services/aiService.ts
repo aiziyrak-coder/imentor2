@@ -963,6 +963,17 @@ async function generateSingleCaseQuestion(
   }
 
   const answer = joinCaseSections(raw, language, domain);
+  // Yechim matni yo'q — adabiyotlar QO'SHILMAYDI: aks holda "yechim" faqat
+  // manbalar ro'yxatidan iborat bo'lib, uzunlik tekshiruvidan o'tib ketardi
+  // (2026-10-14, sinf doskasida).
+  if (answer.trim().length < 120) {
+    return {
+      scenario: joinCaseScenario(raw, language, domain),
+      answer: answer.trim(),
+      focus: normalizeCaseFocus(raw.focus, CASE_STUDY_FOCUS_ORDER.indexOf(focus)),
+      rawSnippet: safeSnippet(raw),
+    } as CaseStudyQuestion;
+  }
   const usedIndices = new Set(
     Array.from(answer.matchAll(/\[(\d+)\]/g)).map((m) => Number(m[1])),
   );
@@ -992,29 +1003,27 @@ function normalizeCaseSession(
   language: AppLanguage = 'uz',
 ): CaseStudySession {
   const rawQuestions = [...(data.questions || [])].slice(0, 3);
-  while (rawQuestions.length < 3) {
-    const focus = CASE_STUDY_FOCUS_ORDER[rawQuestions.length];
-    rawQuestions.push({ scenario: '', answer: '', focus });
-  }
 
-  const cleanedQuestions = rawQuestions.map((q, i) => {
-      const scenario = (q.scenario || '').trim();
-      const answer = (q.answer || '').trim();
-      // Zaxira matn ham interfeys tilida bo'lsin.
-      const fallbackScenario = translate(language, 'case.fallbackScenario', {
-        n: String(i + 1),
-        topic,
-      });
-      const fallbackAnswer = translate(language, 'case.fallbackAnswer');
-      const focus = normalizeCaseFocus((q as CaseStudyQuestion).focus, i);
-      const refs = (q as CaseStudyQuestion).references;
-      return {
-        scenario: scenario.length >= 120 ? scenario : fallbackScenario,
-        answer: answer.length >= 120 ? answer : fallbackAnswer,
-        focus,
-        ...(refs?.length ? { references: refs } : {}),
-      };
+  // Zaxira shablon ("Klinik vaziyat N: ... murakkab holat") ishlatilmaydi:
+  // u keysga o'xshab ko'rinib, aslida hech narsa o'rgatmasdi va klinik
+  // bo'lmagan fanda ham "bemor" haqida yozardi (2026-10-14). Bo'sh savol
+  // tashlanadi; birortasi ham qolmasa — xato, keys saqlanmaydi.
+  const cleanedQuestions = rawQuestions.flatMap((q, i) => {
+    const scenario = (q.scenario || '').trim();
+    const answer = (q.answer || '').trim();
+    if (scenario.length < 120 || answer.length < 120) return [];
+    const focus = normalizeCaseFocus((q as CaseStudyQuestion).focus, i);
+    const refs = (q as CaseStudyQuestion).references;
+    return [{ scenario, answer, focus, ...(refs?.length ? { references: refs } : {}) }];
+  });
+  if (cleanedQuestions.length < rawQuestions.length) {
+    const bad = rawQuestions.filter((q) => (q.scenario || '').trim().length < 120 || (q.answer || '').trim().length < 120);
+    reportClientError(new Error('Keys savoli yaratilmadi (AI javobi yaroqsiz)'), {
+      source: 'aiService.generateCaseStudies',
+      stack: bad.map((q) => (q as CaseStudyQuestion & { rawSnippet?: string }).rawSnippet || '(bo\'sh)').join('\n---\n').slice(0, 3000),
     });
+  }
+  if (!cleanedQuestions.length) throw new Error('Keys yaratilmadi');
   return {
     topic: (data.topic || topic || '').trim() || topic,
     questions: cleanedQuestions,
@@ -1086,6 +1095,14 @@ export function parseCorrectOptionIndex(raw: unknown, options: string[], fallbac
  * o'qituvchi faqat "Sessiyani boshlab bo'lmadi"ni ko'rardi. Endi xato
  * generatsiyaning o'zida chiqadi va bo'sh test saqlanmaydi.
  */
+function safeSnippet(value: unknown): string {
+  try {
+    return JSON.stringify(value).slice(0, 1500);
+  } catch {
+    return String(value).slice(0, 1500);
+  }
+}
+
 function requireQuestions(session: TestSession, rawSnippet = ''): TestSession {
   if (!session.questions?.length) {
     // Sabab keyin aniq ko'rinsin: AI javobidan parcha "Sayt xatolari"
@@ -1289,11 +1306,26 @@ const REFERENCES_HEADING: Record<AppLanguage, string> = {
   en: 'REFERENCES USED',
 };
 
+/** Sahifa noma'lum bo'lsa kitob qidiruvi "0-bet" qaytaradi — bu ma'lumot emas. */
+function bookPages(meta?: string): string {
+  const m = (meta || '').trim();
+  return /^0+(-bet)?$/i.test(m) ? '' : m;
+}
+
 function buildReferencesSection(sources: CaseSource[], language: AppLanguage = 'uz'): string {
   if (!sources.length) return '';
-  const lines = sources.map((s) => {
+  // Bitta kitobning bir nechta parchasi bir xil qator bo'lib takrorlanardi.
+  const seen = new Set<string>();
+  const unique = sources.filter((s) => {
+    const key = `${s.type}|${(s.title || '').trim().toLowerCase()}|${s.type === 'book' ? bookPages(s.meta) : s.url || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const lines = unique.map((s) => {
     if (s.type === 'book') {
-      return `[${s.index}] ${s.title}${s.meta ? `, ${s.meta}` : ''}`;
+      const pages = bookPages(s.meta);
+      return `[${s.index}] ${s.title}${pages ? `, ${pages}` : ''}`;
     }
     const kind = s.type === 'pubmed' ? 'PubMed' : s.type === 'wikipedia' ? 'Wikipedia' : 'Semantic Scholar';
     const authorBit = s.authors ? `${s.authors}. ` : '';
@@ -1319,7 +1351,7 @@ function sourcesToMedicalReferences(sources: CaseSource[]): MedicalReference[] {
     ...(s.authors ? { authors: s.authors } : {}),
     publisher: sourcePublisherLabel(s.type),
     ...(s.url ? { url: s.url } : {}),
-    ...(s.type === 'book' && s.meta ? { pages: s.meta.replace(/-bet$/, '') } : {}),
+    ...(s.type === 'book' && bookPages(s.meta) ? { pages: bookPages(s.meta).replace(/-bet$/, '') } : {}),
     ...(s.type !== 'book' && s.meta ? { note: s.meta } : {}),
   }));
 }
