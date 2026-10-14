@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Rektor hisobotidan chiqarilgan XODIMLAR — HEMIS ichki `employee_id` bo'yicha.",
+    "",
+    "Nega kerak: xodim ishdan bo'shagan, lekin HEMIS dars jadvalida uning",
+    "darslari qolib ketgan. Unga iMentor hisobi ochish to'g'ri emas (ishlamaydigan",
+    "odamga kirish huquqi berilgan bo'lardi), hisobsiz dars esa hisobotda",
+    "«hisobi bog'lanmagan» bo'lib turadi va rektorni chalg'itadi.",
+    "",
+    "Kalit sifatida `employee_id` olinadi, chunki dars yozuvida aynan shu turadi",
+    "(Xodim ID emas). Dars O'CHIRILMAYDI — faqat hisobotga qo'shilmaydi.",
+    "",
+    "Olib tashlash: kadrlar darslarni haqiqiy o'qituvchiga o'tkazgach, shu",
+    "yozuvni ro'yxatdan chiqarish kifoya."
+  ],
+  "staff": [
+    {
+      "employee_id": "1039",
+      "name": "SHAKIROV S. A.",
+      "hemis_status": "Bo‘shagan",
+      "reason": "Ishdan bo'shagan (xalqaro fakultet dekani), lekin jadvalda 32 darsi qolgan",
+      "since": "2026-10-13"
+    }
+  ]
+}

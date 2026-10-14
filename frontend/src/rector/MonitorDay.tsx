@@ -349,8 +349,28 @@ export default function MonitorDay({
         <span className="font-normal text-slate-400">— ismga bosing, har bir darsi ochiladi</span>
       </h3>
       {teachers.length === 0 ? (
+        /* Bo'sh holat uch xil: darslar hali tugamagan, filtr bo'sh, yoki
+           chindan dars yo'q. Ilgari uchalasiga bitta jumla chiqardi va
+           ertalab "dars topilmadi" deb ko‘rinardi — nazorat hisoboti
+           bilan bir xil gapirsin (2026-10-13). */
         <p className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-[13px] text-slate-500 ring-1 ring-slate-900/[0.07]">
-          <CheckCircle2 size={15} className="text-emerald-600" /> Bu filtr bo‘yicha dars topilmadi.
+          {h.pending > 0 ? (
+            <>
+              <Clock size={15} className="text-sky-600" />
+              Bugungi darslar hali tugamagan: {h.pending} ta dars baholanmoqda
+              {h.next_at ? `, eng yaqini ${h.next_at.slice(11, 16)} da tugaydi` : ''}.
+              Tugagandan keyin bu yerda chiqadi.
+            </>
+          ) : onlyProblem || faculty || department || monitor ? (
+            <>
+              <CheckCircle2 size={15} className="text-emerald-600" /> Bu filtr bo‘yicha dars topilmadi.
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={15} className="text-emerald-600" />
+              Bu kunda monitorli xonada amaliy dars yo‘q (dam olish kuni yoki bayram).
+            </>
+          )}
         </p>
       ) : (
         <div className="space-y-2">

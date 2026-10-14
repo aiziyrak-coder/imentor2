@@ -23,6 +23,7 @@
  * bo'lmasa `academic`. Ya'ni xato bo'lganda ham soxta bemor yaratilmaydi.
  */
 
+import { courseLevelPrompt, parseCourseLevel } from './courseLevel';
 import type { SyllabusTopicContext } from './syllabusTopicContext';
 
 export type SubjectDomain = 'clinical' | 'biomedical' | 'academic';
@@ -273,12 +274,18 @@ export function buildScopePrompt(scope: GenerationScope): string {
   const lectureBlock = lecture
     ? `MA'RUZA MATNI (asosiy manba — savol va keys SHU matn + mavzudan chiqmasin):\n${lecture.slice(0, 8500)}`
     : 'Ma\'ruza matni berilmagan — faqat kafedra, fan va mavzu doirasida yozing, boshqa fan aralashtirmang.';
+  // Kurs darajasi fan nomidan olinadi ("Fizika 1-s BM"). Ilgari u hech
+  // qayerda ishlatilmasdi va 1-kursga 4-kurs savoli berilardi (2026-10-13).
+  const levelBlock = courseLevelPrompt(parseCourseLevel(scope.subjectName || ''));
   return [
     `Kafedra: ${scope.departmentName || '—'}.`,
     `Fan: ${scope.subjectName || '—'}.`,
     DOMAIN_LINE[scope.domain],
+    levelBlock,
     lectureBlock,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 export function emptyScope(topic: string, subjectName = '', departmentName = ''): GenerationScope {

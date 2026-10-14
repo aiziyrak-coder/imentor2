@@ -975,13 +975,14 @@ def overview(db: Session, *, start_day: dt.date, end_day: dt.date, department: s
 
 def filter_options(db: Session) -> dict:
     """Smart filtrlar uchun ro'yxatlar — kafedra, fan, guruh, o'quv yili."""
-    departments = sorted(
-        {
-            (d or "").strip()
-            for (d,) in db.execute(select(StaffProfile.department).distinct()).all()
-            if (d or "").strip()
-        }
-    )
+    # Kafedralar ro'yxati INSTITUTNING RASMIY ro'yxatidan. Ilgari u xodim
+    # profilidagi erkin matndan yig'ilardi, shuning uchun ro'yxatga
+    # "Ta'lim jarayonini tashkil etish bo'limi" kabi kafedra bo'lmagan
+    # narsalar tushib, bitta kafedra ikki xil yozuv bilan ikki marta
+    # chiqar, klinik kafedralarning ko'pi esa umuman yo'q edi (2026-10-12).
+    from app.services.dean_access import official_names
+
+    departments = official_names()
 
     from app.services.syllabus_access import public_syllabus_clause
 

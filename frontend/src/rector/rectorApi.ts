@@ -1021,7 +1021,14 @@ export type ControlReport = {
     teacher_buckets?: { full: number; partial: number; opened: number; none: number; on_leave: number; unlinked: number };
     partial_missed_lessons?: number;
     /** Hali tugamagan darslar — hech bir raqamga kirmagan. */
-    pending?: { lessons: number; monitor_lessons: number; teachers: number; as_of: string | null };
+    pending?: {
+      lessons: number;
+      monitor_lessons: number;
+      teachers: number;
+      as_of: string | null;
+      /** Eng yaqin tugash vaqti — "raqamlar qachon paydo bo'ladi" degan javob. */
+      next_at?: string | null;
+    };
   };
   attention: ControlAttention[];
   check_room: ControlAttention[];

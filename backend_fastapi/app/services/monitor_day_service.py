@@ -32,6 +32,7 @@ from app.models.content import CourseSyllabus, StaffCourseSelection
 from app.services import lesson_evidence
 from app.services import lesson_report_service as lr
 from app.services import monitor_schedule_service as ms
+from app.services import dean_access
 from app.services.dean_access import in_groups
 
 #: Fan nomini sillabus nomi bilan solishtirish uchun eng kam moslik.
@@ -220,8 +221,9 @@ def day_report(db: Session, day: dt.date, *, faculty: str = "", department: str 
     if faculty:
         rows = [x for x in rows if faculty_of(x) == faculty]
     if department:
-        needle = ms._norm(department)
-        rows = [x for x in rows if needle in ms._norm(x.department_name) or ms._norm(x.department_name) in needle]
+        # Dars filtri bilan BIR XIL qoida: rasmiy ro'yxat orqali.
+        mine = dean_access.department_filter(db, department)
+        rows = [x for x in rows if mine(x.department_name)]
     if monitor_id:
         rows = [x for x in rows if x.monitor_id == monitor_id]
     if teacher:
@@ -330,6 +332,9 @@ def day_report(db: Session, day: dt.date, *, faculty: str = "", department: str 
 
     counted = [r for r in lessons_out
                if r["decision"] not in ("pending", "unlinked", "on_leave", "dead_room")]
+    waiting = [x for x in rows if not lr.is_over(x, now)]
+    next_at = min((lr._window(x)[1] - lr.AFTER for x in waiting), default=None)
+    next_at = next_at.isoformat() if next_at else None
     full = sum(1 for r in counted if r["decision"] in ("full", "proved"))
     return {
         "day": day.isoformat(),
@@ -343,6 +348,10 @@ def day_report(db: Session, day: dt.date, *, faculty: str = "", department: str 
             "blamed": sum(1 for r in counted if r["decision"] == "blamed"),
             "check_room": sum(1 for r in counted if r["decision"] == "check_room"),
             "pending": sum(1 for r in lessons_out if r["decision"] == "pending"),
+            # Eng yaqin tugaydigan dars: sahifa "hali tugamagan" deganda
+            # QACHON degan savolga javob bersin. Nazorat hisoboti ham shu
+            # gapni aytadi — ikki sahifa bir xil gapirsin (2026-10-13).
+            "next_at": next_at,
             "unlinked": sum(1 for r in lessons_out if r["decision"] == "unlinked"),
             "on_leave": sum(1 for r in lessons_out if r["decision"] == "on_leave"),
             "dead_room": sum(1 for r in lessons_out if r["decision"] == "dead_room"),

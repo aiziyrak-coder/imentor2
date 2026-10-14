@@ -19,6 +19,7 @@ import os
 import time
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
+from types import SimpleNamespace
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -217,6 +218,29 @@ def is_counted(lesson: HemisLesson) -> bool:
     return _type_key(getattr(lesson, "lesson_type", "")) not in _SKIP_KEYS
 
 
+#: Dars qatorining maydonlari — bir marta hisoblanadi.
+_LESSON_FIELDS = tuple(c.name for c in HemisLesson.__table__.columns)
+
+
+def _plain(rows: list) -> list:
+    """ORM qatorlarini baza sessiyasidan MUSTAQIL nusxaga aylantiradi.
+
+    Hisobot natijasi keshda saqlanadi va orqa fonda boshqa sessiyada
+    yangilanadi. ORM obyekti o'z sessiyasiga bog'langan: sessiya yopilsa
+    yoki commit bo'lsa, u "detached"/"expired" bo'lib qoladi va keyingi
+    o'qishda `DetachedInstanceError` beradi. Keshda ORM emas, oddiy
+    nusxa turishi kerak (2026-10-13).
+    """
+    out = []
+    for x in rows:
+        data = {name: getattr(x, name, None) for name in _LESSON_FIELDS}
+        extra = getattr(x, "merged_groups", None)
+        if extra is not None:
+            data["merged_groups"] = extra
+        out.append(SimpleNamespace(**data))
+    return out
+
+
 def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
              teacher: str = "", groups: tuple[str, ...] = (),
              pending: bool = False, all_types: bool = False) -> list[HemisLesson]:
@@ -241,8 +265,11 @@ def _lessons(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     # Guruh qatorlari bitta darsga yig'iladi — hisobot darslarni sanaydi.
     rows = merge_group_rows(rows)
     if department:
-        needle = ms._norm(department)
-        rows = [r for r in rows if needle in ms._norm(r.department_name) or ms._norm(r.department_name) in needle]
+        from app.services.dean_access import department_filter
+
+        mine = department_filter(db, department)
+        rows = [r for r in rows if mine(r.department_name)]
+    rows = _plain(rows)
     if not pending and end_day >= current_time().date():
         now = current_time()
         today = now.date()

@@ -73,6 +73,44 @@ export function buildCaseStructurePrompt(topic: string, domain: SubjectDomain = 
  * Keys sifati: zich klinik karta, qiyin vaziyatli masala.
  * Mutaxassis: kam ma'lumot, oson tashxis, yuzaki yechim — shuni tuzatadi.
  */
+/**
+ * Klinik fikrlashni O'RGATADIGAN keys uchun shartnoma (rektor, 2026-10-13).
+ *
+ * Nega kerak edi: jonli keyslar tekshirilganda yechim "yuqori ESR va qon
+ * bosimi gipertenziv ensefalopatiyani ko'rsatadi" kabi raqamsiz, aylanma
+ * mantiq bilan yozilgan edi; differensial esa "Birinchi farq qilish uchun…
+ * Ikkinchi… Uchinchi…" deb bir xil gapni uch marta takrorlardi. Bunday matn
+ * talabaga fikrlashni o'rgatmaydi.
+ *
+ * Shuning uchun qoidalar TEKSHIRILADIGAN shaklda beriladi: fikr yo'li bitta
+ * qatorda, differensial esa "QO'LLAB/RAD" yorliqlari bilan. Yorliq modelni
+ * aniq topilma yozishga majbur qiladi va bo'sh gapni ko'rinadigan qiladi.
+ */
+export const CASE_REASONING_CONTRACT = [
+  'KLINIK FIKRLASH SHARTNOMASI (majburiy, buzilsa keys yaroqsiz):',
+  // 1. Fikr yo'li — eng muhimi. Talaba aynan shu qatordan "qanday o'ylash"ni oladi.
+  '1) "diagnosis" maydoni AYNAN shu qator bilan boshlansin:',
+  '   "FIKR YO\'LI: <topilma 1> + <topilma 2> + <muhim YO\'Q belgi> -> <aniq nozologiya>."',
+  '   Topilmalar raqam va birligi bilan yozilsin; "yuqori", "past", "ko\'tarilgan" kabi',
+  '   faqat sifatli ta\'rif TAQIQLANADI — qiymat va me\'yor oralig\'i birga ko\'rsatilsin',
+  '   (masalan "EChT 68 mm/soat (me\'yor <20)").',
+  '2) HAL QILUVCHI TOPILMA: keysda bitta topilma bo\'lsin, u olib tashlansa tashxis',
+  '   O\'ZGARADI. "diagnosis" da shu topilma nomi bilan aytilsin.',
+  '3) CHALG\'ITUVCHI: aynan bitta ishonarli chalg\'ituvchi topilma bo\'lsin va yechimda',
+  '   "CHALG\'ITUVCHI: <topilma> — nega jalb qiladi, nega qarorni o\'zgartirmaydi" deb izohlansin.',
+  '4) "differential" da 3 ta nozologiya, HAR BIRI aynan shu shaklda:',
+  '   "<Nozologiya> — QO\'LLAB: <aniq topilma+raqam>; RAD: <aniq topilma+raqam yoki yo\'q belgi>."',
+  '   "Birinchi farq qilish uchun", "Ikkinchi farq qilish uchun" kabi qolip iboralar TAQIQLANADI.',
+  '   Oson rad etiladigan nozologiya emas: har biri yarim bilgan talabani chalg\'itadigan darajada yaqin.',
+  '5) VAQT: shikoyatda boshlanish va kuchayish vaqti (soat/kun) aniq bo\'lsin — fikrlash',
+  '   ko\'pincha aynan vaqt chizig\'iga tayanadi.',
+  '6) MUHIM YO\'Q (pertinent negatives): kamida 2 ta — nimani RAD ETGANI bilan birga.',
+  '7) "investigations" da har tekshiruv uchun: nima kutilyapti va natija QANDAY bo\'lsa',
+  '   qaror o\'zgaradi ("agar <natija> bo\'lsa, taktika <...> ga o\'zgaradi").',
+  '8) Yechim bemor ma\'lumotiga tayansin: "tavsiya etiladi", "o\'rganiladi" kabi egasiz',
+  '   umumiy gaplar TAQIQLANADI. Har da\'vo ortida keysdagi aniq fakt tursin.',
+].join('\n');
+
 export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): string {
   if (isPatientFree(domain)) {
     return [
@@ -85,6 +123,14 @@ export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): stri
       'QIYINLIK: bitta ta\'rif = javob EMAS. Kamida ikkita chalg\'ituvchi, lekin mantiqiy cheklov (me\'yor, qonun, tamoyil, standart, formula, protokol).',
       'Yechimda aniq qadam, me\'yor, qoida yoki tamoyil; nima uchun muqobil noto\'g\'ri.',
       'HAJM: vaziyat 520–720 so\'z, yechim 700–920 so\'z. Har maydon 4–8 dens gap.',
+      // Klinik bo'lmagan fanda ham fikrlash yo'li ko'rinishi kerak — faqat
+      // "bemor" o'rnida me'yor, standart va o'lchov turadi.
+      'FIKRLASH SHARTNOMASI (majburiy): "diagnosis" maydoni aynan shunday boshlansin — ' +
+        '"FIKR YO\'LI: <fakt 1> + <fakt 2> + <buzilgan talab> -> <ildiz sabab>." ' +
+        'Faktlar raqam va birligi bilan; "yuqori", "past" kabi sifatli ta\'rif TAQIQLANADI — ' +
+        'qiymat va me\'yor birga ko\'rsatilsin. Bitta HAL QILUVCHI fakt bo\'lsin (olib tashlansa xulosa o\'zgaradi) ' +
+        'va bitta CHALG\'ITUVCHI fakt izohlansin. "differential" da 3 ta muqobil tushuntirish, har biri ' +
+        '"<Muqobil> — QO\'LLAB: <aniq fakt>; RAD: <aniq fakt>." shaklida; qolip iboralar TAQIQLANADI.',
     ].join(' ');
   }
   return [
@@ -101,6 +147,9 @@ export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): stri
     'HAJM (zich klinik karta, suv emas):',
     'Vaziyat jami 520–720 so\'z. Yechim jami 700–920 so\'z.',
     'Har maydon 4–8 dens klinik gap: raqam+birlik, vaqt (soat/kun), dori+doza.',
+    // Fikrlash shartnomasi oxirida turadi: modeldan AYNAN shu shakl talab
+    // qilinadi, shuning uchun u oxirgi va eng aniq ko'rsatma bo'lsin.
+    CASE_REASONING_CONTRACT,
   ].join(' ');
 }
 

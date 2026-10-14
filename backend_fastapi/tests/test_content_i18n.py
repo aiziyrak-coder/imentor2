@@ -107,7 +107,9 @@ def test_list_fields_are_sent_as_separate_items_and_rebuilt_by_length():
     assert strings == ["Qaysi variant to'g'ri?", "izoh", "bir", "ikki", "uch", "a", "b", "c"]
     rebuilt = i18n._apply_strings([q], [s.upper() for s in strings], i18n.KIND_TEST)[0]
     assert rebuilt["options"] == ["BIR", "IKKI", "UCH"] and rebuilt["optionExplanations"] == ["A", "B", "C"]
-    assert rebuilt["correctOptionIndex"] == 1
+    # To'g'ri javob raqami tarjimaga KO'CHIRILMAYDI — u faqat asl savolda
+    # turadi (2026-10-13); frontend uni ko'rsatishda asl savoldan oladi.
+    assert "correctOptionIndex" not in rebuilt
 
 
 def test_case_headings_are_never_given_to_the_model():

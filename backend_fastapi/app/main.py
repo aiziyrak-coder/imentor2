@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from anyio import to_thread
@@ -50,6 +51,39 @@ from app.services.file_storage import media_root
 settings = get_settings()
 
 @asynccontextmanager
+def _warm_rector_report() -> None:
+    """Rektor hisobotini oldindan hisoblab qo'yish (orqa fonda).
+
+    Hisobot og'ir: 7 kunlik ~8 soniya, 30 kunlik ~24. Natija keshlanadi,
+    lekin dastur qayta ishga tushganda kesh bo'sh bo'ladi va BIRINCHI
+    ochgan odam o'sha vaqtni kutadi. Shu yerda eng ko'p so'raladigan ikki
+    davr oldindan hisoblanadi, shuning uchun rektor kutmaydi (2026-10-13).
+
+    Xato bo'lsa jim o'tiladi: bu faqat tezlik uchun, ilovaning ishlashiga
+    daxli yo'q.
+    """
+    if os.environ.get("IMENTOR_WARM_REPORT", "1") != "1":
+        return
+
+    def run() -> None:
+        import datetime as dt
+
+        try:
+            from app.core.db import SessionLocal
+            from app.services import control_report_service as control
+            from app.services import lesson_report_service as lessons
+
+            today = lessons.current_time().date()
+            with SessionLocal() as db:
+                for start in (today, today - dt.timedelta(days=6)):
+                    control.overview(db, start, today)
+            logging.getLogger("app").info("rektor hisoboti oldindan hisoblandi")
+        except Exception:
+            logging.getLogger("app").warning("hisobotni oldindan hisoblab bo'lmadi", exc_info=True)
+
+    threading.Thread(target=run, name="warm-rector-report", daemon=True).start()
+
+
 async def lifespan(_app: FastAPI):
     """Sinxron (`def`) endpointlar uchun ishchi oqimlar (thread) chegarasi.
 
@@ -63,6 +97,7 @@ async def lifespan(_app: FastAPI):
     """
     limiter = to_thread.current_default_thread_limiter()
     limiter.total_tokens = int(os.environ.get("APP_THREAD_LIMIT", "48"))
+    _warm_rector_report()
     yield
 
 
