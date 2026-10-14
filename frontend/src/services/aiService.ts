@@ -1,3 +1,4 @@
+import { reportClientError } from '../utils/clientErrorReporter';
 import { slideLanguageWrong } from '../utils/presentationLanguage';
 import { type AppLanguage, inferPdfLanguage } from '../i18n/language';
 import { translate } from '../i18n/translations';
@@ -1008,8 +1009,17 @@ export function parseCorrectOptionIndex(raw: unknown, options: string[], fallbac
  * o'qituvchi faqat "Sessiyani boshlab bo'lmadi"ni ko'rardi. Endi xato
  * generatsiyaning o'zida chiqadi va bo'sh test saqlanmaydi.
  */
-function requireQuestions(session: TestSession): TestSession {
-  if (!session.questions?.length) throw new Error('Test savollari yaratilmadi');
+function requireQuestions(session: TestSession, rawSnippet = ''): TestSession {
+  if (!session.questions?.length) {
+    // Sabab keyin aniq ko'rinsin: AI javobidan parcha "Sayt xatolari"
+    // jurnaliga yoziladi (admin panel). Ilgari bo'sh test nega chiqqanini
+    // bilib bo'lmasdi — AI javobi hech qayerda saqlanmasdi.
+    reportClientError(new Error('Test savollari yaratilmadi (AI javobi yaroqsiz)'), {
+      source: 'aiService.generateTests',
+      stack: rawSnippet || '(AI javobi bo\'sh)',
+    });
+    throw new Error('Test savollari yaratilmadi');
+  }
   return session;
 }
 
@@ -1951,6 +1961,8 @@ export const aiService = {
 
     const contextBlock = buildOwnMaterialsBlock(extraContext);
 
+    /** Oxirgi AI javobi (qisqartirilgan) — bo'sh natijada jurnalga yozish uchun. */
+    let lastRaw = '';
     const generate = async (requestedCount: number, extraUser = ''): Promise<TestSession> => {
       const variety = buildTestVarietyPrompt(topic, requestedCount, difficulty, domain);
       const levelBlock = buildTestDifficultyPrompt(difficulty, domain);
@@ -2010,6 +2022,11 @@ export const aiService = {
         },
         parse: (t) => parseJSONSafe<TestSession>(t),
       });
+      try {
+        lastRaw = JSON.stringify(parsed).slice(0, 3000);
+      } catch {
+        lastRaw = String(parsed).slice(0, 3000);
+      }
       return { ...normalizeTestSession(topic, { ...parsed, difficulty, domain }, requestedCount, bookReferences, true) };
     };
 
@@ -2108,11 +2125,11 @@ export const aiService = {
         }
       }
       data = await topUp(data);
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain });
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain }, lastRaw);
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);
       const data = await topUp(await generate(Math.min(safeCount, 10)));
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain });
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain }, lastRaw);
     }
   },
 
