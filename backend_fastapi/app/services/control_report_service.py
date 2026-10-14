@@ -15,6 +15,7 @@ Hamma raqam bitta manbadan: `core_hemislesson` (HEMIS jadvalining nusxasi).
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import threading
 import time
 from collections import defaultdict
@@ -27,6 +28,7 @@ from app.services import lesson_report_service as lr
 from app.services import monitor_room_service as mr
 from app.services import monitor_schedule_service as ms
 from app.services import teacher_activity_service as ta
+from app.services import dean_access
 from app.services.dean_access import in_groups
 
 # Ishlatish darajasi shu chegaralardan qanday o'tgani rangni belgilaydi.
@@ -45,23 +47,80 @@ NEAR_MINUTES = 30
 #: raqam bosilganda esa butun hisob qaytadan yurardi. 30 kunlik davr 17-20
 #: soniya hisoblanadi — brauzer kutib turolmay "so'rov vaqti tugadi" derdi
 #: (2026-10-09). Testlarda 0 (qarang conftest).
-CACHE_SECONDS = 45
+#: Sahifa "Jonli" rejimda har 60 soniyada qayta so'raydi. 45 soniyalik
+#: kesh bilan deyarli har so'rov qaytadan hisoblanardi — rektor har safar
+#: kutib turardi. 5 daqiqa: takroriy ochish bir zumda, raqam esa yetarlicha
+#: yangi (sahifada "oxirgi yangilanish" vaqti ko'rinadi) — 2026-10-13.
+logger = logging.getLogger(__name__)
+
+CACHE_SECONDS = 300
 _cache: dict[tuple, tuple[float, object]] = {}
 _locks: dict[tuple, threading.Lock] = {}
 
 
-def _cached(key: tuple, build):
-    """Bir xil so'rov bir vaqtda kelsa bittasi hisoblaydi, qolgani natijani kutadi."""
+#: Eskirgan natija shu muddatgacha ko'rsatilaveradi, yangisi esa ORQADA
+#: hisoblanadi. Shu sababli rektor faqat eng birinchi ochilishda kutadi:
+#: keyingi safar raqam darhol chiqadi, orqada yangilanadi (2026-10-13).
+STALE_SECONDS = 60 * 60
+_refreshing: set[tuple] = set()
+
+
+def _refresh_later(key: tuple, build) -> None:
+    """Orqa fonda qayta hisoblash — bir kalit uchun bittadan ortiq emas.
+
+    Ip O'ZINING baza sessiyasini ochadi. So'rovning sessiyasini ishlatish
+    mumkin emas: SQLAlchemy sessiyasi bir vaqtda ikki ish bajarmaydi va
+    ikkisi ham yiqilardi — rektorga HTTP 500 qaytardi (2026-10-13).
+    """
+    if key in _refreshing:
+        return
+    _refreshing.add(key)
+
+    def run() -> None:
+        from app.core.db import SessionLocal
+
+        own = SessionLocal()
+        try:
+            value = build(own)
+            _cache[key] = (time.monotonic(), value)
+        except Exception:                                   # pragma: no cover
+            logger.exception("hisobotni orqa fonda yangilash o'tmadi: %s", key)
+        finally:
+            own.close()
+            _refreshing.discard(key)
+
+    threading.Thread(target=run, name="control-report-refresh", daemon=True).start()
+
+
+def _cached(key: tuple, db: Session, build):
+    """Bir xil so'rov bir vaqtda kelsa bittasi hisoblaydi, qolgani natijani kutadi.
+
+    Eskirgan natija bo'lsa — u DARHOL qaytariladi va yangisi orqada
+    hisoblanadi: 30 kunlik hisobot 25 soniya oladi, rektor esa uni har
+    safar kutib o'tirmasligi kerak.
+
+    `build` baza sessiyasini ARGUMENT sifatida oladi: oldinda so'rovning
+    sessiyasi beriladi, orqa fonda esa ipning o'zi ochgani.
+    """
     if CACHE_SECONDS <= 0:
-        return build()
+        return build(db)
+    hit = _cache.get(key)
+    now = time.monotonic()
+    if hit is not None:
+        age = now - hit[0]
+        if age < CACHE_SECONDS:
+            return hit[1]
+        if age < STALE_SECONDS:
+            _refresh_later(key, build)
+            return hit[1]
     with _locks.setdefault(key, threading.Lock()):
         hit = _cache.get(key)
         now = time.monotonic()
         if hit is not None and now - hit[0] < CACHE_SECONDS:
             return hit[1]
-        value = build()
+        value = build(db)
         now = time.monotonic()
-        for old in [k for k, (t, _) in _cache.items() if now - t >= CACHE_SECONDS]:
+        for old in [k for k, (t, _) in _cache.items() if now - t >= STALE_SECONDS]:
             _cache.pop(old, None)
             _locks.pop(old, None)
         _cache[key] = (now, value)
@@ -264,8 +323,9 @@ def _teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, departme
                   query: str = "", groups: tuple[str, ...] = ()) -> tuple[list[dict], list, dict, dict, dict]:
     """`teacher_rows` + hali tugamagan (baholanmaydigan) darslar haqida ma'lumot."""
     key = ("rows", start_day, end_day, department, query, tuple(groups))
-    return _cached(key, lambda: _build_teacher_rows(db, start_day, end_day, department=department,
-                                                    query=query, groups=groups))
+    return _cached(key, db, lambda session: _build_teacher_rows(session, start_day, end_day,
+                                                               department=department,
+                                                               query=query, groups=groups))
 
 
 def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
@@ -278,14 +338,23 @@ def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, de
         # O'tgan kunlar darsi aniq tugagan — vaqtini hisoblab o'tirilmaydi.
         (lessons if x.lesson_date < today or lr.is_over(x, now) else waiting).append(x)
     waiting_by: dict[str, int] = defaultdict(int)
+    # Eng yaqin tugash vaqti: ertalab hisobot bo'sh bo'lsa, rektorga "raqamlar
+    # qachon paydo bo'ladi" degan javob kerak (2026-10-13). `is_over` dars
+    # jadvaldagi tugash vaqtida "tugagan" deb sanaydi, shuning uchun oyna
+    # oxiridan muhlat ayiriladi.
+    next_at = None
     for lesson in waiting:
         if lesson.monitor_id:
             waiting_by[lesson.teacher_username or f"name:{lesson.teacher_name}"] += 1
+        ends = lr._window(lesson)[1] - lr.AFTER
+        if next_at is None or ends < next_at:
+            next_at = ends
     pending = {
         "lessons": len(waiting),
         "monitor_lessons": sum(waiting_by.values()),
         "teachers": len(waiting_by),
         "as_of": now.isoformat() if waiting else None,
+        "next_at": next_at.isoformat() if next_at else None,
     }
     # Faollik bir marta hisoblanadi va `overview` ga ham shu beriladi: ilgari
     # u ikki marta yurardi (30 kunlik davrda har biri ~4 soniya).
@@ -365,8 +434,9 @@ def overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: s
     key = ("overview", start_day, end_day, department, query, tuple(groups))
     # Nusxa: yo'l (route) dekan uchun ro'yxatlarni almashtiradi — saqlangan
     # javobning o'zi o'zgarib, keyingi (rektor) so'roviga o'tib ketmasin.
-    return dict(_cached(key, lambda: _build_overview(db, start_day, end_day, department=department,
-                                                     query=query, groups=groups)))
+    return dict(_cached(key, db, lambda session: _build_overview(session, start_day, end_day,
+                                                                department=department,
+                                                                query=query, groups=groups)))
 
 
 def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, department: str = "",
@@ -420,8 +490,13 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
     # --- Kafedralar
     dep_agg: dict[str, dict] = defaultdict(
         lambda: {"monitor": 0, "used": 0, "teachers": set(), "active": set(), "other": 0})
+    # Kafedra kesimi RASMIY nom bo'yicha: aks holda bitta kafedra bir necha
+    # qator bo'lib ketardi ("Normal anatomiya" va "Yu. Nishonov nomidagi
+    # Normal anatomiya" alohida chiqardi, 2026-10-12).
+    canon = dean_access.canonical_map(db)
     for lesson in lessons:
-        d = dep_agg[lesson.department_name or "—"]
+        d = dep_agg[dean_access.canonical(lesson.department_name, canon)
+                    or (lesson.department_name or "—")]
         if lesson.monitor_id:
             d["monitor"] += 1
             if lesson.teacher_username:

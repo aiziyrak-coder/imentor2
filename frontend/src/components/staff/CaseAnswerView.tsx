@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
+import { splitBold, stripBold } from '../../utils/boldMarkers';
 import { parseCaseAnswer } from '../../utils/parseCaseAnswer';
-import LinkifiedText from './LinkifiedText';
 
 type Props = {
   text: string;
@@ -23,7 +23,33 @@ function isDoseToken(token: string): boolean {
   return DOSE_RE.test(token);
 }
 
+/**
+ * `**qalin**` bo'laklari AVVAL ajratiladi.
+ *
+ * Aks holda doza yoki `[n]` belgisi juftlikni bo'lib tashlaydi va matnda
+ * yolg'iz yulduzchalar qolardi: `**10 mg**` da doza alohida token.
+ */
 function renderRichBody(
+  body: string,
+  refAnchorPrefix?: string,
+  citeUrls?: Record<number, string>,
+): React.ReactNode[] {
+  const pieces = splitBold(body);
+  if (pieces.length === 1 && !pieces[0].bold) return renderTokens(body, refAnchorPrefix, citeUrls);
+  return pieces.map((piece, i) =>
+    piece.bold ? (
+      <strong key={`sb_${i}`} className="font-semibold text-[#06283d]">
+        {renderTokens(piece.text, refAnchorPrefix, citeUrls)}
+      </strong>
+    ) : (
+      <React.Fragment key={`sp_${i}`}>
+        {renderTokens(piece.text, refAnchorPrefix, citeUrls)}
+      </React.Fragment>
+    ),
+  );
+}
+
+function renderTokens(
   body: string,
   refAnchorPrefix?: string,
   citeUrls?: Record<number, string>,
@@ -156,12 +182,14 @@ export default function CaseAnswerView({
   }, [parsed.bibliography, citeUrlsProp]);
 
   if (!parsed.sections.length) {
+    // Sarlavhasiz javob ham `renderRichBody` dan o'tadi: ilgari u sof matn
+    // bo'lib chiqar edi va qalinlik `**` ko'rinishida ko'rinib qolardi
+    // (2026-10-13). Havolalar bu yo'lda ham ishlaydi — `linkifyChunk` ichida.
     return (
       <div className={className}>
-        <LinkifiedText
-          text={parsed.leftover || text}
-          className="text-[14.5px] leading-[1.7] text-slate-800 whitespace-pre-wrap"
-        />
+        <p className="text-[14.5px] leading-[1.7] text-slate-800 whitespace-pre-wrap">
+          {renderRichBody(parsed.leftover || text, refAnchorPrefix, citeUrls)}
+        </p>
       </div>
     );
   }
@@ -169,11 +197,15 @@ export default function CaseAnswerView({
   return (
     <div className={`space-y-4 ${className}`}>
       {parsed.leftover ? (
-        <p className="text-[14.5px] leading-[1.7] text-slate-800 whitespace-pre-wrap">{parsed.leftover}</p>
+        <p className="text-[14.5px] leading-[1.7] text-slate-800 whitespace-pre-wrap">
+          {renderRichBody(parsed.leftover, refAnchorPrefix, citeUrls)}
+        </p>
       ) : null}
       {parsed.sections.map((section) => (
         <div key={section.key}>
-          <h5 className="text-[12px] font-bold text-slate-600 mb-1.5 tracking-wide">{section.title}</h5>
+          {/* Sarlavha allaqachon qalin — ichidagi `**` faqat yulduzcha
+              bo'lib ko'rinardi, shuning uchun tozalanadi. */}
+          <h5 className="text-[12px] font-bold text-slate-600 mb-1.5 tracking-wide">{stripBold(section.title)}</h5>
           <div className="text-[14.5px] leading-[1.75] text-slate-800 whitespace-pre-wrap">
             {renderRichBody(section.body, refAnchorPrefix, citeUrls)}
           </div>

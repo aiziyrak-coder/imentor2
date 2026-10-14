@@ -85,7 +85,13 @@ CASE_HEADINGS: list[dict[str, str]] = [
 
 
 def _heading_key(text: str) -> str:
-    return re.sub(r"['‘’`ʻʼ]", "'", (text or "").strip().lower())
+    """Sarlavha kaliti. Qalinlik belgisi ham olib tashlanadi.
+
+    Model yoki qo'lda tahrir sarlavhani `**Muammo**` qilib qo'ysa, u sarlavha
+    sifatida tanilmay qolardi va himoyasiz tarjimaga tushardi (2026-10-13).
+    """
+    clean = (text or "").strip().strip("*").strip()
+    return re.sub(r"['‘’`ʻʼ]", "'", clean.lower())
 
 
 _HEADING_INDEX = {_heading_key(v): i for i, row in enumerate(CASE_HEADINGS) for v in row.values()}
@@ -95,7 +101,8 @@ _AMBIGUOUS_HEADINGS = {i for i, row in enumerate(CASE_HEADINGS) if row["en"] in 
     "Who is involved", "Problem", "Given conditions", "Setting and tools", "What was observed", "Data",
     "Main conclusion", "Other explanations", "How to check", "How to solve", "How to prevent the mistake",
 }}
-_HEADING_LINE = re.compile(r"^(#{1,6}\s*)?(.+?)\s*$")
+#: Sarlavha qatori: # prefiksi va tasodifiy ** qalinligi bilan ham tanilsin.
+_HEADING_LINE = re.compile(r"^(#{1,6}\s*)?\**(.+?)\**\s*$")
 _HEADING_TOKEN = re.compile(r"§H(\d+)§")
 
 
@@ -268,6 +275,15 @@ def _apply_strings(questions: list, translated: list[str], kind: str = KIND_CASE
         if not isinstance(q, dict):
             continue
         item = dict(q)
+        # To'g'ri javob o'rni TILDAN MUSTAQIL: variantlar tartibi tarjimada
+        # saqlanadi, shuning uchun u faqat ASL savolda turishi kerak.
+        #
+        # Ilgari u nusxalanardi va asl savol keyinchalik tuzatilsa (variant
+        # tartibi yoki javob raqami), tarjimada ESKI raqam qolib ketardi —
+        # talaba rus yoki ingliz tilida ishlaganda to'g'ri javob uchun "xato"
+        # olardi. Jonli ma'lumotda 577 savol shunday edi (2026-10-13).
+        for stale in ("correctOptionIndex", "correctIndex", "correct"):
+            item.pop(stale, None)
         for field in text_fields:
             if cursor < len(translated) and field in q:
                 value = translated[cursor].strip()
@@ -338,6 +354,12 @@ def _system_prompt(kind: str, source: str, target: str, strict_note: str = "") -
         "Every array element is ONE independent text (a scenario, an answer option, an explanation) — translate "
         "each element separately; never merge, split or reorder elements. "
         "Empty strings stay empty. Keep Markdown headings (###) and line breaks. "
+        # Qalinlik talabaga "nimaga e'tibor berish kerak"ni ko'rsatadi (rektor,
+        # 2026-10-13). Tarjima uni yo'qotsa yoki boshqa joyga ko'chirsa, keysning
+        # o'quv qiymati tushadi — shuning uchun alohida talab qilinadi.
+        "Keep **bold** markers: the same clinically decisive words must stay bold in your "
+        "translation, with the same number of ** pairs, each pair opened and closed on one line. "
+        "Never bold a heading, and never add bold of your own. "
         "A text may mix languages (e.g. English sentences inside Uzbek) — translate ALL of it into the target "
         "language, never leave a passage in the original language. "
         "Do NOT add explanations, numbering or commentary. Do NOT leave any sentence untranslated. "

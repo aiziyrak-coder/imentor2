@@ -57,6 +57,9 @@ import {
   type CaseStudyFocus,
 } from '../utils/generationVariety';
 import { listPreparedForTopicSynced, loadPreparedByIdSynced } from '../utils/preparedContentStore';
+import { caseWeaknesses, weakCaseRetryNote } from '../utils/caseQuality';
+import { flawRetryNote, questionFlaws, type QuestionFlaw } from '../utils/testQuality';
+import { depthFlaws, depthRetryNote, type DepthFlaw } from '../utils/testDepth';
 import { normalizeCaseFocus } from '../utils/caseFocusLabels';
 import { type MedicalReference } from '../utils/medicalReferences';
 import { stripUnfilledSourceTemplate } from '../utils/sourceTemplate';
@@ -708,7 +711,42 @@ const CASE_ACADEMIC_FIELDS =
   '   "management" (160–210 so\'z) — aniq yechim (qadam, qaror, me\'yor yoki formula); nima tanlanmadi va nega.\n' +
   '   "recommendations" (80–110 so\'z) — xatolikni oldini olish qoidalari.\n' +
   '3. TAQIQLANGAN: individual bemor vignette (yosh + shikoyat + tashxis + dori); KROK; mavzuga aloqasiz vaziyat.\n' +
-  '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Boshqa ism/kasb.\n';
+  '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Boshqa ism/kasb.\n' +
+  // Klinik bo'lmagan fanda ham "nimaga e'tibor berish kerak" degan savol
+  // bor: me'yordan chetga chiqqan o'lchov, muddat, talab raqami.
+  '5. QALIN BELGILASH (majburiy) — qarorni hal qiluvchi joylarni `**...**` ichiga oling: ' +
+  'me\'yordan chetga chiqqan o\'lchov va uning raqami+birligi, buzilgan talab/standart bandi, ' +
+  'muddat, hamda muhim YO\'Q (masalan "hujjat **yuritilmagan**"). Har maydonda 1–3 ta, jami 6–12 tadan oshmasin; ' +
+  'butun gap, sarlavha, ism va me\'yordagi qiymat qalin QILINMAYDI. ' +
+  'Yechimda 3–6 ta: ildiz sabab, me\'yor/formula, qadam va nazorat muddati. ' +
+  '`**` juft bo\'lsin va bitta qatorda yopilsin; `*`, `_`, `<b>` ISHLATILMAYDI.\n';
+
+/**
+ * Klinik fikrlash uchun MUHIM joylarni qalin qilish (rektor, 2026-10-13).
+ *
+ * Maqsad: talaba qaysi kasallikda nimaga e'tibor berishni o'rganishi. Shuning
+ * uchun qalinlik BEZAK emas — qarorni o'zgartiradigan topilmaga qo'yiladi.
+ *
+ * Nega son bilan cheklangan: hamma joy qalin bo'lsa, hech joy ajralmaydi.
+ * Nega sarlavha qalin qilinmaydi: sarlavhalar `###` bilan ajratiladi
+ * (`parseCaseScenario`), qalin sarlavha bo'lim sifatida tanilmay qoladi.
+ */
+const CASE_BOLD_RULE =
+  '6. QALIN BELGILASH (majburiy) — klinik fikrlash uchun HAL QILUVCHI joylarni ' +
+  '`**...**` ichiga oling, talaba nimaga e\'tibor berishni ko\'rsin:\n' +
+  '   - har bir vaziyat maydonida 1–3 ta, jami 6–12 tadan OSHMASIN. Ko\'p bo\'lsa ma\'nosi yo\'qoladi;\n' +
+  '   - qalin qilinadi: tashxisni hal qiluvchi simptom va uning VAQTI/joylashuvi, ' +
+  'me\'yordan chetga chiqqan hayotiy ko\'rsatkich va lab qiymati (raqam+birlik birga), ' +
+  'qizil bayroq, hamda qarorni o\'zgartiradigan MUHIM YO\'Q (masalan "periton simptomlari **yo\'q**");\n' +
+  '   - qalin QILINMAYDI: butun gap yoki butun abzas, sarlavha, ism, oddiy me\'yordagi qiymat, umumiy so\'z;\n' +
+  // Qalinlik fikrlash shartnomasiga BOG'LANADI: "FIKR YO'LI" qatoridagi
+  // topilmalar bilan vaziyatdagi qalin joylar BIR XIL bo'lishi kerak, aks
+  // holda talaba qalin joyni o'qiydi, lekin u xulosaga olib bormaydi.
+  '   - MUHIM: vaziyatda qalin qilingan topilmalar "FIKR YO\'LI" qatoridagi topilmalar bilan ' +
+  'AYNAN bir xil bo\'lsin — hal qiluvchi topilma va muhim YO\'Q belgisi albatta qalin bo\'lsin. ' +
+  'Xulosaga olib bormaydigan raqamni qalin qilish TAQIQLANADI;\n' +
+  '   - yechimda ham 3–6 ta: aniq nozologiya nomi, mezon/skor, dori+doza va nazorat muddati;\n' +
+  '   - `**` juft bo\'lsin va bitta qatorda yopilsin; `*`, `_`, `<b>` ISHLATILMAYDI.\n';
 
 const CASE_CLINICAL_FIELDS =
   'MAYDONLAR:\n' +
@@ -736,7 +774,8 @@ const CASE_CLINICAL_FIELDS =
   '3. Aniq yozing: nozologiya, mezon, dori, doza, qiymat. "Ehtimol" o\'rniga dalil.\n' +
   '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Boshqa ism/yosh/kasb. Anvar, Nigora, Shirin, Gulnora, Madina, ' +
   'Iskandar, Odil, Otabek, Qodir ismlaridan QOCHING.\n' +
-  '5. TAQIQLANGAN ssenariy: kam lab + pastki qorin og\'rig\'i = appenditsit; yoki bitta klassik belgi = tashxis.\n';
+  '5. TAQIQLANGAN ssenariy: kam lab + pastki qorin og\'rig\'i = appenditsit; yoki bitta klassik belgi = tashxis.\n' +
+  CASE_BOLD_RULE;
 
 /** Bo'limlarni harfsiz klinik fikr matniga birlashtiradi. */
 function joinCaseSections(
@@ -772,7 +811,9 @@ async function generateSingleCaseQuestion(
   const scopeBlock = buildScopePrompt(scope);
   const focusHint = isPatientFree(domain) ? CASE_FOCUS_HINTS_ACADEMIC[focus] : CASE_FOCUS_HINTS[focus];
   const personaHint = isPatientFree(domain) ? CASE_PERSONA_HINTS_ACADEMIC[focus] : CASE_PERSONA_HINTS[focus];
-  const request = (strict: boolean, banClinicalLeak = false, offTopic = false) =>
+  // `qualityNote` — fikrlash sifati bo'yicha qayta urinishda nima aynan
+  // noto'g'ri bo'lganini aytadigan izoh (2026-10-13).
+  const request = (strict: boolean, banClinicalLeak = false, offTopic = false, qualityNote = '') =>
     openaiJson<CaseSections>({
       model: OPENAI_CHAT,
       purpose: 'case_generate',
@@ -792,6 +833,11 @@ async function generateSingleCaseQuestion(
             ? 'Har maydon 4–8 dens gap: atama, mexanizm, o\'lchov va me\'yor bilan. Individual bemor kartasi YO\'Q. '
             : 'Zich klinik karta: har maydon 4–8 dens gap, kam ma\'lumotli oson hikoya YO\'Q. ') +
         'Yechimda a) b) c) d) e) harflari YOZILMASIN — bu fikr, test varianti emas. ' +
+        // Qalinlik — talabaga "nimaga e'tibor berish kerak"ni ko'rsatish usuli.
+        // Faqat `**...**`: boshqa markdown belgisi sof matn ko\'rinishlarida
+        // yulduzcha bo\'lib ko\'rinib qoladi.
+        'Hal qiluvchi topilmani `**matn**` bilan qalin qiling (har maydonda 1–3 ta, umumiy 6–12 ta). ' +
+        'Sarlavha, butun gap va ismni qalin qilmang. Boshqa markdown belgisi ishlatmang. ' +
         `Language: ${outLang}. ${strictLanguageDirective(language)} ` +
         (domain === 'academic'
           ? 'Hech qanday [n] iqtibos, PMID yoki klinik manba yozmang.'
@@ -816,6 +862,7 @@ async function generateSingleCaseQuestion(
         (domain !== 'academic' && hasContext ? `\nMANBALAR:\n${contextText}\n` : '') +
         `\n\n${banClinicalLeak ? `${ACADEMIC_CLINICAL_RETRY_BAN}\n\n` : ''}` +
         `${offTopic ? `${OFF_TOPIC_RETRY_NOTE}\n\n` : ''}` +
+        `${qualityNote ? `${qualityNote}\n\n` : ''}` +
         `${structure}\n\n` +
         `Generate ONE case with focus="${focus}" (${focusHint}). ` +
         `${personaHint}\n` +
@@ -863,9 +910,18 @@ async function generateSingleCaseQuestion(
     }
   }
 
-  // Mavzuga moslik: vaziyat va yechimda mavzuning birorta asosiy atamasi ham bo'lmasa — bir marta qayta.
+  // Mavzuga moslik BO'LIMLAR bo'yicha tekshiriladi. Ilgari butun keys bitta
+  // bo'lak edi: 1500 so'z ichida mavzuning bitta so'zi uchrasa yetarli
+  // hisoblanardi, shuning uchun mavzusi "Monogen kasalliklar" bo'lgan joyda
+  // gipertenziv ensefalopatiya keysi o'tib ketgan (2026-10-13). Endi vaziyat,
+  // xulosa va differensial alohida sanaladi — ulushi graduallashadi.
   const caseOffTopic = (r: CaseSections) =>
-    offTopicShare(topic, [Object.values(r).map((v) => String(v || '')).join('\n')]);
+    offTopicShare(topic, [
+      [r.patient, r.complaints, r.history, r.examination, r.labs]
+        .map((v) => String(v || '')).join('\n'),
+      String(r.diagnosis || ''),
+      String(r.differential || ''),
+    ]);
   const firstShare = caseOffTopic(raw);
   if (firstShare !== null && firstShare > OFF_TOPIC_THRESHOLD) {
     console.warn(`Case focus "${focus}": mavzudan chetga chiqdi, qayta urinilmoqda`);
@@ -881,6 +937,27 @@ async function generateSingleCaseQuestion(
       }
     } catch (err) {
       console.warn('Case mavzu bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
+    }
+  }
+
+  // Klinik fikrlash sifati: promptda talab qilish yetarli emas — natija
+  // tekshiriladi va kuchsiz bo'lsa bir marta qayta so'raladi (2026-10-13).
+  // Jonli keyslarda raqamsiz xulosa va "Birinchi farq qilish uchun…" qolipi
+  // uchragan edi; bunday matn talabaga fikrlashni o'rgatmaydi.
+  const weak = caseWeaknesses(String(raw.diagnosis || ''), String(raw.differential || ''));
+  if (weak.length) {
+    console.warn(`Case focus "${focus}": fikrlash sifati past (${weak.join(', ')}), qayta urinilmoqda`);
+    try {
+      const retry = await request(true, false, false, weakCaseRetryNote(weak));
+      const after = caseWeaknesses(String(retry.diagnosis || ''), String(retry.differential || ''));
+      if (
+        after.length < weak.length &&
+        !outputLanguageLooksWrong(joinCaseSections(retry, language, domain), language)
+      ) {
+        raw = retry;
+      }
+    } catch (err) {
+      console.warn('Case sifat bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
     }
   }
 
@@ -1937,6 +2014,8 @@ export const aiService = {
 
     const contextBlock = buildOwnMaterialsBlock(extraContext);
 
+    // Tashlangan savollarning nuqsonlari — keyingi so'rovga izoh bo'lib qo'shiladi.
+    let lastFlawNote = '';
     const generate = async (requestedCount: number, extraUser = ''): Promise<TestSession> => {
       const variety = buildTestVarietyPrompt(topic, requestedCount, difficulty, domain);
       const levelBlock = buildTestDifficultyPrompt(difficulty, domain);
@@ -2023,9 +2102,10 @@ export const aiService = {
         try {
           const more = await generate(
             missing + 2,
-            existing
-              ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n`
-              : '',
+            (lastFlawNote ? `${lastFlawNote}\n\n` : '') +
+              (existing
+                ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n`
+                : ''),
           );
           const seen = new Set(have.map((q) => q.question.trim().toLowerCase()));
           const fresh = (more.questions || []).filter((q) => !seen.has(q.question.trim().toLowerCase()));
@@ -2093,7 +2173,80 @@ export const aiService = {
           console.warn('Test mavzu bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
         }
       }
+      // Savol sifati: nuqsonli savol OLINMAYDI. Jonli ma'lumotda 54,5%
+      // savolda bitta savol ichida ikki savol, 47,8% da to'g'ri javob eng
+      // uzun variant, 6,4% da javob savolning o'zida aytilgan edi
+      // (2026-10-13 auditi). Promptda talab qilish yetarli bo'lmagan.
+      //
+      // Nuqsonlilar tashlanadi va yetishgani `topUp` orqali qayta so'raladi —
+      // modelga aynan nima noto'g'ri bo'lgani aytiladi.
+      // Ikki qatlam: SHAKL (`testQuality`) va MAZMUN (`testDepth`). Shakli
+      // to'g'ri savol ham yuzaki bo'lishi mumkin — "quyidagilardan qaysi biri
+      // xos?" turidagi eslash savoli yoki ma'lumotsiz vignette.
+      // Ikki qatlam, ikki xil qattiqlik bilan:
+      //
+      //  * SHAKL nuqsoni (ikki savol, javob stemda, eng uzun javob, takror,
+      //    "hammasi to'g'ri") — HAR DOIM rad etiladi: bunday savol talabani
+      //    aldaydi yoki noto'g'ri baholanadi;
+      //  * MAZMUN nuqsoni (yuzaki vignette, yuzaki izoh) — avval rad etiladi,
+      //    lekin so'ralgan son to'lmasa qaytarib olinadi. Aks holda o'qituvchi
+      //    10 savol so'rab bo'sh qolardi: eski bazada savollarning 99% i shu
+      //    chegaradan o'tmaydi (2026-10-13 o'lchovi).
+      const judge = (questions: TestSession['questions']) => {
+        const good: TestSession['questions'] = [];
+        const weak: TestSession['questions'] = [];
+        const form: QuestionFlaw[] = [];
+        const depth: DepthFlaw[] = [];
+        for (const q of questions || []) {
+          const formFlaws = questionFlaws(q);
+          if (formFlaws.length) {
+            form.push(...formFlaws);
+            continue;
+          }
+          const depthFound = depthFlaws(q, { domain, difficulty });
+          if (depthFound.length) {
+            depth.push(...depthFound);
+            weak.push(q);
+            continue;
+          }
+          good.push(q);
+        }
+        // Yetishmasa — mazmuni kuchsizlari qo'shiladi, lekin shakli buzuqlari YO'Q.
+        const kept = good.length >= safeCount ? good : [...good, ...weak.slice(0, safeCount - good.length)];
+        return { kept, good, weak, form, depth };
+      };
+
+      // Birinchi tekshiruv: sifatsizlar chiqariladi va `topUp` ularning
+      // o'rniga yangisini so'raydi — modelga nimasi noto'g'ri bo'lgani aytiladi.
+      const checked = judge(data.questions || []);
+      if (checked.form.length || checked.depth.length) {
+        console.warn(
+          `Test sifati: shakli buzuq ${checked.form.length ? 'bor' : 'yo\'q'}, ` +
+            `mazmuni kuchsiz ${checked.weak.length} ta ` +
+            `(${Array.from(new Set([...checked.form, ...checked.depth])).join(', ')})`,
+        );
+        lastFlawNote = [
+          checked.form.length ? flawRetryNote(checked.form) : '',
+          checked.depth.length ? depthRetryNote(checked.depth) : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+      }
+      // `topUp` ga faqat TOZALARI beriladi, shuning uchun yetishmagani
+      // qaytadan so'raladi; kuchsizlari esa oxirida, kerak bo'lsa, qo'shiladi.
+      data = { ...data, questions: checked.good };
       data = await topUp(data);
+      // Oxirgi tekshiruv: to'ldirilganlar ham o'tadi, va shu yerda kerak
+      // bo'lsa mazmuni kuchsizlari qaytarib olinadi — bo'sh test bermaslik
+      // uchun. Shakli buzuqlari hech qachon qaytmaydi.
+      const finalCheck = judge([...(data.questions || []), ...checked.weak]);
+      data = { ...data, questions: finalCheck.kept };
+      if (finalCheck.kept.length < safeCount) {
+        console.warn(
+          `Test: so'ralgan ${safeCount} dan ${finalCheck.kept.length} ta savol qoldi — ` +
+            'qolganlari sifat talabidan o\'tmadi.',
+        );
+      }
       return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);

@@ -49,6 +49,34 @@ const LEVEL_RULES: Record<TestDifficulty, string> = {
     'To\'g\'ri javob BITTA va aniq; distraktorlar mavzudagi yaqin, lekin stem uchun xato.',
 };
 
+/**
+ * USMLE uslubidagi majburiy talablar (rektor, 2026-10-13: "yanada
+ * kuchaytiring").
+ *
+ * Bu qoidalar `utils/testDepth.ts` da TEKSHIRILADI — bajarilmagan savol
+ * olinmaydi va qayta so'raladi. Shuning uchun ular umumiy maslahat emas,
+ * aniq shartlar.
+ */
+export const USMLE_RULES = [
+  'SAVIYA (majburiy, tekshiriladi — bajarilmagan savol OLINMAYDI):',
+  // Eng muhim mezon: variantlarni yopib qo'yganda ham savol javob beradigan
+  // bo'lsin. Eslash savoli bu sinovdan o'tmaydi.
+  '1) VARIANTLARNI YOPIB SINOV: variantlar ko\'rinmasa ham mutaxassis savolga javob bera olsin. ' +
+    'Ya\'ni savol o\'zi to\'liq vazifa bo\'lsin, variantlardan taxmin qilinadigan emas.',
+  '2) Savol QAROR so\'rasin: "keyingi eng to\'g\'ri qadam", "eng ehtimoliy holat", "qaysi mexanizm", ' +
+    '"USHBU bemorda nima mumkin emas", "qaysi topilma tashxisni kesadi", "ko\'rsatkich qayerga siljiydi". ' +
+    '"Quyidagilardan qaysi biri to\'g\'ri?", "X nima?", "qaysi biri xos?" TAQIQLANADI.',
+  '3) INKOR savol TAQIQLANADI ("qaysi biri to\'g\'ri EMAS", "istisno") — u bilimni emas, diqqatni tekshiradi.',
+  '4) Vignettada kamida IKKI aniq topilma (raqam+birlik) va VAQT bo\'lsin. "Yuqori", "past", "o\'zgargan" ' +
+    'kabi raqamsiz ta\'rif yetarli emas.',
+  '5) IKKI BOSQICHLI fikrlash: avval ma\'lumotni izohlash, so\'ng xulosa. Bitta faktni eslash bilan ' +
+    'yechiladigan savol TAQIQLANADI.',
+  '6) Variantlarda MUTLAQ so\'z bo\'lmasin ("har doim", "hech qachon", "faqat shu").',
+  '7) IZOH (explanation) o\'qituvchi darajasida bo\'lsin: to\'g\'ri javob nega to\'g\'ri, va HAR BIR ' +
+    'noto\'g\'ri variant nega jalb qiladi hamda nega baribir xato. Faqat to\'g\'ri javobni takrorlagan izoh YAROQSIZ.',
+  '8) Fakt kitobdan olinsin: berilgan manbalardagi me\'yor, mezon va raqamlardan foydalaning, o\'ylab topmang.',
+].join('\n');
+
 export function buildTestDifficultyPrompt(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
   if (domain === 'biomedical') {
     return [
@@ -58,7 +86,7 @@ export function buildTestDifficultyPrompt(level: TestDifficulty, domain: Subject
       '(«N yoshli bemor murojaat qildi» + shikoyat + tashxis/dori) TAQIQLANADI.',
       'Ta\'rif («X nima?») TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
       '«Hammasi to\'g\'ri» TAQIQLANADI.',
-    ].join(' ');
+    ].join(' ') + '\n' + USMLE_RULES;
   }
   if (domain === 'academic') {
     return [
@@ -67,9 +95,9 @@ export function buildTestDifficultyPrompt(level: TestDifficulty, domain: Subject
       'Individual bemor vignette (yosh + shikoyat + tashxis/dori) TAQIQLANADI.',
       'Ta\'rif ("X nima?") TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
       '"Hammasi to\'g\'ri" TAQIQLANADI.',
-    ].join(' ');
+    ].join(' ') + '\n' + USMLE_RULES;
   }
-  return `${LEVEL_RULES[level]} ${QUALITY_RULES}`;
+  return `${LEVEL_RULES[level]} ${QUALITY_RULES}\n${USMLE_RULES}`;
 }
 
 export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {

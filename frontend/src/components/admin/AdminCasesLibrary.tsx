@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { renderBold, stripBold } from '../../utils/boldMarkers';
 import { BriefcaseMedical, Trash2, RefreshCw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -255,10 +256,12 @@ export default function AdminCasesLibrary() {
                         payload?.questions.map((q, i) => (
                           <div key={i} className="space-y-2">
                             <p className="font-semibold text-emerald-800">{t('admin.caseNumber', { number: i + 1 })}</p>
-                            <p className="whitespace-pre-wrap leading-relaxed">{q.scenario}</p>
+                            {/* Muhim joylar qalin — yulduzcha ko'rinmasin. */}
+                            <p className="whitespace-pre-wrap leading-relaxed">{renderBold(q.scenario, `s${i}`)}</p>
                             <p className="text-[12px] text-black/55">
-                              <span className="font-semibold">{t('admin.answer')}:</span> {q.answer.slice(0, 500)}
-                              {q.answer.length > 500 ? '…' : ''}
+                              <span className="font-semibold">{t('admin.answer')}:</span>{' '}
+                              {stripBold(q.answer).slice(0, 500)}
+                              {stripBold(q.answer).length > 500 ? '…' : ''}
                             </p>
                           </div>
                         ))

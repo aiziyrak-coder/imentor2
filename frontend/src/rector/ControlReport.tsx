@@ -906,6 +906,12 @@ export function ControlReportView({
   // Dars bo'lmagan kun (yakshanba, bayram) sahifani BO'SH qoldirmaydi — ilgari
   // shu yerda butun mazmun, jumladan talabalar bo'limi ham yo'qolardi (2026-09-28).
   const noLessons = !h.total_lessons;
+  // Baholangan dars yo'qligining UCH sababi bor va ularni adashtirmaslik kerak.
+  // 2026-10-13 shikoyati: ertalab jadvalda darslar bor edi, lekin biri ham
+  // tugamagandi — baho faqat tugagan darsga qo'yiladi — sahifa esa "dam olish
+  // kuni bo'lishi mumkin" deb yozib, butun hisobotni yashirardi.
+  const waiting = h.pending && h.pending.lessons > 0 ? h.pending : null;
+  const notOverYet = noLessons && !!waiting;
   const tone = BAND_TEXT[h.band] || BAND_TEXT.none;
   const touchTone = BAND_TEXT[h.touch_band || h.band] || BAND_TEXT.none;
   const peak = Math.max(5, ...data.daily.map((d) => d.percent));
@@ -915,17 +921,32 @@ export function ControlReportView({
     <div className="space-y-5">
       <Source data={data} />
 
+      {/* Birinchi navbatda vaqt tekshiriladi: `pending` tanlangan kafedra
+          bo'yicha hisoblanadi, shuning uchun unda dars bo'lsa sabab filtr ham,
+          dam olish kuni ham emas — dars hali tugamagan. */}
+      {notOverYet && (
+        <p className="rounded-2xl bg-sky-50 px-4 py-3 text-[13px] text-sky-900 ring-1 ring-sky-200">
+          Jadvalda {department ? <b>«{department}»</b> : 'bugun'} bo‘yicha <b>{waiting!.lessons}</b> ta dars
+          bor, lekin soat {(waiting!.as_of || '').slice(11, 16)} holatiga biri ham tugamagan — shuning uchun
+          baho hali yo‘q.{' '}
+          {waiting!.next_at
+            ? `Birinchi dars ${waiting!.next_at.slice(11, 16)} da tugaydi, raqamlar shundan keyin to‘la boshlaydi.`
+            : 'Raqamlar darslar tugagach to‘la boshlaydi.'}{' '}
+          Tugagan darslarni ko‘rish uchun kechagi sanani tanlang.
+        </p>
+      )}
+
       {/* Kafedra tanlangan bo'lsa "dars yo'q" ko'pincha shu filtrdan: ilgari
           xabar "dam olish kuni" derdi va rektor hisobot buzilgan deb o'ylardi
           (2026-10-12: "Lotin tili" tanlangan, dushanba kuni 0 dars). */}
-      {noLessons && department && (
+      {noLessons && !notOverYet && department && (
         <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
           <b>«{department}»</b> kafedrasida tanlangan davrda HEMIS jadvali bo‘yicha dars yo‘q. Butun institutni
           ko‘rish uchun yuqorida «Barcha kafedralar»ni tanlang yoki «Filtrlarni tozalash»ni bosing.
           Quyidagi talabalar ko‘rsatkichlari kafedra bo‘yicha filtrlanmaydi.
         </p>
       )}
-      {noLessons && !department && (
+      {noLessons && !notOverYet && !department && (
         <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
           Tanlangan davrda HEMIS jadvalida dars yo‘q (dam olish kuni yoki bayram bo‘lishi mumkin).
           Quyidagi talabalar va material ko‘rsatkichlari baribir ko‘rsatilmoqda — boshqa sanani tanlang.

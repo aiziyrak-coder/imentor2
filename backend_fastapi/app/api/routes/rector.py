@@ -104,16 +104,23 @@ def rector_login(
     dean = authenticate_dean(login, password)
     if dean is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login yoki parol noto'g'ri.")
+    # Dekan KAFEDRA bilan cheklanmaydi (rektor talabi, 2026-10-13): hisobotda
+    # institutning hamma kafedralari ko'rinadi, hisobotdan chiqarilgan
+    # beshtasidan tashqari. Fakultet taqsimoti `dean_access.FACULTIES` da
+    # saqlanib qoladi — talab qaytsa, shu ro'yxatni qayta uzatish kifoya.
+    #
+    # GURUH cheklovi esa qoladi: xalqaro fakultet dekanining o'z kafedrasi yo'q,
+    # uning guruhlariga butun institut dars beradi.
     token = create_access_token(0, {
         "scope": RECTOR_SCOPE,
         "role": "dekan",
         "kind": "dekan",
         "login": dean.login,
         "label": dean.label,
-        "departments": list(dean.departments),
+        "departments": [],
         "groups": list(dean.groups),
     })
-    return {"access": token, "expires_minutes": settings.django_jwt_access_minutes, "kind": "dekan", "label": dean.label, "departments": list(dean.departments)}
+    return {"access": token, "expires_minutes": settings.django_jwt_access_minutes, "kind": "dekan", "label": dean.label, "departments": []}
 
 
 # ============================ Hisobotlar ============================

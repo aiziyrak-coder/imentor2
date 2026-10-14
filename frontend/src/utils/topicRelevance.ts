@@ -80,7 +80,27 @@ export const OFF_TOPIC_RETRY_NOTE =
   'OLDINGI NATIJA YAROQSIZ: savollarning ko\'pchiligi mavzudan chetga chiqqan — mavzuning asosiy atamalari umuman ' +
   'uchramadi. Butunlay qayta yozing: har savol AYNAN sarlavhadagi mavzuni tekshirsin.';
 
-/** Test variantlari: to'g'ri javob uzunligi bo'yicha topilib qolmasin (auditda 39% eng uzun variant edi). */
+/**
+ * Test variantlari va savol shakli.
+ *
+ * 2026-10-13 auditi (31 201 jonli savol) ko'rsatdi: qoida bajarilmagan —
+ * 47,8% savolda to'g'ri javob eng uzun variant, 54,5% da bitta savol ichida
+ * ikki savol, 6,4% da javob savolning o'zida aytilgan. Shuning uchun qoida
+ * SANOQ bilan va man etilgan shakllar bilan qayta yozildi; natija
+ * `utils/testQuality.ts` da tekshiriladi.
+ */
 export const OPTION_LENGTH_RULE =
-  'VARIANTLAR: to\'g\'ri javob variantlar ichida eng uzuni yoki eng batafsili BO\'LMASIN — 5 variantning ' +
-  'uzunligi, tuzilishi va aniqlik darajasi bir-biriga yaqin bo\'lsin, javobni uzunligidan taxmin qilib bo\'lmasin.';
+  'SAVOL SHAKLI (qattiq talab, buzilgan savol OLINMAYDI):\n' +
+  '1) BITTA savolda AYNAN BITTA so\'roq gap va AYNAN BITTA savol belgisi (?) bo\'lsin. ' +
+  'Ikkita savol ("... nimani ko\'rsatadi? ... qanday bo\'lishi kerak?") TAQIQLANADI — ' +
+  'ikki savol kerak bo\'lsa, ularni ikki alohida savol qilib yozing.\n' +
+  '2) Javob savol matnida AYTILMASIN: savolda to\'g\'ri javobning raqami yoki iborasi ' +
+  'takrorlanmasin (masalan savolda "1000 CFU/m³ dan oshsa" deb yozib, javobni ' +
+  '"1000 CFU/m³ dan oshmasligi kerak" qilish TAQIQLANADI).\n' +
+  '3) To\'g\'ri javob variantlar ichida eng uzuni yoki eng batafsili BO\'LMASIN — ' +
+  '5 variantning uzunligi (so\'z soni ±20%), tuzilishi va aniqlik darajasi bir-biriga yaqin bo\'lsin. ' +
+  'Javobni uzunligidan taxmin qilib bo\'lmasin.\n' +
+  '4) Variantlar bir-birini TAKRORLAMASIN; "hammasi to\'g\'ri", "barcha javoblar to\'g\'ri", ' +
+  '"yuqoridagilarning hammasi" TAQIQLANADI.\n' +
+  '5) Variantlar bir xil turda bo\'lsin (hammasi tashxis, yoki hammasi dori, yoki hammasi me\'yor) — ' +
+  'turlari aralashgan ro\'yxat javobni oshkor qiladi.';

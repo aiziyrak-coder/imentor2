@@ -91,6 +91,8 @@ export type MonitorDayReport = {
     rooms: number;
     quiet_rooms: number;
     no_syllabus: number;
+    /** Eng yaqin tugaydigan darsning vaqti (hali tugamaganlar bo'lsa). */
+    next_at?: string | null;
   };
   filters: {
     faculties: string[];
