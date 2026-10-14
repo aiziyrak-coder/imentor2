@@ -84,6 +84,7 @@ import {
 import QRCode from 'qrcode';
 import { LIVE_SESSION_PREFIX, LIVE_SUBMISSIONS_PREFIX } from '../utils/liveTestStorage';
 import { HttpError } from '../api/httpClient';
+import type { UiTextKey } from '../i18n/translations';
 import MedicalReferencesList from './staff/MedicalReferencesList';
 import {
   downloadTestAnswerKeyPdf,
@@ -192,6 +193,24 @@ function clearStoredTeacherSid(topic: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Jonli sessiya ochilmagan sabab — o'qituvchiga aniq aytiladi. Ilgari har
+ * qanday xatoda bir xil "Sessiyani boshlab bo'lmadi" chiqardi va sababni
+ * faqat server jurnalidan topish mumkin edi (2026-10-13).
+ */
+function startSessionErrorKey(err: unknown): UiTextKey {
+  if (err instanceof HttpError) {
+    if (err.status === 401 || err.status === 403) return 'test.errorStartAuth';
+    if (err.status === 409) return 'test.errorStartLocked';
+    if (err.status === 422) return 'test.errorNoQuestions';
+    if (err.status === 0) return 'test.errorStartNetwork';
+    if (err.status >= 500) return 'test.errorStartServer';
+  }
+  if (err instanceof TypeError) return 'test.errorStartNetwork'; // fetch: tarmoq yo'q
+  if (err instanceof Error && err.message === 'no-backend-token') return 'test.errorStartAuth';
+  return 'test.errorStartSession';
 }
 
 /** Yopilgan test paneli teacher sahifasidan shuncha vaqtdan keyin avto yo'qoladi. */
@@ -832,7 +851,7 @@ export default function TestQuestions() {
       await setupTeacherLiveSession(testSession, reused ?? undefined);
     } catch (err) {
       console.error('Live session start failed', err);
-      setError(t('test.errorStartSession'));
+      setError(t(startSessionErrorKey(err)));
     } finally {
       setStartingSession(false);
     }

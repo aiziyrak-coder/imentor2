@@ -20,10 +20,11 @@ pytestmark = pytest.mark.usefixtures("events_are_full_lessons")
 DAY = dt.date(2026, 9, 22)
 
 
-def lesson(pk, *, user="u1", monitor="MON-001", room="204", day=DAY, dep="Fiziologiya"):
+def lesson(pk, *, user="u1", monitor="MON-001", room="204", day=DAY, dep="Fiziologiya",
+           start="11:00", end="12:20"):
     return SimpleNamespace(
         id=pk, hemis_id=str(pk), lesson_date=day, weekday="Seshanba", para="3-para",
-        start_time="11:00", end_time="12:20", employee_id="461", teacher_name=user.upper(),
+        start_time=start, end_time=end, employee_id="461", teacher_name=user.upper(),
         teacher_username=user, department_name=dep, subject_name="Fiziologiya",
         group_name="DI-101", lesson_type="Amaliy", auditorium_name=room,
         building_name="Oq uy binosi", monitor_id=monitor,
@@ -36,8 +37,17 @@ def test_one_recorded_use_proves_the_monitor_works():
     rows = [lesson(1, user="a"), lesson(2, user="b"), lesson(3, user="c")]
     stats = mr.room_stats(rows, {1: (True, 12)})
     assert stats["MON-001"]["status"] == "ok"
-    # Ishlatmagan "b" uchun bahona yo'q — xona ishlayotgani isbotlangan.
-    assert mr.teacher_excuse([rows[1]], stats) == "none"
+    assert stats["MON-001"]["used_teachers"] == {"a"}
+
+
+def test_room_level_data_alone_never_blames_a_teacher():
+    """Xona darajasidagi qayd o'qituvchining o'zi monitordan foydalana olganini
+    isbotlamaydi (2026-10-09): `teacher_excuse` doim "check_room". Ayblov
+    endi nazorat hisobotida — shu monitorda BOSHQA hisob ishlagan bo'lsa
+    (`control_report_service`, 2026-10-11)."""
+    rows = [lesson(1, user="a"), lesson(2, user="b")]
+    stats = mr.room_stats(rows, {1: (True, 12)})
+    assert mr.teacher_excuse([rows[1]], stats) == "check_room"
 
 
 def test_a_room_nobody_could_use_is_the_room_s_problem():
@@ -96,7 +106,10 @@ def test_report_separates_the_blamed_from_the_rooms_to_check():
     # MON-001: "a" ishlatgan, "b" ishlatmagan → "b" ning bahonasi yo'q.
     # MON-002: 10 dars, 4 o'qituvchi, hech kim ishlatmagan → xonani tekshirish kerak.
     rows = [lesson(1, user="a"), lesson(2, user="b")]
-    rows += [lesson(10 + i, user=f"c{i % 4}", monitor="MON-002") for i in range(10)]
+    # Har dars alohida vaqtda: bir o'qituvchining bir vaqtdagi guruh qatorlari
+    # bitta darsga birlashtiriladi (`lesson_key`), shunda 10 emas 4 ta qolardi.
+    rows += [lesson(10 + i, user=f"c{i % 4}", monitor="MON-002",
+                    start=f"{7 + i:02d}:00", end=f"{7 + i:02d}:50") for i in range(10)]
     out = _run(rows, {"a": [(at(11, 5), 9)]})
 
     assert [r["teacher_name"] for r in out["attention"]] == ["B"]
