@@ -27,7 +27,26 @@ export function translatedView<T extends I18nPayload>(payload: T | null, lang: A
   if (!payload) return null;
   if (payload.primaryLanguage === lang) return payload;
   const block = payload.translations?.[lang];
-  return block ? ({ ...payload, ...block } as T) : null;
+  if (!block) return null;
+  return { ...payload, ...block, ...answerKeyFromPrimary(payload, block) } as T;
+}
+
+/**
+ * To'g'ri javob raqami TILDAN MUSTAQIL va faqat ASL savolda saqlanadi
+ * (server tarjimadan uni olib tashlaydi, 2026-10-13: eskirgan raqam bilan
+ * 577 savol noto'g'ri baholangan edi). Tarjima ko'rinishida u asl savoldan
+ * olinadi — aks holda RU/EN ko'rinishda to'g'ri javob umuman ko'rinmasdi.
+ */
+function answerKeyFromPrimary(payload: object, block: object): { questions?: unknown[] } {
+  const primary = (payload as { questions?: unknown }).questions;
+  const translated = (block as { questions?: unknown }).questions;
+  if (!Array.isArray(primary) || !Array.isArray(translated)) return {};
+  return {
+    questions: translated.map((q, i) => {
+      const key = (primary[i] as { correctOptionIndex?: unknown } | undefined)?.correctOptionIndex;
+      return q && typeof q === 'object' && typeof key === 'number' ? { ...q, correctOptionIndex: key } : q;
+    }),
+  };
 }
 
 /** Bir xil (yozuv, til) uchun parallel so'rovlar bitta bo'ladi. */

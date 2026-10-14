@@ -49,9 +49,16 @@ def test_rector_scope_drops_excluded_departments_only():
     assert scope == ["Anatomiya", "Pediatriya"]
 
 
-def test_no_exclusions_keeps_the_rector_unrestricted():
-    with patch("app.services.report_exclusion.load", return_value=rx.Exclusions()):
-        assert dean_access.allowed_departments({"departments": []}, db=object()) == []
+def test_rector_decision_departments_are_always_excluded():
+    """Admin hech narsa chiqarmagan bo'lsa ham rektor qarori bilan chiqarilgan
+    kafedralar (`ALWAYS_EXCLUDED`, 2026-10-13) hisobotga kirmaydi."""
+    always = rx.ALWAYS_EXCLUDED[0]
+    with patch("app.services.report_exclusion.load", return_value=rx.Exclusions()), \
+         patch.object(dean_access, "known_departments", return_value=[always, "Anatomiya"]), \
+         patch.object(dean_access, "_all_department_spellings", return_value=[]):
+        scope = dean_access.allowed_departments({"departments": []}, db=object())
+    assert isinstance(scope, dean_access.ExclusionScope)
+    assert scope == ["Anatomiya"]
 
 
 def test_schedule_drops_lessons_of_excluded_subjects():
