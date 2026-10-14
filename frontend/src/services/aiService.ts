@@ -1002,6 +1002,17 @@ export function parseCorrectOptionIndex(raw: unknown, options: string[], fallbac
   return null;
 }
 
+/**
+ * Savolsiz test qaytarilmaydi. 2026-10-13 da shunday test bazaga saqlanib,
+ * "Jonli sessiyani boshlash" server tomonidan rad etilardi (422) va
+ * o'qituvchi faqat "Sessiyani boshlab bo'lmadi"ni ko'rardi. Endi xato
+ * generatsiyaning o'zida chiqadi va bo'sh test saqlanmaydi.
+ */
+function requireQuestions(session: TestSession): TestSession {
+  if (!session.questions?.length) throw new Error('Test savollari yaratilmadi');
+  return session;
+}
+
 function normalizeTestSession(
   topic: string,
   data: TestSession,
@@ -1015,7 +1026,10 @@ function normalizeTestSession(
    */
   shuffle = false,
 ): TestSession {
-  const questions = (data.questions || [])
+  // Model ba'zan savollarni boshqa kalit ostida qaytaradi.
+  const loose = data as TestSession & { tests?: TestQuestion[]; items?: TestQuestion[] };
+  const rawQuestions = data.questions?.length ? data.questions : loose.tests || loose.items || [];
+  const questions = (Array.isArray(rawQuestions) ? rawQuestions : [])
     .flatMap((q) => {
       const raw = q as TestQuestion & { answer?: unknown; correctAnswer?: unknown };
       const options = (q.options || [])
@@ -2094,11 +2108,11 @@ export const aiService = {
         }
       }
       data = await topUp(data);
-      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain });
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);
       const data = await topUp(await generate(Math.min(safeCount, 10)));
-      return { ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain };
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain });
     }
   },
 
