@@ -72,6 +72,16 @@ def upsert_live_test(
             raise HTTPException(status_code=503, detail="Could not allocate session key.")
 
     existing = _get_session(db, key)
+    problems = svc.answer_key_problems(payload.questions)
+    if problems:
+        raise HTTPException(status_code=422, detail=f"Javob kaliti yaroqsiz: {'; '.join(problems[:5])}")
+    # Yangi sessiya kamida 10 savol bilan. Allaqachon ochilganlari (eski,
+    # kam savolli) yangilanishda to'xtatilmaydi — dars o'rtasida uzilmasin.
+    if existing is None and len(payload.questions) < svc.MIN_LIVE_TEST_QUESTIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Jonli test uchun kamida {svc.MIN_LIVE_TEST_QUESTIONS} ta savol kerak.",
+        )
     if existing and existing.owner_key != owner:
         raise HTTPException(status_code=409, detail="Session key already in use.")
     if existing is not None and svc.answer_key_locked(existing, payload.questions):

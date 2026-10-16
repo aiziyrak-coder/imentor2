@@ -80,6 +80,35 @@ def answer_key_locked(session, new_questions: list) -> bool:
     return answer_key_signature(payload.get("questions", [])) != answer_key_signature(new_questions)
 
 
+# Jonli test kamida shuncha savol bilan ochiladi (talab, 2026-10-16).
+MIN_LIVE_TEST_QUESTIONS = 10
+
+
+def answer_key_problems(questions: list) -> list[str]:
+    """Kaliti baholab bo'lmaydigan savollar — har biri uchun qisqa sabab.
+
+    Ilgari server istalgan `correctOptionIndex` ni qabul qilardi: kalit yo'q,
+    matn ("B") yoki variantlar sonidan katta bo'lsa ham sessiya ochilardi va
+    talabalar to'g'ri javob uchun ham "xato" olardi.
+    """
+    problems: list[str] = []
+    for i, q in enumerate(questions if isinstance(questions, list) else []):
+        n = i + 1
+        if not isinstance(q, dict):
+            problems.append(f"{n}: savol obyekt emas")
+            continue
+        options = q.get("options")
+        if not str(q.get("question") or "").strip():
+            problems.append(f"{n}: savol matni yo'q")
+        if not isinstance(options, list) or len(options) < 2:
+            problems.append(f"{n}: variantlar yetarli emas")
+            continue
+        key = q.get("correctOptionIndex")
+        if isinstance(key, bool) or not isinstance(key, int) or not 0 <= key < len(options):
+            problems.append(f"{n}: to'g'ri javob raqami noto'g'ri ({key!r})")
+    return problems
+
+
 def strip_questions_for_student(questions: list[dict]) -> list[dict]:
     stripped: list[dict] = []
     for q in questions:
@@ -102,7 +131,10 @@ def build_wrong_answers(questions: list[dict]) -> list[int]:
         if not isinstance(q, dict):
             answers.append(0)
             continue
-        correct = int(q.get("correctOptionIndex", 0))
+        try:
+            correct = int(q.get("correctOptionIndex", -1))
+        except (TypeError, ValueError):
+            correct = -1
         options = q.get("options", [])
         count = len(options) if isinstance(options, list) else 0
         if count <= 0:

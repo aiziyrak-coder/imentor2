@@ -28,6 +28,8 @@ from app.schemas.prepared_content import (
     PreparedContentPayloadIn,
     PreparedContentSummaryOut,
 )
+from app.services.case_i18n import without_stale_translations
+from app.services.live_test_service import MIN_LIVE_TEST_QUESTIONS
 from app.services.json_sanitize import clean_json
 from app.services import content_catalog as cc
 from app.services import syllabus_access as access
@@ -268,7 +270,7 @@ def _out(item: PreparedContent) -> PreparedContentOut:
         subject_code=item.subject_code,
         variant_label=item.variant_label,
         topic_code=item.topic_code,
-        payload=item.payload,
+        payload=without_stale_translations(item.payload),
         created_at=item.created_at,
     )
 
@@ -305,7 +307,7 @@ def get_latest_prepared_content(
     ).scalar_one_or_none()
     if item is None:
         return PreparedContentLatestOut(payload=None)
-    return PreparedContentLatestOut(payload=item.payload)
+    return PreparedContentLatestOut(payload=without_stale_translations(item.payload))
 
 
 def _reject_empty_test(kind: str, payload: object) -> None:
@@ -318,6 +320,22 @@ def _reject_empty_test(kind: str, payload: object) -> None:
         raise HTTPException(status_code=422, detail="Testda savol yo'q — qayta yarating.")
 
 
+def _reject_short_test(kind: str, payload: object) -> None:
+    """YANGI test kamida 10 savol bilan saqlanadi (talab, 2026-10-16).
+
+    Faqat yaratishda: eski, kam savolli yozuvlarning tarjimasi yoki manbasi
+    yangilanganda (PATCH) ular to'xtatilmaydi.
+    """
+    if kind != "test":
+        return
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    if isinstance(questions, list) and 0 < len(questions) < MIN_LIVE_TEST_QUESTIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Testda kamida {MIN_LIVE_TEST_QUESTIONS} ta savol bo'lishi kerak — qayta yarating.",
+        )
+
+
 @router.post("/prepared-content/", response_model=PreparedContentOut, status_code=status.HTTP_201_CREATED)
 def create_prepared_content(
     payload: PreparedContentIn,
@@ -326,6 +344,7 @@ def create_prepared_content(
     auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
 ) -> PreparedContentOut:
     _reject_empty_test(payload.kind, payload.payload)
+    _reject_short_test(payload.kind, payload.payload)
     topic_norm = (payload.topic_norm or "").strip().lower() or payload.topic.lower()
 
     syllabus = None

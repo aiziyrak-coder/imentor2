@@ -66,9 +66,11 @@ async function page() {
 describe('O‘qituvchilar kesimi', () => {
   it('to‘rt toifa va o‘qituvchi foizi ko‘rinadi', async () => {
     const title = await page();
-    const strip = title.parentElement?.textContent ?? '';
+    // Sarlavha "jami N" bilan bitta qatorda — butun blok ikki daraja yuqorida.
+    const strip = title.parentElement?.parentElement?.textContent ?? '';
     expect(strip).toContain('Hamma darsini o‘tgan125%');
-    expect(strip).toMatch(/Qisman: ba’zi darsini o‘tgan, qolganini o‘tmagan125%/);
+    // Izoh ("2 dars o‘tilmay qolgan") endi nom bilan raqam orasida turadi.
+    expect(strip).toMatch(/Qisman: ba’zi darsini o‘tgan, qolganini o‘tmagan(2 dars o‘tilmay qolgan)?125%/);
     expect(strip).toContain('2 dars o‘tilmay qolgan');
     expect(strip).toMatch(/Dars vaqtida umuman ochmagan125%/);
     expect(screen.getByText('Darsini iMentor’da o‘tgan').parentElement?.textContent).toContain('2 50%');

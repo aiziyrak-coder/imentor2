@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import FaceLogin from './auth/FaceLogin';
 import { motion } from 'motion/react';
-import { aiService, TestSession, TestQuestion } from '../services/aiService';
+import { TOO_FEW_QUESTIONS, aiService, TestSession, TestQuestion } from '../services/aiService';
 import { AppLanguageContext, GlobalTopicContext } from '../App';
 import type { AppLanguage } from '../i18n/language';
 import { useUiText } from '../i18n/useUiText';
@@ -91,7 +91,7 @@ import {
   downloadTestResultsPdf,
 } from '../utils/buildTestPdf';
 import { gradeBadgeClass, scoreToGrade } from '../utils/testGrading';
-import { stripOptionLetterPrefix } from '../utils/testOptionText';
+import { stripOptionLabels } from '../utils/testOptionText';
 import { DEFAULT_TEST_DIFFICULTY, DEFAULT_TEST_QUESTION_COUNT } from '../utils/testDifficulty';
 import { loadLatestLectureText } from '../utils/lectureExcerpt';
 import { hydrateGenerationScope, makeGenerationScope } from '../utils/subjectDomain';
@@ -844,6 +844,17 @@ export default function TestQuestions() {
       setError(t('test.errorNoQuestions'));
       return;
     }
+    // Jonli test kamida 10 savol bilan o'tadi (server ham shuni talab qiladi).
+    // Eski, kam savolli versiyani qayta yaratish kerak.
+    if (testSession.questions.length < DEFAULT_TEST_QUESTION_COUNT) {
+      setError(
+        t('test.errorTooFewQuestions', {
+          have: testSession.questions.length,
+          count: DEFAULT_TEST_QUESTION_COUNT,
+        }),
+      );
+      return;
+    }
     setStartingSession(true);
     setError(null);
     try {
@@ -1027,7 +1038,13 @@ export default function TestQuestions() {
       })();
     } catch (err) {
       console.error('Test generation error:', err);
-      if (stillHere()) setError(messageFromAiError(err, t('test.errorGenerate'), language));
+      if (stillHere()) {
+        setError(
+          err instanceof Error && err.message === TOO_FEW_QUESTIONS
+            ? t('test.errorTooFewGenerated', { count: DEFAULT_TEST_QUESTION_COUNT })
+            : messageFromAiError(err, t('test.errorGenerate'), language),
+        );
+      }
       setGeneratingKey(null);
     }
   };
@@ -1072,13 +1089,38 @@ export default function TestQuestions() {
     }
   };
 
+  /**
+   * Natijalar QAYSI savollar bo'yicha chiqariladi. Talabalar sessiyadagi
+   * savollarga javob bergan; o'qituvchi ekranidagi test esa shu orada boshqa
+   * versiya bo'lishi mumkin (Bazadan boshqasi ochilgan, qayta yaratilgan).
+   * Ilgari PDF ekrandagi test bo'yicha har savolni belgilardi — jami ball
+   * serverdan to'g'ri kelsa ham, "qaysi savolda adashdi" noto'g'ri chiqardi.
+   */
+  const resultsPdfSource = (): { session: TestSession; lang: AppLanguage } => {
+    const onScreen =
+      displayedTest && testStatus === 'ready'
+        ? { session: displayedTest, lang: viewLang }
+        : { session: testSession as TestSession, lang: language };
+    const doc = teacherSessionId ? loadLocalSession(teacherSessionId) : null;
+    const keyed =
+      doc?.questions?.length &&
+      doc.questions.every((q) => typeof (q as TestQuestion).correctOptionIndex === 'number');
+    if (!doc || !keyed || !testSession) return onScreen;
+    if (questionsFingerprint(doc.questions) === questionsFingerprint(testSession.questions)) return onScreen;
+    return {
+      session: { ...testSession, topic: doc.topic, questions: doc.questions as TestQuestion[] },
+      lang: testSession.primaryLanguage || language,
+    };
+  };
+
   const handleDownloadResultsPdf = async () => {
     if (!testSession || submissions.length === 0) return;
     setDownloadingResultsPdf(true);
     try {
+      const source = resultsPdfSource();
       // Savollar va sarlavha ekrandagi tilda (tarjima tayyor bo'lsa).
       await downloadTestResultsPdf(
-        displayedTest && testStatus === 'ready' ? displayedTest : testSession,
+        source.session,
         submissions.map((s) => ({
           firstName: s.firstName,
           lastName: s.lastName,
@@ -1086,7 +1128,7 @@ export default function TestQuestions() {
           submittedAt: s.submittedAt,
           correct: s.correct,
         })),
-        displayedTest && testStatus === 'ready' ? viewLang : language,
+        source.lang,
       );
     } catch (err) {
       console.error('Results PDF error:', err);
@@ -1318,7 +1360,7 @@ export default function TestQuestions() {
                           }`}
                         >
                           <span className="font-bold">{String.fromCharCode(65 + optIdx)})</span>{' '}
-                          {stripOptionLetterPrefix(opt, optIdx)}
+                          {stripOptionLabels(q.options)[optIdx]}
                         </button>
                       ))}
                     </div>
@@ -1682,7 +1724,7 @@ export default function TestQuestions() {
                           >
                             <div className="text-[14px] leading-relaxed">
                               <span className="font-bold">{String.fromCharCode(65 + optIdx)})</span>{' '}
-                              {stripOptionLetterPrefix(option, optIdx)}
+                              {stripOptionLabels(q.options)[optIdx]}
                               {isCorrect && (
                                 <span className="ml-2 inline-flex items-center text-[11px] font-bold uppercase tracking-wide">
                                   <CheckCircle2 size={14} className="mr-1" /> {t('test.correctAnswer')}

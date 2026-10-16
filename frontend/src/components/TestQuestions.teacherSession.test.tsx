@@ -37,6 +37,13 @@ const PAYLOAD = {
       explanation: 'MAXFIY_TAHLIL matni',
       optionExplanations: ['izoh-a', 'MAXFIY_IZOH', 'izoh-c', 'izoh-d'],
     },
+    // Jonli sessiya kamida 10 savol bilan ochiladi.
+    ...Array.from({ length: 9 }, (_, i) => ({
+      question: `Qo‘shimcha savol ${i + 2}`,
+      options: ['birinchi', 'ikkinchi', 'uchinchi', 'to‘rtinchi'],
+      correctOptionIndex: i % 4,
+      explanation: `oddiy izoh ${i + 2}`,
+    })),
   ],
 };
 
@@ -52,11 +59,12 @@ vi.mock('../utils/preparedContentStore', async (importOriginal) => {
 });
 
 const finalizeMock = vi.fn();
+const createSessionMock = vi.fn(async () => 'lts_test');
 vi.mock('../utils/liveTestApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/liveTestApi')>();
   return {
     ...actual,
-    createLiveTestSessionOnServer: vi.fn(async () => 'lts_test'),
+    createLiveTestSessionOnServer: (...args: unknown[]) => createSessionMock(...(args as [])),
     syncLiveTestSessionToServer: vi.fn(async () => true),
     fetchLiveTestSessionFromServer: vi.fn(async () => ({ isClosed: false, closedAtMs: null, questions: [], topic: '' })),
     fetchLiveTestSubmissionsFromServer: vi.fn(async () => []),
@@ -100,6 +108,7 @@ describe('TestQuestions — o‘qituvchi ekrani, jonli sessiya', () => {
     localStorage.clear();
     sessionStorage.clear();
     window.history.pushState({}, '', '/?view=tests');
+    createSessionMock.mockResolvedValue('lts_test');
     finalizeMock.mockResolvedValue({ isClosed: true, closedAtMs: Date.now(), submissions: [] });
   });
 
@@ -123,6 +132,20 @@ describe('TestQuestions — o‘qituvchi ekrani, jonli sessiya', () => {
     fireEvent.click(screen.getByRole('button', { name: /Testni yakunlash/ }));
     await waitFor(() => expect(screen.getByText('MAXFIY_TAHLIL matni')).toBeInTheDocument());
     expect(screen.queryByText(/ekranda to'g'ri javoblar va tahlil yashirilgan/)).not.toBeInTheDocument();
+  });
+
+  it('10 tadan kam savolli eski test bilan jonli sessiya ochilmaydi va sababi aytiladi', async () => {
+    const full = PAYLOAD.questions;
+    PAYLOAD.questions = full.slice(0, 7);
+    try {
+      renderTeacher();
+      await openSavedVersion();
+      fireEvent.click(screen.getByRole('button', { name: /Jonli sessiyani boshlash/ }));
+      expect(await screen.findByText(/7 ta savol bor, jonli test uchun kamida 10 ta kerak/)).toBeInTheDocument();
+      expect(createSessionMock).not.toHaveBeenCalled();
+    } finally {
+      PAYLOAD.questions = full;
+    }
   });
 
   it('o‘qituvchi tasdiqlasa javoblarni sessiya paytida ham ko‘rsata oladi', async () => {

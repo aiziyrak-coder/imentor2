@@ -65,7 +65,7 @@ import { depthFlaws, depthRetryNote, type DepthFlaw } from '../utils/testDepth';
 import { normalizeCaseFocus } from '../utils/caseFocusLabels';
 import { type MedicalReference } from '../utils/medicalReferences';
 import { stripUnfilledSourceTemplate } from '../utils/sourceTemplate';
-import { stripOptionLetterPrefix } from '../utils/testOptionText';
+import { remapOptionLetters, stripOptionLabels } from '../utils/testOptionText';
 import {
   DEFAULT_TEST_DIFFICULTY,
   buildTestDifficultyPrompt,
@@ -1053,6 +1053,9 @@ async function generateSingleCaseQuestion(
   };
 }
 
+/** Zaxira yo'lida keys yechimining eng kam uzunligi (belgi). */
+const MIN_FALLBACK_CASE_ANSWER = 60;
+
 function normalizeCaseSession(
   topic: string,
   data: CaseStudySession,
@@ -1089,7 +1092,9 @@ function normalizeCaseSession(
     : rawQuestions.flatMap((q, i) => {
         const scenario = (q.scenario || '').trim();
         const answer = (q.answer || '').trim();
-        if (scenario.length < 120 || !answer) return [];
+        // Bir-ikki so'zlik "yechim" (masalan faqat tashxis nomi) keysni
+        // noto'g'ri javobli qilib ko'rsatadi — kamida ikki-uch gap kerak.
+        if (scenario.length < 120 || answer.length < MIN_FALLBACK_CASE_ANSWER) return [];
         const refs = (q as CaseStudyQuestion).references;
         return [{
           scenario,
@@ -1116,7 +1121,8 @@ export function shuffleQuestionOptions(input: {
   options: string[];
   correctOptionIndex: number;
   optionExplanations?: string[];
-}): { options: string[]; correctOptionIndex: number; optionExplanations?: string[] } {
+  explanation?: string;
+}): { options: string[]; correctOptionIndex: number; optionExplanations?: string[]; explanation?: string } {
   const n = input.options.length;
   if (n < 2) return { ...input };
   const order = Array.from({ length: n }, (_, i) => i);
@@ -1125,13 +1131,26 @@ export function shuffleQuestionOptions(input: {
     [order[i], order[j]] = [order[j], order[i]];
   }
   const nextCorrect = order.indexOf(input.correctOptionIndex);
+  // Izohdagi "to'g'ri javob — A" kabi ishoralar ham yangi tartibga o'tadi:
+  // aks holda izoh aralashtirishdan oldingi harfni ko'rsatib qolardi.
+  const newIndexOf = Array.from({ length: n }, (_, k) => order.indexOf(k));
   return {
     options: order.map((k) => input.options[k]),
     correctOptionIndex: nextCorrect >= 0 ? nextCorrect : 0,
     ...(input.optionExplanations
-      ? { optionExplanations: order.map((k) => input.optionExplanations?.[k] ?? '') }
+      ? { optionExplanations: order.map((k) => remapOptionLetters(input.optionExplanations?.[k] ?? '', newIndexOf)) }
       : {}),
+    ...(input.explanation != null ? { explanation: remapOptionLetters(input.explanation, newIndexOf) } : {}),
   };
+}
+
+function normalizeAnswerText(value: string): string {
+  return (value || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.;]+$/, '');
+}
+
+/** "C) Matn" -> "Matn": javob matni harf bilan kelsa ham solishtirish uchun. */
+function stripOptionLetterPrefixLoose(value: string): string {
+  return (value || '').trim().replace(/^[A-Ea-e]\s*[).:]\s+/, '');
 }
 
 /**
@@ -1142,6 +1161,18 @@ export function shuffleQuestionOptions(input: {
  */
 export function parseCorrectOptionIndex(raw: unknown, options: string[], fallbackText?: unknown): number | null {
   const n = options.length;
+  // To'g'ri javob MATNI berilgan va u aynan bitta variantga teng bo'lsa —
+  // raqamdan ustun. Model raqamni ba'zan 1 dan sanaydi (A=1): shunda har
+  // savolning kaliti bir harfga siljiydi, matn esa adashmaydi.
+  if (typeof fallbackText === 'string' && fallbackText.trim()) {
+    const find = (want: string) =>
+      want ? options.map((o, i) => (normalizeAnswerText(o) === want ? i : -1)).filter((i) => i >= 0) : [];
+    // Avval to'liq matn ("C. difficile" ham variant nomi bo'lishi mumkin),
+    // keyin "C) ..." harfisiz ko'rinishi.
+    let hits = find(normalizeAnswerText(fallbackText));
+    if (hits.length !== 1) hits = find(normalizeAnswerText(stripOptionLetterPrefixLoose(fallbackText)));
+    if (hits.length === 1) return hits[0];
+  }
   if (typeof raw === 'number' && Number.isInteger(raw)) return raw >= 0 && raw < n ? raw : null;
   if (typeof raw === 'string') {
     const t = raw.trim();
@@ -1178,8 +1209,24 @@ function safeSnippet(value: unknown): string {
   }
 }
 
-function requireQuestions(session: TestSession, rawSnippet = ''): TestSession {
-  if (!session.questions?.length) {
+/** `topUp` necha marta yetishmagan savollarni so'raydi. */
+const TOP_UP_ATTEMPTS = 4;
+
+/** Generatsiya shu sondan kam savol bilan tugasa — test qaytarilmaydi. */
+export const TOO_FEW_QUESTIONS = 'too-few-questions';
+
+function requireQuestions(session: TestSession, rawSnippet = '', minCount = 1): TestSession {
+  const have = session.questions?.length || 0;
+  // Talab (2026-10-16): testda DOIM kamida 10 savol. Ilgari yaroqsiz savollar
+  // tashlanib, 7–8 savolli test jimgina saqlanardi va jonli sessiyaga chiqardi.
+  if (have > 0 && have < minCount) {
+    reportClientError(new Error(`Test: ${minCount} o'rniga ${have} ta savol yaratildi`), {
+      source: 'aiService.generateTests',
+      stack: rawSnippet || '(AI javobi bo\'sh)',
+    });
+    throw new Error(TOO_FEW_QUESTIONS);
+  }
+  if (!have) {
     // Sabab keyin aniq ko'rinsin: AI javobidan parcha "Sayt xatolari"
     // jurnaliga yoziladi (admin panel). Ilgari bo'sh test nega chiqqanini
     // bilib bo'lmasdi — AI javobi hech qayerda saqlanmasdi.
@@ -1211,9 +1258,7 @@ function normalizeTestSession(
   const questions = (Array.isArray(rawQuestions) ? rawQuestions : [])
     .flatMap((q) => {
       const raw = q as TestQuestion & { answer?: unknown; correctAnswer?: unknown };
-      const options = (q.options || [])
-        .slice(0, 5)
-        .map((o, oi) => stripOptionLetterPrefix(String(o ?? '').trim(), oi));
+      const options = stripOptionLabels((q.options || []).slice(0, 5).map((o) => String(o ?? '')));
       const correctOptionIndex = parseCorrectOptionIndex(
         raw.correctOptionIndex,
         options,
@@ -1243,12 +1288,13 @@ function normalizeTestSession(
         options,
         correctOptionIndex,
         optionExplanations: hasOptionExplanations ? optionExplanations : undefined,
+        explanation: stripUnfilledSourceTemplate(q.explanation || ''),
       };
       const shuffled = shuffle ? shuffleQuestionOptions(base) : base;
       return {
         question: (q.question || '').trim(),
         options: shuffled.options,
-        explanation: stripUnfilledSourceTemplate(q.explanation || ''),
+        explanation: shuffled.explanation ?? base.explanation,
         correctOptionIndex: shuffled.correctOptionIndex,
         ...(shuffled.optionExplanations ? { optionExplanations: shuffled.optionExplanations } : {}),
         ...(refs.length ? { references: refs } : {}),
@@ -1501,6 +1547,26 @@ const OPTION_EXPLANATION_CHUNK = 4;
  * `optionExplanations` ni o'zgartirmasdan uzatadi) va iMentor test ekranida har
  * variant ostida ko'rinadi.
  */
+/**
+ * Kalit qoidasi. Ilgari promptda raqam qayerdan sanalishi aytilmasdi: model
+ * 1 dan sanasa (A=1) har savolning kaliti bir harfga siljirdi. `correctAnswer`
+ * — to'g'ri variant matnining nusxasi: raqam bilan kelishmasa, matn ustun
+ * (`parseCorrectOptionIndex`).
+ *
+ * Izohda harf yozilmasligi kerak: variantlar keyin aralashtiriladi va
+ * "to'g'ri javob — A" degan izoh boshqa variantni ko'rsatib qoladi.
+ */
+const ANSWER_KEY_RULE =
+  'correctOptionIndex — 0 dan sanaladi: birinchi variant 0, ikkinchisi 1, … beshinchisi 4. ' +
+  'correctAnswer — to\'g\'ri variant matnining AYNAN nusxasi (harfsiz). ' +
+  'options ichida "A)", "B." kabi harf belgisi yozilmasin. ' +
+  'explanation va boshqa izohlarda variantga HARF yoki RAQAM bilan ishora qilmang ("A javob", "2-variant") — ' +
+  'variant matnini keltiring: variantlar keyin aralashtiriladi.';
+
+/** Tahlil yoziladigan paytda ham variant harfi ishlatilmaydi (yuqoridagi sabab). */
+const NO_OPTION_LETTER_RULE =
+  'Matnda variantga HARF yoki RAQAM bilan ishora qilmang ("A javob", "2-variant") — variant matnini keltiring.';
+
 function optionExplanationSystem(
   domain: SubjectDomain,
   bookContext: BookContext | undefined,
@@ -1516,7 +1582,7 @@ function optionExplanationSystem(
       '2) `explanations` — HAR BIR variantga bittadan qisqa izoh (1 gap, 20 so\'zgacha).\n' +
       'JSON: {items:[{id:<berilgan id>, analysis:"...", explanations:[{i:<variantning berilgan i raqami>, text:"..."}]}]}. ' +
       (bookContext ? 'MANBA: darslik parchalariga tayaning. ' : 'Faqat shu fan bilimiga tayaning. ') +
-      `Til: ${outLang}. ${strictLanguageDirective(language)}`
+      `${NO_OPTION_LETTER_RULE} Til: ${outLang}. ${strictLanguageDirective(language)}`
     );
   }
   if (domain === 'academic') {
@@ -1532,7 +1598,7 @@ function optionExplanationSystem(
       (bookContext
         ? 'MANBA: darslik parchalariga tayaning. '
         : 'Faqat shu fan bilimiga tayaning. ') +
-      `Til: ${outLang}. ${strictLanguageDirective(language)}`
+      `${NO_OPTION_LETTER_RULE} Til: ${outLang}. ${strictLanguageDirective(language)}`
     );
   }
   return (
@@ -1573,7 +1639,7 @@ function optionExplanationSystem(
     'SAFSATA TAQIQLANADI: "muhim ahamiyatga ega", "e\'tibor berish kerak", "to\'g\'ri ' +
     'yondashuv talab etiladi" kabi hech narsa tushuntirmaydigan gaplar YOZMANG — ' +
     'har gapda aniq atama, mexanizm, ko\'rsatkich yoki qadam bo\'lsin.\n' +
-    `Til: ${outLang}. ${strictLanguageDirective(language)}`
+    `${NO_OPTION_LETTER_RULE} Til: ${outLang}. ${strictLanguageDirective(language)}`
   );
 }
 
@@ -1613,7 +1679,7 @@ async function attachOptionExplanations(
         question: questions[i].question,
         options: questions[i].options.map((opt, oi) => ({
           i: oi,
-          text: stripOptionLetterPrefix(opt, oi),
+          text: stripOptionLabels(questions[i].options)[oi] ?? opt,
         })),
         correctOptionIndex: questions[i].correctOptionIndex,
       }));
@@ -2171,7 +2237,8 @@ export const aiService = {
               : 'Oliy tibbiy ta\'lim testlari (KROK / USMLE Step 2 CK), maktab/kollej emas. ') +
           `${GENERATION_UNIQUENESS_RULE} ${DEPTH_RULE} ${TOPIC_FIT_RULE} ${OPTION_LENGTH_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
           `${requestedCount} ta test JSON: ` +
-          `{topic, references:[], questions:[{question, options[5], correctOptionIndex, explanation, references:[]}]}. ` +
+          `{topic, references:[], questions:[{question, options[5], correctOptionIndex, correctAnswer, explanation, references:[]}]}. ` +
+          `${ANSWER_KEY_RULE} ` +
           `${briefExplanation ? 'explanation — 1-2 qisqa gap: to‘g‘ri javob va hal qiluvchi belgi (batafsil tahlil keyin alohida yoziladi).' : testExplanationInstruction(difficulty, domain)} ` +
           (domain === 'academic'
             ? 'Uydirma foiz, PMID, maqola yoki havola YOZILMASIN. Bemor+kasallik+dori vignette TAQIQLANADI. '
@@ -2236,20 +2303,26 @@ export const aiService = {
      */
     const topUp = async (s: TestSession): Promise<TestSession> => {
       let out = s;
-      for (let attempt = 0; attempt < 2 && (out.questions?.length || 0) < safeCount; attempt += 1) {
+      // 4 urinish: ikki urinishda ham 10 ga yetmagan testlar bo'lgan. Har
+      // safar bir nechta ortiqcha so'raladi — ularning bir qismi sifat
+      // nazoratidan o'tmasligi mumkin.
+      for (let attempt = 0; attempt < TOP_UP_ATTEMPTS && (out.questions?.length || 0) < safeCount; attempt += 1) {
         const have = out.questions || [];
         const missing = safeCount - have.length;
         const existing = have.map((q, i) => `${i + 1}. ${q.question}`).join('\n');
         try {
           const more = await generate(
-            missing + 2,
+            missing + 3,
             (lastFlawNote ? `${lastFlawNote}\n\n` : '') +
               (existing
                 ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n`
                 : ''),
           );
           const seen = new Set(have.map((q) => q.question.trim().toLowerCase()));
-          const fresh = (more.questions || []).filter((q) => !seen.has(q.question.trim().toLowerCase()));
+          // Baholab bo'lmaydigan savol (kalitsiz, takror variant) qo'shilmaydi.
+          const fresh = (more.questions || []).filter(
+            (q) => !seen.has(q.question.trim().toLowerCase()) && !questionFlaws(q).some((f) => UNGRADABLE.has(f)),
+          );
           out = {
             ...out,
             questions: [...have, ...fresh].slice(0, safeCount),
@@ -2414,16 +2487,34 @@ export const aiService = {
       data = { ...data, questions: finalCheck.kept };
       if (finalCheck.kept.length < safeCount) {
         console.warn(
-          `Test: so'ralgan ${safeCount} dan ${finalCheck.kept.length} ta savol qoldi — ` +
-            'qolganlari sifat talabidan o\'tmadi.',
+          `Test: so'ralgan ${safeCount} dan ${finalCheck.kept.length} ta savol qoldi — yana to'ldirilmoqda.`,
         );
+        // Kuchsiz va nuqsonlilar ham qo'shilgandan keyin hamon kam bo'lsa —
+        // yana so'raladi. 10 tadan kam test o'qituvchiga berilmaydi.
+        data = await topUp(data);
+        const again = judge([...(data.questions || []), ...finalCheck.rough]);
+        let kept = again.kept;
+        // Toza savollar baribir yetmasa — 10 talik talab (2026-10-16) uchun
+        // shakli biroz nuqsonli savollar to'ldiradi. "Bitta savolda bir nechta
+        // savol" esa hech qachon olinmaydi: uni to'g'ri baholab bo'lmaydi.
+        if (kept.length < safeCount) {
+          const seen = new Set(kept.map((q) => q.question.trim().toLowerCase()));
+          const filler = again.rough.filter(
+            (q) => !questionFlaws(q).includes('ikki_savol') && !seen.has(q.question.trim().toLowerCase()),
+          );
+          kept = [...kept, ...filler].slice(0, safeCount);
+        }
+        data = { ...data, questions: kept };
       }
       // Sifat filtri hammasini tashlasa ham bo'sh test qaytmaydi (2026-10-13).
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw);
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw, safeCount);
     } catch (error) {
+      if (error instanceof Error && error.message === TOO_FEW_QUESTIONS) throw error;
       console.warn('Test generation failed, compact retry…', error);
-      const data = await topUp(await generate(Math.min(safeCount, 10)));
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw);
+      const first = await generate(Math.min(safeCount, 10));
+      const gradable = (first.questions || []).filter((q) => !questionFlaws(q).some((f) => UNGRADABLE.has(f)));
+      const data = await topUp({ ...first, questions: gradable });
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw, safeCount);
     }
   },
 

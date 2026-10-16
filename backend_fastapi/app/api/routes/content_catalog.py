@@ -9,6 +9,7 @@ from app.core.db import get_db
 from app.models import content as _content  # noqa: F401  (registers CourseSyllabus mapper)
 from app.models.prepared_content import CATALOG_KINDS, PreparedContent
 from app.services import content_catalog as svc
+from app.services.case_i18n import without_stale_translations
 from app.services.pagination import paginate
 
 router = APIRouter()
@@ -95,7 +96,7 @@ def get_catalog_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Not found.")
     data = svc.catalog_item_summary(item)
-    data["payload"] = item.payload if isinstance(item.payload, dict) else {}
+    data["payload"] = without_stale_translations(item.payload) if isinstance(item.payload, dict) else {}
     return data
 
 
@@ -105,7 +106,7 @@ def public_get_catalog_item(pk: int, db: Session = Depends(get_db)) -> dict:
     if item is None:
         raise HTTPException(status_code=404, detail="Not found.")
     data = svc.catalog_item_summary(item, include_verification=True)
-    data["payload"] = item.payload if isinstance(item.payload, dict) else {}
+    data["payload"] = without_stale_translations(item.payload) if isinstance(item.payload, dict) else {}
     data["view_only"] = True
     return data
 
@@ -122,7 +123,7 @@ def admin_get_catalog_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Not found.")
     data = svc.catalog_item_summary(item)
-    data["payload"] = item.payload if isinstance(item.payload, dict) else {}
+    data["payload"] = without_stale_translations(item.payload) if isinstance(item.payload, dict) else {}
     return data
 
 

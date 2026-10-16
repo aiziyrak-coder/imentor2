@@ -349,8 +349,11 @@ def collect_unique_questions_from_tests(
             seen.add(key)
 
             correct = q.get("correctOptionIndex")
-            if not isinstance(correct, int):
-                correct = 0
+            options = q.get("options") if isinstance(q.get("options"), list) else []
+            # Kalitsiz savol tashqi tizimga BERILMAYDI: ilgari u jimgina A (0)
+            # deb yuborilardi va to'g'ri javob bergan talaba xato olardi.
+            if isinstance(correct, bool) or not isinstance(correct, int) or not 0 <= correct < len(options):
+                continue
             refs = q.get("references")
             if not (isinstance(refs, list) and refs):
                 refs = payload_refs
