@@ -59,3 +59,19 @@ describe('shuffleQuestionOptions', () => {
     expect(out.correctOptionIndex).toBe(0);
   });
 });
+
+describe('shuffleQuestionOptions — izohdagi harf', () => {
+  it("izohdagi \"to'g'ri javob — A\" aralashtirilgandan keyin ham to'g'ri variantni ko'rsatadi", () => {
+    for (let n = 0; n < 100; n += 1) {
+      const out = shuffleQuestionOptions({
+        options: ['Togri', 'Xato-1', 'Xato-2', 'Xato-3', 'Xato-4'],
+        correctOptionIndex: 0,
+        explanation: "To'g'ri javob — A. B variant esa boshqa holat uchun.",
+      });
+      const letter = 'ABCDE'[out.correctOptionIndex];
+      expect(out.explanation).toContain(`To'g'ri javob — ${letter}.`);
+      const bWas = 'ABCDE'[out.options.indexOf('Xato-1')];
+      expect(out.explanation).toContain(`${bWas} variant esa`);
+    }
+  });
+});

@@ -219,7 +219,34 @@ def _translation_ok(source_q: dict, translated_q: dict, target: str, kind: str) 
     return got == target
 
 
+def translations_stale(payload: dict | None) -> bool:
+    """Tarjimalar asl savollarning ESKI holatidan qilinganmi.
+
+    Asl savollar (masalan variantlar tartibi) tarjimadan keyin o'zgarsa,
+    tarjimadagi variantlar eski tartibda qoladi, to'g'ri javob raqami esa
+    yangi asl savoldan olinadi — RU/EN ko'rinishda va javoblar PDF'ida
+    noto'g'ri variant belgilanardi. Xesh bo'lmasa (eski yozuv) — aniqlab
+    bo'lmaydi, tegilmaydi.
+    """
+    if not isinstance(payload, dict) or not payload.get("translations"):
+        return False
+    saved = payload.get("i18nSourceHash")
+    questions = [q for q in payload.get("questions") or [] if isinstance(q, dict)]
+    if not saved or not questions:
+        return False
+    return saved != _source_hash(questions, _kind_of(payload))
+
+
+def without_stale_translations(payload):
+    """O'qishda: eskirgan tarjimalar berilmaydi — mijoz yangisini so'raydi."""
+    if not translations_stale(payload):
+        return payload
+    return {k: v for k, v in payload.items() if k not in ("translations", "i18nSourceHash")}
+
+
 def _valid_block(payload: dict, lang: str, kind: str) -> bool:
+    if translations_stale(payload):
+        return False
     questions = [q for q in payload.get("questions") or [] if isinstance(q, dict)]
     block = (payload.get("translations") or {}).get(lang)
     rows = block.get("questions") if isinstance(block, dict) else None
