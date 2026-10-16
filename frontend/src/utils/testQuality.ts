@@ -16,8 +16,18 @@
  * Tekshiruv ataylab qo'pol: faqat ochiq-oydin nuqsonni tutadi.
  */
 
+/**
+ * Baholashni buzadigan nuqsonlar — bunday savol hech qachon ishlatilmaydi.
+ *
+ * Qolgan nuqsonlar (ikki savol, javob eng uzun, javob stemda) savolni
+ * xunuk qiladi, lekin baho to'g'ri qo'yiladi — shuning uchun boshqa savol
+ * qolmasa, ular oxirgi chora sifatida ishlatiladi (2026-10-15).
+ */
+export const UNGRADABLE = new Set(['javob_yoq', 'variant_takror', 'hammasi_togri']);
+
 export type QuestionFlaw =
   | 'ikki_savol'
+  | 'manba_savolda'
   | 'javob_savolda'
   | 'javob_eng_uzun'
   | 'variant_takror'
@@ -78,6 +88,12 @@ export function questionFlaws(q: TestQuestionLike): QuestionFlaw[] {
     out.push('ikki_savol');
   }
 
+  // 2. Savol ichidagi manba havolasi: javobni oshkor qiladi va savolni
+  //    kitobdan qidirishga aylantiradi ("(Source: Robbins, 2015, p. 108)").
+  if (/\((?:source|manba|источник)\s*:|\bp\.\s*\d+\s*\)/i.test(stem)) {
+    out.push('manba_savolda');
+  }
+
   if (typeof idx !== 'number' || idx < 0 || idx >= opts.length) {
     out.push('javob_yoq');
     return out;                                    // qolgan tekshiruvlar javobga tayanadi
@@ -125,6 +141,8 @@ export function splitByQuality<T extends TestQuestionLike>(
 /** Modelga qaytib aytiladigan izoh: nima aynan noto'g'ri bo'lgan. */
 export function flawRetryNote(flaws: QuestionFlaw[]): string {
   const WHY: Record<QuestionFlaw, string> = {
+    manba_savolda:
+      'savol matnida MANBA ko\'rsatilgan ("(Source: ...)", "p. 108") — bu javobni oshkor qiladi; manbani savolga yozmang',
     ikki_savol:
       'bitta savol ichida IKKI savol bo\'lgan — har savolda AYNAN BITTA so\'roq gap va bitta savol belgisi bo\'lsin',
     javob_savolda:

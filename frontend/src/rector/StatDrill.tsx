@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Search, X } from 'lucide-react';
+import { ChevronRight, Download, ListChecks, Search, X } from 'lucide-react';
 import { fetchControlPeople, type ControlPeople, type ReportFilters } from './rectorApi';
 import { Spinner } from './RectorUi';
 import type { Person } from './PersonPanel';
+import { Avatar } from './RectorViz';
+import { downloadCsv, safeFileName } from './csv';
+import './rector.css';
 
 /**
  * Raqam ortidagi odamlar (2026-09-28).
@@ -64,20 +67,39 @@ export default function StatDrill({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <button type="button" className="absolute inset-0 bg-slate-900/40" onClick={onClose} aria-label="Yopish" />
-      <div className="relative flex max-h-[80vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-[15px] font-bold text-slate-900">{target.label || data?.title || '…'}</h2>
-            <p className="text-[12px] text-slate-500">
+      <button type="button" className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" onClick={onClose} aria-label="Yopish" />
+      <div className="relative flex max-h-[84vh] w-full max-w-[600px] flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <header className="rx-header flex items-center gap-3 px-5 py-4 text-white">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-sky-500 shadow-lg shadow-indigo-500/30">
+            <ListChecks size={19} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-[16px] font-extrabold tracking-tight">{target.label || data?.title || '…'}</h2>
+            <p className="text-[12px] text-indigo-100/75 rx-num">
               {data ? `${data.total} ta` : 'yuklanmoqda…'}
               {data && data.total > data.people.length && ` · ${data.people.length} tasi ko‘rsatilmoqda`}
             </p>
           </div>
+          {data && data.people.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                downloadCsv(
+                  safeFileName(`${target.label || data.title || 'royxat'}_${filters.from}_${filters.to}`),
+                  ['F.I.Sh.', 'Tafsilot', 'Qiymat', 'Birlik', 'Izoh'],
+                  rows.map((p) => [p.name, p.subtitle, p.value, p.value_label, p.note]),
+                )
+              }
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-[12px] font-bold ring-1 ring-white/15 transition hover:bg-emerald-500/80"
+              title="Ro‘yxatni Excel uchun yuklab olish"
+            >
+              <Download size={14} /> Excel
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="shrink-0 rounded-xl bg-white/10 p-2 text-indigo-100 ring-1 ring-white/15 transition hover:bg-white/20 hover:text-white"
             aria-label="Yopish"
           >
             <X size={18} />
@@ -85,15 +107,15 @@ export default function StatDrill({
         </header>
 
         {data && data.people.length > 0 && (
-          <div className="border-b border-slate-100 px-4 py-2">
+          <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3">
             <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Familiya yoki kafedra bo‘yicha qidirish"
-                className="h-9 w-full rounded-lg border border-slate-200 pl-8 pr-2 text-[13px] outline-none focus:border-sky-400"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-2 text-[13px] outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
               />
             </div>
           </div>
@@ -122,13 +144,10 @@ export default function StatDrill({
                       onClick={() =>
                         openable && onOpenPerson({ kind: p.kind as 'teacher' | 'student', key: p.key, name: p.name })
                       }
-                      className="flex w-full items-center gap-2.5 px-4 py-2 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent"
+                      className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-indigo-50/40 disabled:cursor-default disabled:hover:bg-transparent"
                       title={openable ? 'Batafsil hisobotini ochish' : ''}
                     >
-                      <ChevronRight
-                        size={14}
-                        className={`shrink-0 ${openable && !p.key.startsWith('name:') ? 'text-slate-400' : 'text-transparent'}`}
-                      />
+                      <Avatar name={p.name} size={32} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13.5px] font-medium text-slate-900">{p.name}</span>
                         <span className="block truncate text-[11.5px] text-slate-500">
@@ -136,9 +155,13 @@ export default function StatDrill({
                           {p.note && <span className="ml-1.5 text-amber-700">· {p.note}</span>}
                         </span>
                       </span>
-                      <span className="shrink-0 text-right text-[12.5px] tabular-nums text-slate-600">
-                        <b className="text-slate-800">{p.value}</b> {p.value_label}
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-right text-[12px] tabular-nums text-slate-600">
+                        <b className="text-slate-900">{p.value}</b> {p.value_label}
                       </span>
+                      <ChevronRight
+                        size={15}
+                        className={`shrink-0 transition group-hover:translate-x-0.5 ${openable && !p.key.startsWith('name:') ? 'text-slate-300' : 'text-transparent'}`}
+                      />
                     </button>
                   </li>
                 );

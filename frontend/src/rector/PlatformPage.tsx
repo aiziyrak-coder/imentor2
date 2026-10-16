@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
+import { ArrowLeft, Bot, CalendarRange, ExternalLink, ListChecks, Loader2, MonitorSmartphone } from 'lucide-react';
 import ControlReport from './ControlReport';
 import MonitorDay from './MonitorDay';
 import MonitorReport from './MonitorReport';
 import LessonReport from './LessonReport';
 import RectorIntelligence from './RectorIntelligence';
 import { fetchPlatforms, type PlatformsReport, type ReportFilters } from './rectorApi';
+import './rector.css';
 
 /**
  * Bitta tanlangan platformaning hisoboti — o'z sahifasida.
@@ -27,6 +28,14 @@ const VIEWS = [
   ['jadval', 'Dars jadvali', false],
   ['tahlil', 'AI tahlil', true],
 ] as const;
+
+/** Ikkinchi darajali bo'limlar ikonkasi (2026-10-15 qayta dizayn). */
+const VIEW_ICON = {
+  kun: ListChecks,
+  xonalar: MonitorSmartphone,
+  jadval: CalendarRange,
+  tahlil: Bot,
+} as const;
 
 type ViewKey = (typeof VIEWS)[number][0];
 
@@ -68,7 +77,7 @@ export default function PlatformPage({
     <button
       type="button"
       onClick={onBack}
-      className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-slate-500 hover:text-slate-800"
+      className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-[12.5px] font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 transition hover:text-slate-900 hover:ring-slate-300"
     >
       <ArrowLeft size={15} />
       Tizimlar
@@ -79,7 +88,7 @@ export default function PlatformPage({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         {back}
-        <h2 className="text-[15px] font-bold text-slate-900">
+        <h2 className="text-[18px] font-extrabold tracking-tight text-slate-900">
           {found?.label || (platform === 'imentor' ? 'Darsga tayyorgarlik (iMentor)' : platform)}
         </h2>
         {found?.link && (
@@ -87,7 +96,7 @@ export default function PlatformPage({
             href={found.link}
             target="_blank"
             rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1 text-[12.5px] font-medium text-sky-700 hover:underline"
+            className="ml-auto inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[12.5px] font-semibold text-indigo-600 hover:bg-indigo-50"
           >
             Saytni ochish <ExternalLink size={13} />
           </a>
@@ -99,19 +108,33 @@ export default function PlatformPage({
           (2026-10-09): "umumiy ma'lumotlar emas, individual yondashuv". */}
       {platform === 'imentor' ? (
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-1.5">
-            {VIEWS.filter(([, , wideOnly]) => wide || !wideOnly).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setView(key)}
-                className={`rounded-lg px-3 py-1.5 text-[12.5px] font-semibold ${
-                  view === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-900/[0.07]'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          {/* Olti tugmalik tasma olib tashlandi (rektor, 2026-10-15): asosiy
+              tanlov headerdagi surmada — ustozlar yoki talabalar. Asosiy
+              hisobot nomsiz, darhol ochiladi.
+
+              Qolgan uchta ko'rinish (kun bo'yicha, monitor xonalari, dars
+              jadvali, AI tahlil) KERAK bo'lib qoladi va ular ilgari bir
+              marta shunday yo'qolgan (`0f0f6a8`), shuning uchun kichik
+              ikkinchi darajali qator sifatida saqlanadi. */}
+          <div className="flex flex-wrap items-center gap-2">
+            {VIEWS.filter(([key, , wideOnly]) => key !== 'umumiy' && (wide || !wideOnly)).map(([key, label]) => {
+              const Icon = VIEW_ICON[key as keyof typeof VIEW_ICON];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setView(view === key ? 'umumiy' : key)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-semibold transition ${
+                    view === key
+                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-500/25'
+                      : 'bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 hover:text-slate-900 hover:ring-slate-300'
+                  }`}
+                >
+                  {Icon && <Icon size={14} aria-hidden />}
+                  {label}
+                </button>
+              );
+            })}
           </div>
           {view === 'umumiy' && <ControlReport filters={filters} onUnauthorized={onUnauthorized} />}
           {view === 'kun' && <MonitorDay day={filters.to} onUnauthorized={onUnauthorized} />}
@@ -138,10 +161,15 @@ export default function PlatformPage({
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {found.cards.map((c) => (
-              <div key={c.metric} className="rounded-2xl bg-white px-4 py-3.5 ring-1 ring-slate-900/[0.07]">
-                <p className="text-[12px] text-slate-500">{c.title}</p>
-                <p className="text-[26px] font-bold tabular-nums leading-tight text-slate-900">{c.value}</p>
+            {found.cards.map((c, i) => (
+              <div
+                key={c.metric}
+                className="rx-card rx-rise relative overflow-hidden px-5 py-4"
+                style={{ ['--rx-delay' as string]: `${i * 60}ms` } as React.CSSProperties}
+              >
+                <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-sky-500" />
+                <p className="text-[12px] font-semibold text-slate-500">{c.title}</p>
+                <p className="mt-1 text-[30px] font-extrabold leading-tight text-slate-900 rx-num">{c.value}</p>
                 <p className="text-[11.5px] text-slate-400">{c.hint}</p>
               </div>
             ))}

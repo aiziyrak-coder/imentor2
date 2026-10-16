@@ -43,10 +43,27 @@ const LEVEL_RULES: Record<TestDifficulty, string> = {
     'DARAJASI: O\'RTA. 3 qator vignette: asosiy belgi + bitta chalg\'ituvchi topilma, lekin to\'g\'ri javob aniq. ' +
     'Tashxis yoki keyingi qadam. Ta\'rif savoli YO\'Q.',
   hard:
-    'DARAJASI: QIYIN — rezidentura/KROK. 3 zich jumla: komorbidlik yoki dori + 2 topilma (biri trap) + qaror. ' +
-    'Savol turi: keyingi eng to\'g\'ri qadam, USHBU bemorda qaysi dori mumkin emas, qaysi belgi yaqin DDx ni kesadi, ' +
-    'ikki ko\'rsatkichni birga talqin. "Bitta ABG/lab = tashxis" va "qaysi tashxis ehtimoliy?" (yolg\'iz) TAQIQLANADI. ' +
-    'To\'g\'ri javob BITTA va aniq; distraktorlar mavzudagi yaqin, lekin stem uchun xato.',
+    // Rektor talabi (2026-10-15): "judayam oson — USMLE 10-11 darajaga
+    // o'tkazing, o'sha mavzu bo'yicha bo'lsin". Ya'ni qiyinlik MAVZUNI
+    // chuqurlashtirish hisobiga oshadi, boshqa mavzuga o'tish hisobiga emas.
+    'DARAJASI: ENG QIYIN — USMLE Step 2 CK ning eng og\'ir savollari darajasi. ' +
+    '4 zich jumla (75–110 so\'z): bemor + komorbidlik va dori + 3 topilma + qaror savoli.\n' +
+    'MAJBURIY SHARTLAR:\n' +
+    '  1) Javob KAMIDA UCHTA ma\'lumotni birga talqin qilgandagina chiqsin ' +
+    '(masalan vital + lab + dori ta\'siri). Ikkita faktdan chiqadigan savol bu daraja uchun oson.\n' +
+    '  2) Kamida BITTA topilma yo\'nalishni O\'ZGARTIRSIN: usiz javob boshqa bo\'lardi. ' +
+    'Izohda shu aniq aytilsin.\n' +
+    '  3) Vaqt omili bo\'lsin (necha soat/kun, qachon boshlangani yoki qachongacha ulgurish kerakligi) ' +
+    'va u qarorga ta\'sir qilsin.\n' +
+    '  4) Distraktorlar — TO\'G\'RI, lekin boshqa vaziyat uchun: har biri shu mavzuning yaqin ' +
+    'holatida to\'g\'ri javob bo\'ladigan darajada ishonarli bo\'lsin.\n' +
+    '  5) Savol turi: keyingi eng to\'g\'ri qadam; USHBU bemorda nima mumkin emas; qaysi topilma ' +
+    'yaqin DDx ni kesadi; dastlabki taktika muvaffaqiyatsiz bo\'lganda nima qilinadi; ' +
+    'ikki ko\'rsatkichni birga talqin qilish.\n' +
+    '  6) MAVZUDAN CHIQMASIN: ishchi tashxis ham, qaror ham shu mavzuning nozologiyasi doirasida. ' +
+    'Qiyinlik mavzuni chuqurlashtirish bilan oshadi, begona mavzu qo\'shish bilan emas.\n' +
+    'TAQIQLANADI: "bitta ABG/lab = tashxis"; yolg\'iz "qaysi tashxis ehtimoliy?"; ' +
+    'klassik darslik kartinasi; bitta belgidan topiladigan javob.',
 };
 
 /**
@@ -77,6 +94,65 @@ export const USMLE_RULES = [
   '8) Fakt kitobdan olinsin: berilgan manbalardagi me\'yor, mezon va raqamlardan foydalaning, o\'ylab topmang.',
 ].join('\n');
 
+/**
+ * Daraja bo'yicha CHUQURLIK talabi — bemorsiz fanlar uchun ham.
+ *
+ * Klinik tarmoqda bu `LEVEL_RULES` ichida, lekin biomedical va academic
+ * tarmoqlar u yerga umuman yetib bormasdi: natijada "qiyin" deb so'ralgan
+ * test 24 so'zlik, o'lchovsiz savol bo'lib chiqardi (2026-10-15 o'lchovi).
+ */
+const DEPTH_BY_LEVEL: Record<TestDifficulty, string> = {
+  easy:
+    'DARAJASI: OSONROQ, lekin TA\'RIF EMAS — shart + bitta aniq o\'lchov (raqam+birlik) + qaror.',
+  medium:
+    'DARAJASI: O\'RTA — shart + IKKITA aniq o\'lchov, biri chalg\'ituvchi; javob ikkisini birga talqin qilishdan chiqsin.',
+  hard:
+    'DARAJASI: ENG QIYIN (USMLE Step 2 CK ning eng og\'ir savollari darajasi). MAJBURIY: ' +
+    'savol 45–90 so\'z; ichida KAMIDA UCHTA aniq ma\'lumot (raqam+birlik: konsentratsiya, faollik, ' +
+    'harorat, pH, vaqt, foiz, me\'yordan chetlanish); javob shu uchtasini BIRGA talqin qilgandagina chiqsin. ' +
+    'Bitta ma\'lumot o\'zgarsa javob ham o\'zgaradigan bo\'lsin va izohda shu aniq aytilsin. ' +
+    'Har bir chalg\'ituvchi variant — SHU mavzuning boshqa shartida TO\'G\'RI javob bo\'ladigan darajada ishonarli. ' +
+    'Bitta faktni eslash bilan yechiladigan savol va "qaysi biri xos?" TAQIQLANADI.',
+};
+
+/**
+ * "Qiyin" daraja uchun NAMUNA savol — har tarmoq uchun bittadan.
+ *
+ * Qoida aytish yetarli emasligi ko'rindi: 2026-10-15 da talablar
+ * kuchaytirilgandan keyin ham model 24 so'zlik savol yozardi. Model
+ * ko'rsatmadan ko'ra NAMUNAGA aniqroq ergashadi, shuning uchun unga
+ * kerakli darajaning aniq ko'rinishi beriladi.
+ *
+ * Namuna MAVZUSI ataylab neytral: model uni ko'chirmasligi, faqat
+ * SHAKLINI va chuqurligini olishi kerak.
+ */
+const HARD_EXAMPLE: Record<SubjectDomain, string> = {
+  clinical:
+    'NAMUNA (faqat SHAKL va chuqurlik uchun; mavzusini KO\'CHIRMANG):\n' +
+    'Savol: "64 yoshli erkak 8 soat ichida kuchaygan nafas qisilishi bilan keldi. ' +
+    'Yurak yetishmovchiligi bo\'yicha furosemid 40 mg va enalapril qabul qiladi. ' +
+    'AB 92/58 mm Hg, puls 118 zarb/min, SpO2 86%, kreatinin 2,1 mg/dl (3 oy oldin 1,0), ' +
+    'kaliy 5,8 mmol/l, o\'pkada ikki tomonlama xirillash. Bu bemorda keyingi eng to\'g\'ri qadam qaysi?"\n' +
+    'Nega bu daraja: javob UCHTA ma\'lumotni birga talqin qilishni talab qiladi (bosim pastligi + ' +
+    'kreatinin ikki baravar oshgani + kaliy yuqoriligi); kaliy 5,8 bo\'lmasa javob boshqa bo\'lardi; ' +
+    'har bir variant boshqa shartda to\'g\'ri javob bo\'ladi.',
+  biomedical:
+    'NAMUNA (faqat SHAKL va chuqurlik uchun; mavzusini KO\'CHIRMANG):\n' +
+    'Savol: "Jigar gomogenatida glyukoza-6-fosfataza faolligi 0,5 birlik/mg oqsil (me\'yor 2,8–4,2), ' +
+    'glyukoza-6-fosfat miqdori 40% ga oshgan, laktat 4,8 mmol/l (me\'yor <2,2), ' +
+    'ochlikning 6-soatida qondagi glyukoza 2,6 mmol/l. Bu ko\'rsatkichlar birgalikda qaysi ' +
+    'bosqichning buzilishini ko\'rsatadi?"\n' +
+    'Nega bu daraja: uchta o\'lchov birga talqin qilinadi (ferment faolligi + substrat to\'planishi + ' +
+    'laktat); laktat me\'yorda bo\'lsa javob boshqa bo\'lardi; bemor kartasi yo\'q.',
+  academic:
+    'NAMUNA (faqat SHAKL va chuqurlik uchun; mavzusini KO\'CHIRMANG):\n' +
+    'Savol: "Xonada o\'lchov 3 marta takrorlandi: 420, 465 va 510 lk, talab 500 lk dan kam emas. ' +
+    'O\'lchov quyoshli kunning 11:00 va 15:00 oralig\'ida, chiroqlar yoqilgan holda olingan. ' +
+    'Shu uch natija asosida qaysi xulosa to\'g\'ri?"\n' +
+    'Nega bu daraja: uchta raqam, talab me\'yori va o\'lchov sharti birga hisobga olinadi; ' +
+    'bitta natijaga qarab javob berib bo\'lmaydi.',
+};
+
 export function buildTestDifficultyPrompt(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
   if (domain === 'biomedical') {
     return [
@@ -86,6 +162,11 @@ export function buildTestDifficultyPrompt(level: TestDifficulty, domain: Subject
       '(«N yoshli bemor murojaat qildi» + shikoyat + tashxis/dori) TAQIQLANADI.',
       'Ta\'rif («X nima?») TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
       '«Hammasi to\'g\'ri» TAQIQLANADI.',
+      // Bu tarmoq avval LEVEL_RULES'ni umuman olmasdi, shuning uchun
+      // "qiyin" daraja tibbiy-nazariy fanlarda amalda ishlamasdi: jonli
+      // tekshiruvda o'rtacha savol 24 so'z va 0,1 o'lchov edi (2026-10-15).
+      DEPTH_BY_LEVEL[level],
+      level === 'hard' ? HARD_EXAMPLE[domain] : '',
     ].join(' ') + '\n' + USMLE_RULES;
   }
   if (domain === 'academic') {
@@ -95,9 +176,12 @@ export function buildTestDifficultyPrompt(level: TestDifficulty, domain: Subject
       'Individual bemor vignette (yosh + shikoyat + tashxis/dori) TAQIQLANADI.',
       'Ta\'rif ("X nima?") TAQIQLANADI. 5 variant bir xil turda, to\'g\'ri javob BITTA.',
       '"Hammasi to\'g\'ri" TAQIQLANADI.',
+      DEPTH_BY_LEVEL[level],
+      level === 'hard' ? HARD_EXAMPLE[domain] : '',
     ].join(' ') + '\n' + USMLE_RULES;
   }
-  return `${LEVEL_RULES[level]} ${QUALITY_RULES}\n${USMLE_RULES}`;
+  const example = level === 'hard' ? `\n${HARD_EXAMPLE[domain]}` : '';
+  return `${LEVEL_RULES[level]} ${QUALITY_RULES}\n${USMLE_RULES}${example}`;
 }
 
 export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain = 'clinical'): string {
@@ -106,9 +190,15 @@ export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain
       return 'HAR savol 2 qatorlik ilmiy vazifa (30–50 so\'z): tuzilma, mexanizm yoki me\'yor. Bemor hikoyasi yo\'q.';
     }
     return (
-      'HAR savol 2–3 zich jumla: preparat/namuna/o\'lchov sharti; raqam+birlik bilan topilma; qaror savoli ' +
+      (level === 'hard'
+        ? 'HAR savol 45–90 so\'z, 3–4 zich jumla: preparat/namuna/tajriba sharti; KAMIDA UCHTA ' +
+          'raqam+birlik bilan topilma (biri chalg\'ituvchi); oxirida qaror savoli. '
+        : 'HAR savol 2–3 zich jumla: preparat/namuna/o\'lchov sharti; raqam+birlik bilan topilma; qaror savoli ') +
       '(qaysi mexanizm, qaysi tuzilma, ko\'rsatkich qayerga siljiydi). 5 ta yaqin variant. ' +
-      'Individual bemor kartasi YARATILMASIN.'
+      'Individual bemor kartasi YARATILMASIN. ' +
+      // Jonli natijada savol ichida "(Source: Robbins..., p. 108)" turardi —
+      // bu javobni oshkor qiladi va savolni kitobdan qidirishga aylantiradi.
+      'Savol matnida MANBA ko\'rsatilmasin ("(Source: ...)", "(Robbins, p. 108)") — manbalar alohida maydonda.'
     );
   }
   if (domain === 'academic') {

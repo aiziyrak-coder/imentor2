@@ -1,4 +1,4 @@
-import { reportClientError } from '../utils/clientErrorReporter';
+import { currentAppVersion, reportClientError } from '../utils/clientErrorReporter';
 import { slideLanguageWrong } from '../utils/presentationLanguage';
 import { type AppLanguage, inferPdfLanguage } from '../i18n/language';
 import { translate } from '../i18n/translations';
@@ -59,7 +59,8 @@ import {
 } from '../utils/generationVariety';
 import { listPreparedForTopicSynced, loadPreparedByIdSynced } from '../utils/preparedContentStore';
 import { caseWeaknesses, weakCaseRetryNote } from '../utils/caseQuality';
-import { flawRetryNote, questionFlaws, type QuestionFlaw } from '../utils/testQuality';
+import { CASE_SHAPE_RETRY_NOTE, caseShapeSummary, repairCaseShape } from '../utils/caseShape';
+import { UNGRADABLE, flawRetryNote, questionFlaws, type QuestionFlaw } from '../utils/testQuality';
 import { depthFlaws, depthRetryNote, type DepthFlaw } from '../utils/testDepth';
 import { normalizeCaseFocus } from '../utils/caseFocusLabels';
 import { type MedicalReference } from '../utils/medicalReferences';
@@ -351,6 +352,15 @@ export interface TestSession {
   /** Oson / o'rta / qiyin — yaratishda tanlangan. */
   difficulty?: TestDifficulty;
   domain?: SubjectDomain;
+  /**
+   * Qaysi brauzer nusxasi yaratgan (`index-AbC123.js`).
+   *
+   * Sinf doskasidagi brauzer kun bo'yi ochiq turadi va eski kod bilan
+   * ishlayveradi. 2026-10-15 da sifat qoidalari kuchaytirilgach, yangi
+   * testlar hamon zaif chiqdi va ular eski nusxadan kelganini ISBOTLAB
+   * bo'lmadi — endi har to'plamda versiya turadi va o'lchov aniq bo'ladi.
+   */
+  appVersion?: string;
 }
 
 export interface LectureNote {
@@ -832,6 +842,10 @@ async function generateSingleCaseQuestion(
   const personaHint = isPatientFree(domain) ? CASE_PERSONA_HINTS_ACADEMIC[focus] : CASE_PERSONA_HINTS[focus];
   // `qualityNote` — fikrlash sifati bo'yicha qayta urinishda nima aynan
   // noto'g'ri bo'lganini aytadigan izoh (2026-10-13).
+  // Javob shakli har so'rovdan keyin tiklanadi (`caseShape.ts`): model ba'zan
+  // vaziyatni boshqa kalitga yoki ichma-ich obyektga yozadi. Asl shakli
+  // jurnal uchun eslab qolinadi — "nega bo'sh" degan savolga javob bo'lsin.
+  let lastShape = '';
   const request = (strict: boolean, banClinicalLeak = false, offTopic = false, qualityNote = '') =>
     openaiJson<CaseSections>({
       model: OPENAI_CHAT,
@@ -895,6 +909,9 @@ async function generateSingleCaseQuestion(
       // qayta generatsiyaga (yana 10 000 token) majbur qilardi.
       responseFormat: { type: 'json_object' },
       parse: (t) => parseJSONSafe(t),
+    }).then((r) => {
+      lastShape = caseShapeSummary(r);
+      return repairCaseShape<CaseSections>(r);
     });
 
   let raw: CaseSections;
@@ -980,16 +997,37 @@ async function generateSingleCaseQuestion(
     }
   }
 
+  // Vaziyati yoki yechimi bo'sh keys savoli tashlanadi — o'qituvchi 3 o'rniga
+  // 1–2 savol oladi (2026-10-15: biotibbiyot keyslarining 103/187 tasi shunday
+  // edi). Tashlashdan oldin bir marta aniq izoh bilan qayta so'raladi.
+  const thin = (r: CaseSections) =>
+    joinCaseScenario(r, language, domain).trim().length < 120 ||
+    joinCaseSections(r, language, domain).trim().length < 120;
+  if (thin(raw)) {
+    const firstShape = lastShape;
+    console.warn(`Case focus "${focus}": vaziyat yoki yechim bo'sh (${firstShape}), qayta urinilmoqda`);
+    try {
+      const retry = await request(true, false, false, CASE_SHAPE_RETRY_NOTE);
+      if (!thin(retry)) raw = retry;
+    } catch (err) {
+      console.warn('Case shakl bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
+    }
+    if (thin(raw)) lastShape = `${firstShape} | qayta: ${lastShape}`;
+  }
+
   const answer = joinCaseSections(raw, language, domain);
+  const scenarioText = joinCaseScenario(raw, language, domain);
   // Yechim matni yo'q — adabiyotlar QO'SHILMAYDI: aks holda "yechim" faqat
   // manbalar ro'yxatidan iborat bo'lib, uzunlik tekshiruvidan o'tib ketardi
   // (2026-10-14, sinf doskasida).
-  if (answer.trim().length < 120) {
+  if (answer.trim().length < 120 || scenarioText.trim().length < 120) {
     return {
-      scenario: joinCaseScenario(raw, language, domain),
+      scenario: scenarioText,
       answer: answer.trim(),
       focus: normalizeCaseFocus(raw.focus, CASE_STUDY_FOCUS_ORDER.indexOf(focus)),
-      rawSnippet: safeSnippet(raw),
+      // Jurnalda sabab ko'rinsin: fan turi, uzunliklar va modelning asl shakli.
+      rawSnippet: `${domain} focus=${focus} vaziyat=${scenarioText.trim().length} yechim=${answer.trim().length} ` +
+        `shakl: ${lastShape}\n${safeSnippet(raw)}`,
     } as CaseStudyQuestion;
   }
   const usedIndices = new Set(
@@ -1041,10 +1079,29 @@ function normalizeCaseSession(
       stack: bad.map((q) => (q as CaseStudyQuestion & { rawSnippet?: string }).rawSnippet || '(bo\'sh)').join('\n---\n').slice(0, 3000),
     });
   }
-  if (!cleanedQuestions.length) throw new Error('Keys yaratilmadi');
+  // Hammasi chegaradan o'tmasa ham, VAZIYATI to'liq yozilganlari saqlanadi:
+  // 2026-10-15 da o'qituvchilar "Klinik keys yaratishda xatolik" xabarini
+  // olib, hech narsa yarata olmadi (76 marta, 20 dan ortiq o'qituvchi).
+  // Qisqa yechimli keys — kamchilik, lekin bo'sh sahifadan foydaliroq;
+  // u jurnalga yozilgan, ya'ni ko'rinmay qolmaydi.
+  const usable = cleanedQuestions.length
+    ? cleanedQuestions
+    : rawQuestions.flatMap((q, i) => {
+        const scenario = (q.scenario || '').trim();
+        const answer = (q.answer || '').trim();
+        if (scenario.length < 120 || !answer) return [];
+        const refs = (q as CaseStudyQuestion).references;
+        return [{
+          scenario,
+          answer,
+          focus: normalizeCaseFocus((q as CaseStudyQuestion).focus, i),
+          ...(refs?.length ? { references: refs } : {}),
+        }];
+      });
+  if (!usable.length) throw new Error('Keys yaratilmadi');
   return {
     topic: (data.topic || topic || '').trim() || topic,
-    questions: cleanedQuestions,
+    questions: usable,
     references: [],
     ...(data.domain ? { domain: data.domain } : {}),
   };
@@ -2088,6 +2145,9 @@ export const aiService = {
 
     const contextBlock = buildOwnMaterialsBlock(extraContext);
 
+    // Shundan kam toza savol qolsa — shakli buzuq (lekin bitta savolli)
+    // savollar ham olinadi; aks holda test umuman chiqmay qolardi.
+    const MIN_TEST_QUESTIONS = 5;
     // Tashlangan savollarning nuqsonlari — keyingi so'rovga izoh bo'lib qo'shiladi.
     let lastFlawNote = '';
     /** Oxirgi AI javobi (qisqartirilgan) — bo'sh natijada jurnalga yozish uchun. */
@@ -2276,12 +2336,21 @@ export const aiService = {
       const judge = (questions: TestSession['questions']) => {
         const good: TestSession['questions'] = [];
         const weak: TestSession['questions'] = [];
+        const rough: TestSession['questions'] = [];
         const form: QuestionFlaw[] = [];
         const depth: DepthFlaw[] = [];
         for (const q of questions || []) {
           const formFlaws = questionFlaws(q);
+          // Baholashni buzadigan nuqson — savol HECH QACHON ishlatilmaydi:
+          // to'g'ri javob raqami yo'q yoki bir xil variant ikki marta bo'lsa,
+          // talaba nohaq baho oladi.
+          if (formFlaws.some((f) => UNGRADABLE.has(f))) {
+            form.push(...formFlaws);
+            continue;
+          }
           if (formFlaws.length) {
             form.push(...formFlaws);
+            rough.push(q);
             continue;
           }
           const depthFound = depthFlaws(q, { domain, difficulty });
@@ -2292,9 +2361,26 @@ export const aiService = {
           }
           good.push(q);
         }
-        // Yetishmasa — mazmuni kuchsizlari qo'shiladi, lekin shakli buzuqlari YO'Q.
-        const kept = good.length >= safeCount ? good : [...good, ...weak.slice(0, safeCount - good.length)];
-        return { kept, good, weak, form, depth };
+        // Sifat bo'yicha tartib: toza -> mazmuni kuchsiz -> shakli nuqsonli.
+        //
+        // Oxirgisi ham olinadi, chunki 2026-10-15 da nazorat hamma savolni
+        // rad etgan payt o'qituvchiga "AI javobi yaroqsiz" degan xato chiqdi
+        // va test umuman yaratilmadi (114 marta, 20 dan ortiq o'qituvchida).
+        // Sifat uchun kurash sahifani ishdan chiqarmasligi kerak.
+        //
+        // 2026-10-16: shakli buzuq savol endi faqat OXIRGI chora — test
+        // umuman chiqmay qolmasligi uchun, va hatto shunda ham "bitta savolda
+        // bir nechta savol" bo'lgani olinmaydi. 15–16 oktabrda 1437 savolning
+        // 35% i shunday edi: zaxira yaxshi savol yetmaganda ularni ham
+        // qaytarib olardi. Toza 7 savollik test nuqsonli 10 talikdan yaxshi.
+        const usable = [...good, ...weak];
+        let kept = usable.slice(0, Math.max(safeCount, good.length));
+        if (kept.length < MIN_TEST_QUESTIONS) {
+          const single = rough.filter((q) => !questionFlaws(q).includes('ikki_savol'));
+          kept = [...kept, ...single].slice(0, MIN_TEST_QUESTIONS);
+        }
+        if (!kept.length) kept = rough.slice(0, MIN_TEST_QUESTIONS);
+        return { kept, good, weak, rough, form, depth };
       };
 
       // Birinchi tekshiruv: sifatsizlar chiqariladi va `topUp` ularning
@@ -2317,10 +2403,14 @@ export const aiService = {
       // qaytadan so'raladi; kuchsizlari esa oxirida, kerak bo'lsa, qo'shiladi.
       data = { ...data, questions: checked.good };
       data = await topUp(data);
-      // Oxirgi tekshiruv: to'ldirilganlar ham o'tadi, va shu yerda kerak
-      // bo'lsa mazmuni kuchsizlari qaytarib olinadi — bo'sh test bermaslik
-      // uchun. Shakli buzuqlari hech qachon qaytmaydi.
-      const finalCheck = judge([...(data.questions || []), ...checked.weak]);
+      // Oxirgi tekshiruv: to'ldirilganlar ham o'tadi. Avval chetga qo'yilgan
+      // savollar shu yerda qaytib qo'shiladi — tartibi bo'yicha, ya'ni
+      // yaxshisi oldinda. Baholab bo'lmaydiganlari qaytmaydi.
+      const finalCheck = judge([
+        ...(data.questions || []),
+        ...checked.weak,
+        ...checked.rough,
+      ]);
       data = { ...data, questions: finalCheck.kept };
       if (finalCheck.kept.length < safeCount) {
         console.warn(
@@ -2329,11 +2419,11 @@ export const aiService = {
         );
       }
       // Sifat filtri hammasini tashlasa ham bo'sh test qaytmaydi (2026-10-13).
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain }, lastRaw);
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw);
     } catch (error) {
       console.warn('Test generation failed, compact retry…', error);
       const data = await topUp(await generate(Math.min(safeCount, 10)));
-      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain }, lastRaw);
+      return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw);
     }
   },
 
