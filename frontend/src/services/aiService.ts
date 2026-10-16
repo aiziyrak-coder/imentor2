@@ -2211,6 +2211,9 @@ export const aiService = {
 
     const contextBlock = buildOwnMaterialsBlock(extraContext);
 
+    // Shundan kam toza savol qolsa — shakli buzuq (lekin bitta savolli)
+    // savollar ham olinadi; aks holda test umuman chiqmay qolardi.
+    const MIN_TEST_QUESTIONS = 5;
     // Tashlangan savollarning nuqsonlari — keyingi so'rovga izoh bo'lib qo'shiladi.
     let lastFlawNote = '';
     /** Oxirgi AI javobi (qisqartirilgan) — bo'sh natijada jurnalga yozish uchun. */
@@ -2437,8 +2440,19 @@ export const aiService = {
         // rad etgan payt o'qituvchiga "AI javobi yaroqsiz" degan xato chiqdi
         // va test umuman yaratilmadi (114 marta, 20 dan ortiq o'qituvchida).
         // Sifat uchun kurash sahifani ishdan chiqarmasligi kerak.
-        const ranked = [...good, ...weak, ...rough];
-        const kept = ranked.slice(0, Math.max(safeCount, good.length));
+        //
+        // 2026-10-16: shakli buzuq savol endi faqat OXIRGI chora — test
+        // umuman chiqmay qolmasligi uchun, va hatto shunda ham "bitta savolda
+        // bir nechta savol" bo'lgani olinmaydi. 15–16 oktabrda 1437 savolning
+        // 35% i shunday edi: zaxira yaxshi savol yetmaganda ularni ham
+        // qaytarib olardi. Toza 7 savollik test nuqsonli 10 talikdan yaxshi.
+        const usable = [...good, ...weak];
+        let kept = usable.slice(0, Math.max(safeCount, good.length));
+        if (kept.length < MIN_TEST_QUESTIONS) {
+          const single = rough.filter((q) => !questionFlaws(q).includes('ikki_savol'));
+          kept = [...kept, ...single].slice(0, MIN_TEST_QUESTIONS);
+        }
+        if (!kept.length) kept = rough.slice(0, MIN_TEST_QUESTIONS);
         return { kept, good, weak, rough, form, depth };
       };
 

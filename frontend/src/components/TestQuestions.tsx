@@ -937,9 +937,9 @@ export default function TestQuestions() {
       );
       const here = stillHere();
       if (here) {
-        // Yangi test — jonli sessiya AVTOMATIK boshlanmaydi (Bazadan ochilgan
-        // versiyadagidek "Sessiyani boshlash" tugmasi bilan). Ilgari har
-        // generatsiya serverda QR sessiya ochardi.
+        // Jonli sessiya shu yerda emas — test bazaga yozilgandan KEYIN
+        // o'zi ochiladi (pastda, 2026-10-16), sessiya qaysi versiyadan
+        // boshlangani shunda aniq bo'ladi.
         if (teacherSessionId && !sessionClosed) clearStoredTeacherSid(startTopic);
         setTestSession(data);
         setViewLang(data.primaryLanguage || contentLanguage);
@@ -979,6 +979,22 @@ export default function TestQuestions() {
       } catch (saveErr) {
         console.error('Test save failed', saveErr);
         if (stillHere()) setError(t('common.saveFailedKeepWork'));
+      }
+
+      // QR darhol (2026-10-16). O'qituvchilar "test yaratdim, QR chiqmadi"
+      // deb shikoyat qildi: 16-oktabr ertalab 102 ta test yaratilib, faqat
+      // 39 ta jonli sessiya ochilgan edi — tugmani topishmagan. YANGI
+      // yaratilgan test darsda ishlatish uchun, shuning uchun sessiya o'zi
+      // ochiladi. Bazadan ochilgan eski versiya esa avvalgidek tugma bilan:
+      // shunchaki ko'rish uchun ochilganda serverda sessiya paydo bo'lmasin.
+      if (stillHere() && data.questions?.length) {
+        try {
+          const sid = await setupTeacherLiveSession(data);
+          if (savedId) writeStoredSidVersion(sid, savedId);
+        } catch (err) {
+          console.error('Live session auto-start failed', err);
+          if (stillHere()) setError(t(startSessionErrorKey(err)));
+        }
       }
 
       if (stillHere()) setEnriching(true);
