@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import './rector.css';
 import {
   Activity,
   BookOpen,
@@ -168,33 +169,33 @@ function ProfileDialog({ target, filters, onClose, onUnauthorized }: { target: T
   const name = data?.display_name || target.name;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-stretch justify-center bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-stretch justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`${name} — to‘liq hisobot`}
-        className="flex max-h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-slate-50 shadow-2xl sm:max-h-[94vh] sm:rounded-3xl"
+        className="flex max-h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-[#f3f5fb] shadow-2xl sm:max-h-[94vh] sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-start gap-4 border-b border-slate-200 bg-white px-5 py-4">
-          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-[20px] font-black text-white ${BAR[status]}`}>
+        <header className="rx-header flex items-start gap-4 px-5 py-5 text-white">
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-[20px] font-black text-white shadow-lg ring-2 ring-white/20 ${BAR[status]}`}>
             {name.trim().charAt(0).toUpperCase() || '?'}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-[19px] font-black leading-tight text-slate-950">{name}</h2>
-            <p className="mt-0.5 text-[12.5px] text-slate-500">
+            <h2 className="text-[20px] font-black leading-tight text-white">{name}</h2>
+            <p className="mt-0.5 text-[12.5px] text-indigo-100/75">
               {[data?.department, data?.job_title].filter(Boolean).join(' · ') || (target.key ? '' : 'iMentor hisobi topilmagan — faqat monitor jadvali ko‘rsatiladi')}
             </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11.5px] text-slate-500">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-indigo-200/80">
               {data && <StatusChip status={status} title={teacherStatusText(data)}>{teacherStatusShort(data)}</StatusChip>}
               {data && <span>Oxirgi kirish: {fmtDate(data.last_login)}</span>}
               <span>
                 {filters.from} — {filters.to}
               </span>
-              {target.key && <span className="font-mono text-slate-400">{target.key}</span>}
+              {target.key && <span className="font-mono text-indigo-200/60">{target.key}</span>}
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Yopish" className="rounded-full bg-white p-2 ring-1 ring-slate-200 hover:bg-slate-50">
+          <button type="button" onClick={onClose} aria-label="Yopish" className="rounded-xl bg-white/10 p-2 text-indigo-100 ring-1 ring-white/15 transition hover:bg-white/20 hover:text-white">
             <X size={18} />
           </button>
         </header>

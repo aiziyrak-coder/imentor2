@@ -1173,6 +1173,25 @@ export function fetchControlPeople(
   return get(`/control/people/?${query({ from: f.from, to: f.to, department: f.department, metric })}`);
 }
 
+/** Haftalar bo'yicha monitorli darslarda iMentor ishlatilishi (2026-10-15). */
+export type ControlTrend = {
+  from: string;
+  to: string;
+  weeks: Array<{
+    week_start: string;
+    week_end: string;
+    lessons: number;
+    used: number;
+    touched: number;
+    percent: number | null;
+    touched_percent: number | null;
+  }>;
+};
+
+export function fetchControlTrend(f: ReportFilters, weeks = 8): Promise<ControlTrend> {
+  return get(`/control/trend/?${query({ to: f.to, department: f.department, weeks })}`);
+}
+
 export function fetchControlStudents(f: ReportFilters): Promise<ControlStudents> {
   return get(`/control/students/?${query({ from: f.from, to: f.to })}`);
 }

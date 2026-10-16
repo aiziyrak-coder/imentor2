@@ -60,7 +60,13 @@ class Settings(BaseSettings):
     django_allow_open_registration: bool = False
     django_allow_legacy_prepared_content_api: bool = False
 
-    django_ai_education_rate: str = "60/hour"
+    # Bitta "10 ta test yarat" bosilishi bir nechta so'rov sarflaydi: asosiy
+    # generatsiya, kitob manbalari, keys konteksti, sifat va til bo'yicha
+    # qayta urinishlar. 60/soat bilan o'qituvchi besh-olti marta bosganda
+    # "juda ko'p so'rov" (429) olardi — 2026-10-15 da shunday 118 marta
+    # bo'ldi. Xarajatni bu emas, OpenAI hisobidagi limit tiyadi; bu chegara
+    # suiiste'molga qarshi.
+    django_ai_education_rate: str = "300/hour"
     # Tarjima: til almashganda bir necha material birdan so'raladi; tayyor tarjima AI'siz qaytadi.
     django_ai_translate_rate: str = "300/hour"
     django_ai_startup_rate: str = "40/hour"

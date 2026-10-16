@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState, useSyncExternalStore } from 'react';
-import { AlertTriangle, ArrowUpDown, ChevronDown, Loader2 } from 'lucide-react';
+import { AlertTriangle, ArrowUpDown, ChevronDown, Inbox, Loader2 } from 'lucide-react';
+import './rector.css';
 
 /**
  * Rektor hisobotining umumiy qismlari.
@@ -42,24 +43,32 @@ export function useNarrowScreen(): boolean {
 
 export function Spinner() {
   return (
-    <div className="flex justify-center py-16 text-slate-400">
-      <Loader2 size={22} className="animate-spin" />
+    <div className="flex flex-col items-center justify-center gap-2 py-16 text-indigo-400">
+      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-slate-200">
+        <Loader2 size={22} className="animate-spin" />
+      </span>
+      <span className="text-[12px] font-medium text-slate-400">Yuklanmoqda…</span>
     </div>
   );
 }
 
 export function ErrorBox({ text }: { text: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
-      <AlertTriangle size={17} className="mt-0.5 shrink-0" />
-      {text}
+    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-[13px] text-amber-900 shadow-sm">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md">
+        <AlertTriangle size={16} />
+      </span>
+      <span className="pt-1">{text}</span>
     </div>
   );
 }
 
 export function Empty({ text }: { text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-4 py-14 text-center text-[13px] text-slate-500">
+    <div className="flex flex-col items-center gap-2 rounded-3xl border border-dashed border-slate-300 bg-white/70 px-4 py-14 text-center text-[13px] text-slate-500">
+      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+        <Inbox size={20} />
+      </span>
       {text}
     </div>
   );
@@ -104,15 +113,15 @@ export function Stat({
           className={`absolute inset-y-0 left-0 w-1.5 ${STATUS_BAR[status]}`}
         />
       )}
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`mt-0.5 text-[22px] font-bold tabular-nums ${valueTone}`}>{value}</p>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`mt-1 text-[26px] font-extrabold leading-tight tabular-nums ${valueTone}`}>{value}</p>
       {hint && <p className="text-[11.5px] text-slate-400">{hint}</p>}
     </>
   );
 
   const shell =
-    'relative overflow-hidden rounded-xl border border-slate-200 bg-white py-3 pr-3.5 ' +
-    (status ? 'pl-4' : 'pl-3.5');
+    'rx-card relative overflow-hidden py-3.5 pr-4 ' +
+    (status ? 'pl-5' : 'pl-4');
 
   if (!onClick) return <div className={shell}>{body}</div>;
   return (
@@ -120,10 +129,10 @@ export function Stat({
       type="button"
       onClick={onClick}
       title="Bosing — bu raqam nimadan iborat"
-      className={`group text-left transition hover:border-slate-400 hover:shadow-sm ${shell}`}
+      className={`group rx-lift text-left ${shell}`}
     >
       {body}
-      <span className="absolute right-2.5 top-2.5 text-[10px] font-bold text-slate-300 transition group-hover:text-slate-500">
+      <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-400 transition group-hover:bg-indigo-500 group-hover:text-white">
         ?
       </span>
     </button>
@@ -143,9 +152,12 @@ export function Stat({
 /** Bo'lim sarlavhasi va uning ostidagi qisqa izoh. */
 export function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="px-1">
-      <h2 className="text-[13px] font-bold uppercase tracking-wide text-slate-500">{title}</h2>
-      {hint && <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">{hint}</p>}
+    <div className="flex items-start gap-2.5 px-1">
+      <span aria-hidden className="mt-1 h-4 w-1.5 shrink-0 rounded-full bg-gradient-to-b from-indigo-500 to-violet-500" />
+      <div>
+        <h2 className="text-[14px] font-extrabold tracking-tight text-slate-800">{title}</h2>
+        {hint && <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">{hint}</p>}
+      </div>
     </div>
   );
 }
@@ -209,7 +221,7 @@ export function StatusChip({
   return (
     <span
       title={title || STATUS_LABEL[status]}
-      className={`inline-block rounded px-1.5 py-0.5 text-[11.5px] font-semibold tabular-nums ${STATUS_CHIP[status]}`}
+      className={`inline-block rounded-full px-2 py-0.5 text-[11.5px] font-bold tabular-nums ${STATUS_CHIP[status]}`}
     >
       {children}
     </span>
@@ -379,7 +391,7 @@ export function SortableTable<T>({
               return v !== null && v !== undefined && v !== '';
             });
             return (
-              <li key={key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <li key={key} className="rx-card overflow-hidden">
                 <div
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={`px-3 py-2.5 ${onRowClick ? 'cursor-pointer' : ''}`}
@@ -416,15 +428,15 @@ export function SortableTable<T>({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+    <div className="rx-card rx-scroll overflow-x-auto">
       <table className="w-full min-w-[52rem] border-collapse text-[13px]">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/80">
+          <tr className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-indigo-50/40">
             {columns.map((c) => (
               <th
                 key={c.key}
                 style={c.width ? { width: c.width } : undefined}
-                className={`px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 ${
+                className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500 ${
                   c.align === 'right' ? 'text-right' : 'text-left'
                 }`}
               >
@@ -440,8 +452,8 @@ export function SortableTable<T>({
                           : { key: c.key, dir: 'desc' },
                       )
                     }
-                    className={`inline-flex items-center gap-1 hover:text-slate-800 ${
-                      sort.key === c.key ? 'text-slate-900' : ''
+                    className={`inline-flex items-center gap-1 transition hover:text-indigo-700 ${
+                      sort.key === c.key ? 'text-indigo-700' : ''
                     }`}
                   >
                     {c.label}
@@ -465,9 +477,9 @@ export function SortableTable<T>({
               <Fragment key={key}>
                 <tr
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={`border-b border-slate-100 last:border-0 ${
-                    onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''
-                  } ${expanded ? 'bg-slate-50' : ''}`}
+                  className={`border-b border-slate-100 transition-colors last:border-0 ${
+                    onRowClick ? 'cursor-pointer hover:bg-indigo-50/40' : ''
+                  } ${expanded ? 'bg-indigo-50/50' : ''}`}
                 >
                   {columns.map((c) => (
                     <td

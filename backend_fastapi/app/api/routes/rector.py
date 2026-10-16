@@ -37,6 +37,7 @@ from app.services import control_report_service as control
 from app.services import lesson_report_service as lessons
 from app.services import monitor_day_service as monitor_day
 from app.services import platform_overview as platforms_svc
+from app.services import student_report_service as students_svc
 from app.services import rector_report_service as svc
 from app.services import monitor_schedule_service as monitor_svc
 
@@ -208,6 +209,19 @@ def rector_control(
     return out
 
 
+@router.get("/rector/control/trend/")
+def rector_control_trend(
+    date_to: str | None = Query(default=None, alias="to"),
+    weeks: int = Query(default=8, ge=2, le=16),
+    department: str = Query(default=""),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Haftalar bo'yicha monitorli darslarda iMentor ishlatilishi."""
+    _start, end = _range(None, date_to)
+    return control.weekly_trend(db, end, weeks=weeks, department=department, groups=allowed_groups(ctx))
+
+
 @router.get("/rector/platforms/")
 def rector_platforms(
     date_from: str | None = Query(default=None, alias="from"),
@@ -278,6 +292,123 @@ def rector_control_students(
     """Talabalar nazorati: test faolligi va guruhlar qamrovi."""
     start, end = _range(date_from, date_to)
     return control.students(db, start, end, only_groups=allowed_groups(ctx))
+
+
+# ===================== Talabalar sahifasi (2026-10-15) =====================
+# Rektor: o'qituvchilar bo'yicha alohida, talabalar bo'yicha alohida sahifa.
+# Dekan cheklovi hamma yo'lda bir xil: `allowed_groups(ctx)`.
+
+
+@router.get("/rector/students-report/filters/")
+def rector_students_filters(
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Saralash ro'yxatlari: fakultet, guruh, kurs, fan."""
+    return students_svc.filters(db, groups=allowed_groups(ctx))
+
+
+@router.get("/rector/students-report/")
+def rector_students_report(
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+    faculty: str = Query(default=""),
+    group: str = Query(default=""),
+    course: int | None = Query(default=None),
+    subject_code: str = Query(default=""),
+    q: str = Query(default="", max_length=120),
+    scope: str = Query(default="monitor", pattern="^(monitor|all)$"),
+    department: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Talabalar ro'yxati — filtr bo'yicha, test topshirmaganlari bilan."""
+    start, end = _range(date_from, date_to)
+    return students_svc.student_rows(
+        db, start, end, faculty=faculty.strip(), group=group.strip(), course=course,
+        subject_code=subject_code.strip(), query=q.strip(), scope=scope,
+        department=department.strip(), groups=allowed_groups(ctx),
+    )
+
+
+@router.get("/rector/students-report/overview/")
+def rector_students_overview(
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+    faculty: str = Query(default=""),
+    group: str = Query(default=""),
+    course: int | None = Query(default=None),
+    subject_code: str = Query(default=""),
+    scope: str = Query(default="monitor", pattern="^(monitor|all)$"),
+    department: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Rahbariyat tahlili: qamrov, baholar, kurs/guruh kesimi, xavf, halollik."""
+    start, end = _range(date_from, date_to)
+    return students_svc.cached_overview(
+        db, start, end, faculty=faculty.strip(), group=group.strip(), course=course,
+        subject_code=subject_code.strip(), scope=scope, department=department.strip(),
+        groups=allowed_groups(ctx),
+    )
+
+
+@router.get("/rector/students-report/trend/")
+def rector_students_trend(
+    date_to: str | None = Query(default=None, alias="to"),
+    weeks: int = Query(default=8, ge=2, le=16),
+    faculty: str = Query(default=""),
+    group: str = Query(default=""),
+    course: int | None = Query(default=None),
+    subject_code: str = Query(default=""),
+    scope: str = Query(default="monitor", pattern="^(monitor|all)$"),
+    department: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Haftalar bo'yicha talabalar qamrovi va natijasi."""
+    _start, end = _range(None, date_to)
+    return students_svc.weekly_trend(
+        db, end, weeks=weeks, faculty=faculty.strip(), group=group.strip(), course=course,
+        subject_code=subject_code.strip(), scope=scope, department=department.strip(),
+        groups=allowed_groups(ctx),
+    )
+
+
+@router.get("/rector/students-report/{student_key}/attempts/")
+def rector_student_attempts(
+    student_key: str,
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+    scope: str = Query(default="all", pattern="^(monitor|all)$"),
+    department: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Bitta talaba: qaysi kuni, qaysi darsda, qaysi mavzuda test topshirgan."""
+    start, end = _range(date_from, date_to)
+    try:
+        return students_svc.student_attempts(
+            db, student_key.strip(), start, end, scope=scope,
+            department=department.strip(), groups=allowed_groups(ctx),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.get("/rector/students-report/attempt/{attempt_id}/")
+def rector_student_attempt(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    ctx: dict = Depends(require_rector),
+) -> dict:
+    """Bitta test: savollar, talaba belgilagan javoblar va to'g'ri javoblar."""
+    try:
+        return students_svc.attempt_detail(db, attempt_id, groups=allowed_groups(ctx))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/rector/control/people/")

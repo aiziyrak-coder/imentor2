@@ -30,6 +30,13 @@ function formatDrfBody(body: unknown): string | null {
 export function apiErrorMessage(err: unknown, fallback: string, lang: AppLanguage = 'uz'): string {
   if (err instanceof HttpError) {
     const fromBody = formatDrfBody(err.body);
+    // Mablag' tugagani — eng ko'p uchraydigan to'xtash sababi, va u o'z-o'zidan
+    // tuzalmaydi. Server xabari o'zbekcha keladi, interfeys esa rus yoki
+    // ingliz tilida bo'lishi mumkin; o'shanda umumiy "vaqtincha ishlamayapti"
+    // ko'rinib, administrator sababni bilmay qolardi (2026-10-15).
+    if (fromBody && /no credits remaining|insufficient_quota|mablag|средства|credit/i.test(fromBody)) {
+      return translate(lang, 'api.error.openaiCredits');
+    }
     // Server xabari faqat interfeys tilida bo'lsa (aks holda tarjima qilingan umumiy matn).
     if (fromBody && textFitsLanguage(fromBody, lang)) return fromBody;
     if (err.status === 503) return translate(lang, 'api.error.openaiKey');

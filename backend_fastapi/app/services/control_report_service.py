@@ -371,6 +371,13 @@ def _build_teacher_rows(db: Session, start_day: dt.date, end_day: dt.date, *, de
     work = {k: (m["seconds"], m["students"]) for k, m in measures.items()}
     need = lr.MIN_LESSON_MINUTES * 60
     used = {k: (True, m["students"]) for k, m in measures.items() if lr.is_taught(m)}
+    # "Ishlatilgan" dars — to'liq o'tilgan YOKI dars vaqtida qisqa bo'lsa ham
+    # ishlangan. Asosiy foiz shu bo'yicha (2026-10-12); kunlik va haftalik
+    # grafik ham shu ma'noda bo'lsin (2026-10-15).
+    pending["_touched"] = {
+        lesson.id for lesson in lessons
+        if lesson.monitor_id and (lesson.id in used or work.get(lesson.id, (0, 0))[0] > 0)
+    }
     # Avval XONALAR: qaysi monitor ishlayotgani isbotlangan, qaysi biri shubhali.
     rooms = mr.room_stats(lessons, used)
     stats = _teacher_stats(lessons, used, rooms)
@@ -444,6 +451,7 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
     rows, lessons, used, rooms, pending = _teacher_rows(db, start_day, end_day, department=department,
                                                         query=query, groups=groups)
     engagement = pending["_engagement"]
+    touched_ids = pending.get("_touched", set())
     pending = {k: v for k, v in pending.items() if not k.startswith("_")}
     # Kesh bilan bo'lishilgan ro'yxat — tartiblash boshqa so'rovga ta'sir qilmasin.
     rows = list(rows)
@@ -471,7 +479,7 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
     teachers_used = states["full"] + states["partial"]
 
     # --- Kunlik kesim (grafik uchun)
-    per_day: dict[dt.date, dict] = defaultdict(lambda: {"monitor": 0, "used": 0})
+    per_day: dict[dt.date, dict] = defaultdict(lambda: {"monitor": 0, "used": 0, "touched": 0})
     for lesson in lessons:
         if not lesson.monitor_id:
             continue
@@ -479,12 +487,16 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
         day["monitor"] += 1
         if lesson.id in used:
             day["used"] += 1
+        if lesson.id in touched_ids:
+            day["touched"] += 1
     daily = [{
         "date": day.isoformat(),
         "weekday": ms.WEEKDAYS[day.weekday()] if day.weekday() < len(ms.WEEKDAYS) else "",
         "lessons": v["monitor"],
         "used": v["used"],
         "percent": _pct(v["used"], v["monitor"]),
+        "touched": v["touched"],
+        "touched_percent": _pct(v["touched"], v["monitor"]),
     } for day, v in sorted(per_day.items())]
 
     # --- Kafedralar
@@ -1189,3 +1201,52 @@ def student_detail(db: Session, student_key: str, start_day: dt.date, end_day: d
         "status": row.status,
     }
     return detail
+
+
+# =================================================================== dinamika
+
+#: Haftalik grafik necha hafta orqaga qaraydi.
+TREND_WEEKS = 8
+
+
+def weekly_trend(db: Session, end_day: dt.date, *, weeks: int = TREND_WEEKS,
+                 department: str = "", groups: tuple[str, ...] = ()) -> dict:
+    """Haftalar bo'yicha monitorli darslarda iMentor ishlatilishi (2026-10-15).
+
+    Rektor bitta davrni emas, YO'NALISHNI ko'rishi kerak: yaxshilanyaptimi
+    yoki pasayyaptimi. Hisob asosiy hisobot bilan bir manbadan — kunlik
+    qatorlar haftaga yig'iladi, shuning uchun raqamlar mos tushadi.
+    Hisob og'ir (8 hafta ~25 soniya), shuning uchun `overview` keshidan.
+    """
+    weeks = max(2, min(16, int(weeks)))
+    monday = end_day - dt.timedelta(days=end_day.weekday())
+    start = monday - dt.timedelta(weeks=weeks - 1)
+    data = overview(db, start, end_day, department=department, groups=groups)
+    buckets: dict[dt.date, dict] = {
+        start + dt.timedelta(weeks=i): {"lessons": 0, "used": 0, "touched": 0} for i in range(weeks)
+    }
+    for d in data.get("daily", []):
+        day = dt.date.fromisoformat(d["date"])
+        week = buckets.get(day - dt.timedelta(days=day.weekday()))
+        if week is None:
+            continue
+        week["lessons"] += int(d.get("lessons") or 0)
+        week["used"] += int(d.get("used") or 0)
+        week["touched"] += int(d.get("touched", d.get("used")) or 0)
+    return {
+        "from": start.isoformat(),
+        "to": end_day.isoformat(),
+        "weeks": [
+            {
+                "week_start": ws.isoformat(),
+                "week_end": min(ws + dt.timedelta(days=6), end_day).isoformat(),
+                "lessons": v["lessons"],
+                "used": v["used"],
+                "touched": v["touched"],
+                "percent": _pct(v["used"], v["lessons"]) if v["lessons"] else None,
+                "touched_percent": _pct(v["touched"], v["lessons"]) if v["lessons"] else None,
+            }
+            for ws, v in sorted(buckets.items())
+        ],
+    }
+

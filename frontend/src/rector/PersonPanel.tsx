@@ -1,5 +1,27 @@
 import { Fragment, useEffect, useState } from 'react';
-import { Check, Laptop, Minus, Monitor, X } from 'lucide-react';
+import {
+  BookOpen,
+  Building2,
+  CalendarCheck,
+  Check,
+  Clock3,
+  FileText,
+  GraduationCap,
+  Laptop,
+  Layers,
+  ListChecks,
+  Minus,
+  Monitor,
+  MonitorCheck,
+  Presentation,
+  Radio,
+  Sparkles,
+  Stethoscope,
+  UserRound,
+  Video,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import {
   fetchControlStudent,
   fetchControlTeacher,
@@ -10,6 +32,8 @@ import {
 } from './rectorApi';
 import { Spinner } from './RectorUi';
 import { minutesText, RoomTable } from './ControlReport';
+import { Avatar, Meter, Pill, Ring, TONE, toneOf, type Tone } from './RectorViz';
+import './rector.css';
 
 /**
  * Ism bosilganda o'ngdan chiqadigan batafsil oyna (2026-09-25).
@@ -27,18 +51,36 @@ const PROFILE_LABEL: Record<string, string> = {
   face: 'Yuz ro‘yxatda',
 };
 
-const DEPTH_TONE: Record<string, string> = {
-  worked: 'bg-emerald-100 text-emerald-800',
-  viewed: 'bg-amber-100 text-amber-800',
-  visit: 'bg-orange-100 text-orange-800',
-  none: 'bg-rose-100 text-rose-800',
-};
-
 function day(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return d.toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit' });
 }
+
+/** Panel ichidagi bo'lim sarlavhasi — rangli ikonka bilan. */
+function Head({ icon: Icon, tone = 'indigo', children }: { icon: LucideIcon; tone?: Tone; children: React.ReactNode }) {
+  return (
+    <h3 className="mb-2 flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-slate-500">
+      <span className={`flex h-6 w-6 items-center justify-center rounded-lg shadow-sm ${TONE[tone].chip}`}>
+        <Icon size={13} />
+      </span>
+      {children}
+    </h3>
+  );
+}
+
+/** Yaratilgan material turi — ikonka va rang. */
+const CREATED_LOOK: Record<string, { icon: LucideIcon; tone: Tone }> = {
+  tests: { icon: ListChecks, tone: 'indigo' },
+  cases: { icon: Stethoscope, tone: 'rose' },
+  lectures: { icon: BookOpen, tone: 'sky' },
+  presentations: { icon: Presentation, tone: 'violet' },
+  handouts: { icon: FileText, tone: 'teal' },
+  videos: { icon: Video, tone: 'orange' },
+  live_sessions: { icon: Radio, tone: 'emerald' },
+};
+
+const DEPTH_PILL: Record<string, Tone> = { worked: 'emerald', viewed: 'amber', visit: 'orange', none: 'rose' };
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -52,11 +94,11 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function Lesson({ l }: { l: ScheduledLessonRow }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={`rounded-lg ${l.hemis_status === 'missing_from_hemis' ? 'bg-amber-50' : l.pending ? 'bg-sky-50' : l.monitor_id ? (l.used ? 'bg-emerald-50' : 'bg-rose-50') : 'bg-slate-50'}`}>
+    <div className={`rounded-xl ring-1 ${l.hemis_status === 'missing_from_hemis' ? 'bg-amber-50 ring-amber-100' : l.pending ? 'bg-sky-50 ring-sky-100' : l.monitor_id ? (l.used ? 'bg-emerald-50 ring-emerald-100' : 'bg-rose-50 ring-rose-100') : 'bg-slate-50 ring-slate-100'}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1.5 text-left text-[12px]"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2 text-left text-[12px]"
         title="HEMIS yozuvini ochish"
       >
         <span className="w-[74px] shrink-0 font-medium text-slate-700">
@@ -142,8 +184,33 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
   const sm = data.subject_materials;
   const topMinutes = Math.max(1, ...e.modules.map((x) => x.minutes));
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl bg-slate-50 p-3">
+    <div className="space-y-5">
+      {/* Bir qarashda: monitorli darslar, vaqt, yaratgani va profil. */}
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          {
+            icon: MonitorCheck,
+            tone: toneOf(s?.monitor_percent ?? null),
+            label: 'Monitorli dars',
+            value: s ? `${s.monitor_used}/${s.monitor_lessons}` : '—',
+            hint: s && s.monitor_percent !== null ? `${s.monitor_percent}%` : 'nazoratda emas',
+          },
+          { icon: Clock3, tone: (e.minutes ? 'sky' : 'rose') as Tone, label: 'Ishlagan vaqt', value: minutesText(e.minutes), hint: `${e.active_days} kun` },
+          { icon: Sparkles, tone: (e.created_total ? 'emerald' : 'rose') as Tone, label: 'Yaratgani', value: String(e.created_total), hint: 'material' },
+          { icon: UserRound, tone: toneOf(pc.percent, 100, 60), label: 'Profil', value: `${pc.percent}%`, hint: 'to‘liqligi' },
+        ].map((k) => (
+          <div key={k.label} className="rounded-2xl bg-white p-3 ring-1 ring-slate-900/[0.06]">
+            <span className={`flex h-7 w-7 items-center justify-center rounded-lg shadow-sm ${TONE[k.tone].chip}`}>
+              <k.icon size={14} />
+            </span>
+            <p className="mt-2 text-[11px] font-semibold text-slate-500">{k.label}</p>
+            <p className="text-[18px] font-extrabold leading-tight text-slate-900 rx-num">{k.value}</p>
+            <p className="text-[10.5px] text-slate-400">{k.hint}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
         <Row label="Kafedra" value={data.profile.department || '—'} />
         {data.profile.job_title && <Row label="Lavozim" value={data.profile.job_title} />}
         {/* Davr ichidagi faollik BIRINCHI: rektor kechani ochsa, kechagi holatni ko'rsin.
@@ -160,9 +227,7 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
               <span>
                 {minutesText(e.minutes)} · {e.active_days} kun
               </span>
-              <span className={`rounded px-1.5 py-px text-[11px] font-medium ${DEPTH_TONE[e.depth] || DEPTH_TONE.none}`}>
-                {e.depth_label}
-              </span>
+              <Pill tone={DEPTH_PILL[e.depth] || 'rose'}>{e.depth_label}</Pill>
             </span>
           }
         />
@@ -170,7 +235,7 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {/* Qaysi bo'limda qancha vaqt — «shunchaki kirib qo'ydimi» degan savolga javob. */}
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">Bo‘limlar bo‘yicha vaqt</h3>
+        <Head icon={Clock3} tone="sky">Bo‘limlar bo‘yicha vaqt</Head>
         {e.modules.length === 0 ? (
           <p className="rounded-xl bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">
             Bu davrda bo‘limlardan foydalanish qaydi topilmadi.
@@ -182,11 +247,8 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
                 <span className="w-[120px] shrink-0 truncate text-slate-700" title={x.label}>
                   {x.label}
                 </span>
-                <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                  <span
-                    className="block h-full rounded-full bg-sky-500"
-                    style={{ width: `${Math.max(3, (x.minutes / topMinutes) * 100)}%` }}
-                  />
+                <span className="min-w-0 flex-1">
+                  <Meter value={x.minutes} max={topMinutes} tone="sky" />
                 </span>
                 <span className="w-[68px] shrink-0 text-right font-semibold tabular-nums text-slate-700">
                   {minutesText(x.minutes)}
@@ -200,15 +262,17 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {/* Nima YARATGAN — kirgani emas, ishi. */}
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
-          Shu davrda yaratgani ({e.created_total})
-        </h3>
+        <Head icon={Sparkles} tone="emerald">Shu davrda yaratgani ({e.created_total})</Head>
         <div className="grid grid-cols-4 gap-1.5">
           {Object.entries(e.created_labels).map(([key, label]) => {
             const n = e.created[key] ?? 0;
+            const look = CREATED_LOOK[key] || { icon: Sparkles, tone: 'slate' as Tone };
             return (
-              <div key={key} className={`rounded-lg p-2 text-center ${n ? 'bg-emerald-50' : 'bg-slate-50'}`}>
-                <p className={`text-[16px] font-bold tabular-nums ${n ? 'text-emerald-800' : 'text-slate-400'}`}>{n}</p>
+              <div key={key} className={`rounded-xl p-2 text-center ring-1 ${n ? 'bg-white ring-slate-200' : 'bg-slate-50 ring-slate-100'}`}>
+                <span className={`mx-auto flex h-6 w-6 items-center justify-center rounded-lg ${n ? TONE[look.tone].chip : 'bg-slate-200 text-slate-400'}`}>
+                  <look.icon size={12} />
+                </span>
+                <p className={`mt-1 text-[16px] font-extrabold tabular-nums ${n ? 'text-slate-900' : 'text-slate-400'}`}>{n}</p>
                 <p className="text-[10.5px] text-slate-500">{label}</p>
               </div>
             );
@@ -221,15 +285,13 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {/* Profil to'liqmi */}
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
-          Profil to‘liqligi — {pc.percent}%
-        </h3>
+        <Head icon={UserRound} tone="violet">Profil to‘liqligi — {pc.percent}%</Head>
         <div className="flex flex-wrap gap-1.5">
           {Object.entries(pc.have).map(([key, ok]) => (
             <span
               key={key}
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] ${
-                ok ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ring-1 ${
+                ok ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : 'bg-rose-50 text-rose-800 ring-rose-200'
               }`}
             >
               {ok ? <Check size={11} /> : <Minus size={11} />}
@@ -241,14 +303,14 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {/* Biriktirgan fanlarining mavzulari to'ldirilganmi */}
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">Fanlari va material qamrovi</h3>
+        <Head icon={BookOpen} tone="teal">Fanlari va material qamrovi</Head>
         {sm.rows.length === 0 ? (
           <p className="rounded-xl bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">
             Hech qanday fan biriktirmagan — material yuklashi ham, mavzu bo‘yicha ishlashi ham mumkin emas.
           </p>
         ) : (
           <>
-            <div className="mb-1.5 rounded-xl bg-slate-50 p-3">
+            <div className="mb-1.5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
               <Row label="Jami mavzu" value={sm.topics} />
               <Row label="Materialsiz mavzu" value={<span className={sm.empty ? 'text-rose-700' : ''}>{sm.empty}</span>} />
               <Row label="Tarqatma / Taqdimot / Video" value={`${sm.handout} / ${sm.presentation} / ${sm.video}`} />
@@ -266,12 +328,8 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
                   <span className="shrink-0 text-slate-500">
                     {x.topics - x.empty}/{x.topics} mavzu
                   </span>
-                  <span
-                    className={`w-10 shrink-0 text-right font-semibold ${
-                      x.percent >= 70 ? 'text-emerald-700' : x.percent >= 40 ? 'text-amber-700' : 'text-rose-700'
-                    }`}
-                  >
-                    {x.percent}%
+                  <span className="w-[110px] shrink-0">
+                    <Meter value={x.percent} label={`${x.percent}%`} height={6} />
                   </span>
                 </div>
               ))}
@@ -288,9 +346,9 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
             ['Dars kuni', String(s.days), `${s.lessons} dars`],
             ['Jonli testda talaba', String(s.students), 'jami'],
           ].map(([label, value, hint]) => (
-            <div key={label} className="rounded-xl bg-white p-2.5 ring-1 ring-slate-900/[0.06]">
-              <p className="text-[11px] text-slate-500">{label}</p>
-              <p className="text-[17px] font-bold tabular-nums text-slate-900">{value}</p>
+            <div key={label} className="rounded-2xl bg-white p-3 ring-1 ring-slate-900/[0.06]">
+              <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+              <p className="text-[18px] font-extrabold tabular-nums text-slate-900">{value}</p>
               <p className="text-[10.5px] text-slate-400">{hint}</p>
             </div>
           ))}
@@ -298,8 +356,8 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
       )}
 
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">Yaratgan materiallari</h3>
-        <div className="rounded-xl bg-slate-50 p-3">
+        <Head icon={Layers} tone="indigo">Yaratgan materiallari</Head>
+        <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
           <Row label="Tarqatma" value={m.handouts} />
           <Row label="Taqdimot" value={m.presentations} />
           <Row label="Video" value={m.videos} />
@@ -310,7 +368,7 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {data.subjects.length > 0 && (
         <section>
-          <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">Fanlar bo‘yicha</h3>
+          <Head icon={BookOpen} tone="sky">Fanlar bo‘yicha</Head>
           <div className="space-y-1">
             {data.subjects.slice(0, 8).map((x) => (
               <div key={x.subject} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[12px]">
@@ -318,8 +376,8 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
                   {x.subject}
                 </span>
                 <span className="shrink-0 text-slate-500">{x.lessons} dars</span>
-                <span className="w-12 shrink-0 text-right font-semibold text-slate-700">
-                  {x.monitor ? `${x.percent}%` : '—'}
+                <span className="w-[110px] shrink-0">
+                  {x.monitor ? <Meter value={x.percent} label={`${x.percent}%`} height={6} /> : <span className="block text-right text-slate-400">—</span>}
                 </span>
               </div>
             ))}
@@ -329,21 +387,19 @@ function TeacherBody({ data }: { data: ControlTeacherDetail }) {
 
       {data.rooms.length > 0 && (
         <section>
-          <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
-            Dars o‘tadigan monitor xonalari
-          </h3>
+          <Head icon={Monitor} tone="sky">Dars o‘tadigan monitor xonalari</Head>
           <RoomTable rows={data.rooms} compact />
         </section>
       )}
 
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
+        <Head icon={CalendarCheck} tone="indigo">
           Darslari ({data.lessons.length}) <span className="font-normal normal-case text-slate-400">— qatorni bosing, HEMIS yozuvi ochiladi</span>
-        </h3>
+        </Head>
         <p className="mb-2 text-[12px] text-slate-600">Quyidagi holatlar HEMIS va platforma qaydlarini bildiradi. Ular intizomiy ayb yoki dars o‘tilmaganligi haqida avtomatik hukm emas.</p>
         <div className="mb-2 flex flex-wrap gap-1">
           {Object.entries({ all: 'Barcha darslar', recorded: 'Faollik qaydi bor', no_record: 'Qayd topilmadi', pending: 'Hali tugamagan', missing_schedule_time: 'HEMIS vaqti yetishmaydi', unlinked_teacher: 'Hisob bog‘lanmagan', unverified: 'Dalil olinmagan' }).map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setLessonFilter(key)} className={`rounded-lg px-2 py-1 text-[11px] ${lessonFilter === key ? 'bg-sky-100 text-sky-900' : 'bg-slate-100 text-slate-600'}`}>
+            <button key={key} type="button" onClick={() => setLessonFilter(key)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${lessonFilter === key ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               {label} · {key === 'all' ? data.lessons.length : evidenceCounts[key] || 0}
             </button>
           ))}
@@ -364,9 +420,9 @@ function StudentBody({ data }: { data: ControlStudentDetail }) {
   const attempts = (data.attempts as Array<Record<string, unknown>>) || [];
   const totals = (data.totals as Record<string, number>) || {};
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {c ? (
-        <section className="rounded-xl bg-slate-50 p-3">
+        <section className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
           <Row label="Guruh" value={c.group_name || '—'} />
           <Row label="Kurs" value={c.course ?? '—'} />
           <Row label="Fakultet" value={c.faculty || '—'} />
@@ -386,17 +442,15 @@ function StudentBody({ data }: { data: ControlStudentDetail }) {
           ['O‘rtacha ball', totals.avg_score != null ? `${totals.avg_score}%` : '—'],
           ['Fanlar', totals.subjects ?? '—'],
         ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-xl bg-white p-2.5 ring-1 ring-slate-900/[0.06]">
-            <p className="text-[11px] text-slate-500">{label}</p>
-            <p className="text-[17px] font-bold tabular-nums text-slate-900">{String(value)}</p>
+          <div key={String(label)} className="rounded-2xl bg-white p-3 ring-1 ring-slate-900/[0.06]">
+            <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+            <p className="text-[18px] font-extrabold tabular-nums text-slate-900">{String(value)}</p>
           </div>
         ))}
       </section>
 
       <section>
-        <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-slate-500">
-          Testlari ({attempts.length})
-        </h3>
+        <Head icon={ListChecks} tone="indigo">Testlari ({attempts.length})</Head>
         {attempts.length === 0 ? (
           <p className="text-[12.5px] text-slate-400">Bu davrda test topshirmagan.</p>
         ) : (
@@ -463,25 +517,46 @@ export default function PersonPanel({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <button type="button" className="absolute inset-0 bg-slate-900/30" onClick={onClose} aria-label="Yopish" />
-      <aside className="relative flex h-full w-full max-w-[560px] flex-col bg-white shadow-2xl">
-        <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+      <button type="button" className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} aria-label="Yopish" />
+      <aside className="relative flex h-full w-full max-w-[600px] flex-col bg-[#f6f7fb] shadow-2xl">
+        <header className="rx-header flex items-center gap-3 px-5 py-4 text-white">
+          <Avatar name={person.name} size={46} />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-indigo-200/80">
+              {person.kind === 'teacher' ? <UserRound size={12} /> : <GraduationCap size={12} />}
               {person.kind === 'teacher' ? 'O‘qituvchi' : 'Talaba'}
             </p>
-            <h2 className="truncate text-[16px] font-bold text-slate-900">{person.name}</h2>
+            <h2 className="truncate text-[18px] font-extrabold tracking-tight">{person.name}</h2>
+            {data && person.kind === 'teacher' && (data as ControlTeacherDetail).profile?.department && (
+              <p className="flex items-center gap-1 truncate text-[12px] text-indigo-100/75">
+                <Building2 size={12} className="shrink-0" />
+                {(data as ControlTeacherDetail).profile.department}
+              </p>
+            )}
           </div>
+          {data && person.kind === 'teacher' && (data as ControlTeacherDetail).summary?.monitor_percent != null && (
+            <Ring
+              value={(data as ControlTeacherDetail).summary!.monitor_percent}
+              size={58}
+              stroke={6}
+              tone={toneOf((data as ControlTeacherDetail).summary!.monitor_percent)}
+              track="rgba(255,255,255,0.15)"
+            >
+              <span className="text-[13px] font-extrabold text-white rx-num">
+                {(data as ControlTeacherDetail).summary!.monitor_percent}%
+              </span>
+            </Ring>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="shrink-0 rounded-xl bg-white/10 p-2 text-indigo-100 ring-1 ring-white/15 transition hover:bg-white/20 hover:text-white"
             aria-label="Yopish"
           >
             <X size={18} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
           {error ? (
             <p className="rounded-xl bg-rose-50 px-3 py-2 text-[13px] text-rose-700">{error}</p>
           ) : !data ? (

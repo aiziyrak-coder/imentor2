@@ -122,8 +122,13 @@ export function depthFlaws(q: DepthInput, opts: DepthOptions = {}): DepthFlaw[] 
   const needData = domain !== 'academic' && difficulty !== 'easy';
   // Klinik bo'lmagan fanda vazifa qisqaroq bo'lishi tabiiy (raqam ham shart
   // emas), lekin bir qatorlik ta'rif savoli bo'lib qolmasligi kerak.
-  const minWords = domain === 'academic' ? 20 : difficulty === 'easy' ? 18 : 30;
-  if (words < minWords || (needData && dataPoints < 2)) out.push('vignette_yuzaki');
+  //
+  // "Qiyin" daraja 2026-10-15 da ko'tarildi (rektor: "judayam oson"): javob
+  // kamida UCH ma'lumotni birga talqin qilgandagina chiqishi kerak, shuning
+  // uchun vignettada ham uchta topilma talab qilinadi.
+  const minWords = domain === 'academic' ? 20 : difficulty === 'easy' ? 18 : difficulty === 'hard' ? 45 : 30;
+  const minData = difficulty === 'hard' ? 3 : 2;
+  if (words < minWords || (needData && dataPoints < minData)) out.push('vignette_yuzaki');
 
   // 2. Savol qarorga olib borsinmi.
   if (!DECISION.test(stem) && RECALL.test(stem)) out.push('eslash_savoli');

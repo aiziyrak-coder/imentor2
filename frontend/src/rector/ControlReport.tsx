@@ -1,19 +1,67 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronRight, Database, MapPin, Monitor, Search, Users, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  BarChart3,
+  BookOpen,
+  Building2,
+  CalendarCheck,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Database,
+  DoorOpen,
+  Hourglass,
+  Link2Off,
+  MapPin,
+  Monitor,
+  MonitorCheck,
+  MonitorOff,
+  Palmtree,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+  UserCheck,
+  UserX,
+  Users,
+  Wrench,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { HttpError } from '../api/httpClient';
 import {
   fetchControlReport,
-  fetchControlStudents,
+  fetchControlTrend,
+  type ControlTrend,
   type ControlReport as Report,
-  type ControlStudents,
   type ControlTeacher,
   type ControlAttention,
-  type ControlStudentRow,
   type ReportFilters,
 } from './rectorApi';
 import { ErrorBox, Spinner } from './RectorUi';
 import PersonPanel, { type Person } from './PersonPanel';
 import StatDrill, { type DrillTarget } from './StatDrill';
+import {
+  Avatar,
+  Columns,
+  CountUp,
+  Delta,
+  Insights,
+  Legend,
+  Meter,
+  Panel,
+  Pill,
+  Ring,
+  Skeleton,
+  StackBar,
+  TONE,
+  TrendChart,
+  uzDay,
+  type Insight,
+  type Tone,
+} from './RectorViz';
 
 /**
  * Rektor nazorat paneli (2026-09-25).
@@ -24,6 +72,12 @@ import StatDrill, { type DrillTarget } from './StatDrill';
  *   2. Ochgani yetarli emas: qaysi bo'limda necha daqiqa turdi, nima
  *      YARATDI (test, keys, ma'ruza, taqdimot, tarqatma, video), profili
  *      to'liqmi, fan biriktirganmi, mavzulari material bilan yopilganmi.
+ *
+ * 2026-10-15 qayta dizayn (rektor: "oddiy, ko'rimsiz — zamonaviy qiling"):
+ * asosiy foiz qorong'i "hero" kartada halqa diagramma bilan, taqsimotlar
+ * rangli chiziqlar, kafedralar reyting, o'qituvchilar avatar bilan. Pastdagi
+ * "Talabalar" bloki olib tashlandi — talabalar endi headerdagi surmaning
+ * o'zining sahifasida, to'liqroq tahlil bilan.
  */
 
 type Props = { filters: ReportFilters; onUnauthorized: () => void };
@@ -35,7 +89,6 @@ type Props = { filters: ReportFilters; onUnauthorized: () => void };
  */
 const DrillContext = createContext<(t: DrillTarget) => void>(() => {});
 
-/** Bosiladigan raqam. Ko'rinishi o'zgarmaydi — faqat bosilganda ro'yxat ochiladi. */
 /**
  * Monitorli darslar ishlangan vaqt bo'yicha: to'liq o'tilgan, chegaraga yaqin,
  * kirib chiqqan, umuman ochilmagan. Rektor "ishlatgan, lekin 50 daqiqa emas"
@@ -59,23 +112,23 @@ function WorkBuckets({
 }) {
   const parts: BucketPart[] = [
     {
-      key: 'full', value: buckets.full, bar: 'bg-emerald-500', dot: 'bg-emerald-500',
+      key: 'full', value: buckets.full, tone: 'emerald',
       label: `To‘liq o‘tilgan (${minMinutes}+ daq)`, metric: 'monitor_used',
       drill: 'Monitorli darsni to‘liq iMentor’da o‘tganlar', note: '',
     },
     {
-      key: 'near', value: buckets.near, bar: 'bg-amber-400', dot: 'bg-amber-400',
+      key: 'near', value: buckets.near, tone: 'amber',
       label: `Ishlatgan, lekin ${minMinutes} daqiqaga yetmagan (${nearMinutes}–${minMinutes - 1} daq)`,
       metric: 'short_near', drill: `Ishlatgan, lekin ${minMinutes} daqiqaga yetmagan`,
       note: `${nearTeachers} o‘qituvchi`,
     },
     {
-      key: 'brief', value: buckets.brief, bar: 'bg-orange-300', dot: 'bg-orange-300',
+      key: 'brief', value: buckets.brief, tone: 'orange',
       label: `Kirib chiqqan (${nearMinutes} daqiqadan kam)`, metric: 'short_brief',
       drill: `Kirib chiqqan (${nearMinutes} daqiqadan kam)`, note: `${briefTeachers} o‘qituvchi`,
     },
     {
-      key: 'none', value: buckets.none, bar: 'bg-rose-400', dot: 'bg-rose-400',
+      key: 'none', value: buckets.none, tone: 'rose',
       label: 'Dars vaqtida umuman ochilmagan', metric: 't_none',
       drill: 'Dars vaqtida iMentor’ni umuman ochmaganlar', note: '',
     },
@@ -86,47 +139,72 @@ function WorkBuckets({
 }
 
 type BucketPart = {
-  key: string; value: number; bar: string; dot: string; label: string; metric: string; drill: string; note: string;
+  key: string; value: number; tone: Tone; label: string; metric: string; drill: string; note: string;
+};
+
+/** Toifa ikonkasi — kalit bo'yicha, ikkala chiziqda ham bir xil ma'noda. */
+const BUCKET_ICON: Record<string, LucideIcon> = {
+  full: CheckCircle2,
+  near: Hourglass,
+  brief: DoorOpen,
+  opened: DoorOpen,
+  partial: Hourglass,
+  none: XCircle,
+  on_leave: Palmtree,
+  unlinked: Link2Off,
 };
 
 /** Bir-birini qoplamaydigan toifalar chizig'i: yig'indisi `total` ga teng. */
 function BucketStrip({ title, unit, parts, total }: { title: string; unit: string; parts: BucketPart[]; total: number }) {
   const pct = (n: number) => (total ? Math.round((100 * n) / total) : 0);
   return (
-    <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
-      <p className="mb-2 text-[11.5px] text-slate-400">{title}</p>
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
-        {parts.map((p) =>
-          p.value ? (
-            <div
-              key={p.key}
-              className={p.bar}
-              style={{ width: `${(100 * p.value) / total}%` }}
-              title={`${p.label}: ${p.value} ${unit} (${pct(p.value)}%)`}
-            />
-          ) : null,
-        )}
+    <div className="px-4 py-4 sm:px-5">
+      <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[13px] font-bold text-slate-800">{title}</p>
+        <p className="text-[11.5px] text-slate-400 rx-num">
+          jami {total} {unit}
+        </p>
       </div>
-      <div className="mt-2 grid gap-x-6 gap-y-1.5 text-[12.5px] sm:grid-cols-2 lg:grid-cols-4">
+      <StackBar
+        height={14}
+        parts={parts.map((p) => ({
+          key: p.key,
+          value: p.value,
+          tone: p.tone,
+          title: `${p.label}: ${p.value} ${unit} (${pct(p.value)}%)`,
+        }))}
+      />
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {parts.map((p) => {
           const body = (
-            <span className="flex items-baseline gap-2">
-              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${p.dot}`} />
-              <span className="text-slate-600">{p.label}</span>
-              <b className="ml-auto tabular-nums text-slate-900">{p.value}</b>
-              <span className="w-9 text-right tabular-nums text-slate-400">{pct(p.value)}%</span>
+            <span className="flex h-full items-center gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-100 transition hover:bg-white hover:ring-slate-200">
+              {(() => {
+                const Icon = BUCKET_ICON[p.key] || CheckCircle2;
+                return (
+                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1 ${TONE[p.tone].soft}`}>
+                    <Icon size={14} />
+                  </span>
+                );
+              })()}
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12px] leading-snug text-slate-600">{p.label}</span>
+                {p.note && p.value ? <span className="block text-[11px] text-slate-400">{p.note}</span> : null}
+              </span>
+              <span className="shrink-0 text-right">
+                <b className="block text-[16px] leading-tight text-slate-900 rx-num">{p.value}</b>
+                <span className={`text-[11px] font-semibold rx-num ${TONE[p.tone].text}`}>{pct(p.value)}%</span>
+              </span>
             </span>
           );
           return (
             <div key={p.key}>
               {p.metric && p.value ? (
-                <Stat metric={p.metric} label={p.drill} className="block w-full px-0 text-left">
+                <Stat metric={p.metric} label={p.drill} plain className="block h-full w-full text-left">
                   {body}
                 </Stat>
               ) : (
                 body
               )}
-              {p.note && p.value ? <p className="pl-4 text-[11px] text-slate-400">{p.note}</p> : null}
             </div>
           );
         })}
@@ -145,34 +223,34 @@ function TeacherBuckets({ h }: { h: Report['headline'] }) {
   if (!b || !h.watched_teachers) return null;
   const parts: BucketPart[] = [
     {
-      key: 'full', value: b.full, bar: 'bg-emerald-500', dot: 'bg-emerald-500',
+      key: 'full', value: b.full, tone: 'emerald',
       label: 'Hamma darsini o‘tgan', metric: 't_full', drill: 'Hamma darsini iMentor’da o‘tganlar', note: '',
     },
     {
-      key: 'partial', value: b.partial, bar: 'bg-amber-400', dot: 'bg-amber-400',
+      key: 'partial', value: b.partial, tone: 'amber',
       label: 'Qisman: ba’zi darsini o‘tgan, qolganini o‘tmagan', metric: 't_partial',
       drill: 'Ba’zi darsini o‘tgan, qolganini o‘tmaganlar',
       note: `${h.partial_missed_lessons ?? 0} dars o‘tilmay qolgan`,
     },
     {
-      key: 'opened', value: b.opened, bar: 'bg-orange-300', dot: 'bg-orange-300',
+      key: 'opened', value: b.opened, tone: 'orange',
       label: `Kirgan, lekin birorta darsni to‘liq (${h.min_lesson_minutes} daq) o‘tmagan`, metric: 't_opened',
       drill: 'Kirgan, lekin birorta darsni to‘liq o‘tmaganlar', note: '',
     },
     {
-      key: 'none', value: b.none, bar: 'bg-rose-400', dot: 'bg-rose-400',
+      key: 'none', value: b.none, tone: 'rose',
       label: 'Dars vaqtida umuman ochmagan', metric: 't_none',
       drill: 'Dars vaqtida iMentor’ni umuman ochmaganlar', note: '',
     },
     {
-      key: 'on_leave', value: b.on_leave, bar: 'bg-slate-300', dot: 'bg-slate-300',
+      key: 'on_leave', value: b.on_leave, tone: 'slate',
       label: 'Ta’tilda (HEMIS)', metric: 'on_leave', drill: 'HEMIS bo‘yicha ta’tilda', note: '',
     },
     {
-      key: 'unlinked', value: b.unlinked, bar: 'bg-slate-200', dot: 'bg-slate-200',
+      key: 'unlinked', value: b.unlinked, tone: 'slate',
       label: 'iMentor hisobi bog‘lanmagan', metric: 'unlinked', drill: 'HEMIS jadvalida bor, iMentor hisobi yo‘q', note: '',
     },
-  ].filter((p) => p.value > 0 || ['full', 'partial', 'opened', 'none'].includes(p.key));
+  ].filter((p) => p.value > 0 || ['full', 'partial', 'opened', 'none'].includes(p.key)) as BucketPart[];
   return (
     <BucketStrip
       title="Darsi bor o‘qituvchilar — nechtasi darsini iMentor’da o‘tgan"
@@ -183,26 +261,38 @@ function TeacherBuckets({ h }: { h: Report['headline'] }) {
   );
 }
 
+/** Bosiladigan raqam: bosilganda shu raqam ortidagi ro'yxat ochiladi. */
 function Stat({
   metric,
   label,
   children,
   className = '',
   title,
+  plain = false,
+  dark = false,
 }: {
   metric: string;
   label: string;
   children: React.ReactNode;
   className?: string;
   title?: string;
+  /** Butun qator yoki karta bosiladi — tagiga chizilmaydi. */
+  plain?: boolean;
+  /** Qorong'i fonda. */
+  dark?: boolean;
 }) {
   const drill = useContext(DrillContext);
+  const hover = plain
+    ? ''
+    : dark
+      ? 'rounded-md underline-offset-4 hover:bg-white/10 hover:underline'
+      : 'rounded-md underline-offset-4 hover:bg-slate-900/[0.05] hover:underline';
   return (
     <button
       type="button"
       onClick={() => drill({ metric, label })}
       title={title || `${label} — ro‘yxatini ochish`}
-      className={`cursor-pointer rounded-md underline-offset-4 transition-colors hover:bg-slate-900/[0.05] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${className}`}
+      className={`cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${hover} ${className}`}
     >
       {children}
     </button>
@@ -215,6 +305,8 @@ const BAND_TEXT: Record<string, { bg: string; text: string; label: string }> = {
   bad: { bg: 'bg-rose-500', text: 'text-rose-700', label: 'past' },
   none: { bg: 'bg-slate-300', text: 'text-slate-500', label: '—' },
 };
+
+const BAND_TONE: Record<string, Tone> = { good: 'emerald', warn: 'amber', bad: 'rose', none: 'slate' };
 
 function useLoad<T>(load: () => Promise<T>, deps: unknown[], onUnauthorized: () => void) {
   const [data, setData] = useState<T | null>(null);
@@ -246,34 +338,34 @@ export function minutesText(m: number): string {
   return m % 60 ? `${h} s ${m % 60} daq` : `${h} soat`;
 }
 
-/** Foizli yo'lakcha — rangi darajaga qarab. */
-function Bar({ percent, band }: { percent: number; band: string }) {
-  const tone = BAND_TEXT[band] || BAND_TEXT.none;
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 w-full min-w-[60px] overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full rounded-full ${tone.bg}`} style={{ width: `${Math.max(2, percent)}%` }} />
-      </div>
-      <span className={`w-10 shrink-0 text-right text-[13px] font-bold tabular-nums ${tone.text}`}>{percent}%</span>
-    </div>
-  );
-}
-
 /* ==================================================== o'qituvchilar ro'yxati */
 
-const DEPTH: Record<string, { label: string; cls: string }> = {
-  worked: { label: 'material yaratgan', cls: 'bg-emerald-100 text-emerald-800' },
-  viewed: { label: 'ko‘rgan, yaratmagan', cls: 'bg-amber-100 text-amber-800' },
-  visit: { label: 'kirib chiqqan', cls: 'bg-orange-100 text-orange-800' },
-  none: { label: 'kirish qaydi yo‘q', cls: 'bg-rose-100 text-rose-800' },
+const DEPTH: Record<string, { label: string; tone: Tone }> = {
+  worked: { label: 'material yaratgan', tone: 'emerald' },
+  viewed: { label: 'ko‘rgan, yaratmagan', tone: 'amber' },
+  visit: { label: 'kirib chiqqan', tone: 'orange' },
+  none: { label: 'kirish qaydi yo‘q', tone: 'rose' },
 };
 
 /** Qatordagi kichik raqam ustuni — sarlavhasi bilan, shunda nima ekani aniq. */
-function Cell({ label, value, tone = 'text-slate-700' }: { label: string; value: React.ReactNode; tone?: string }) {
+function Cell({
+  label,
+  value,
+  tone = 'text-slate-800',
+  icon: Icon,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: string;
+  icon?: LucideIcon;
+}) {
   return (
-    <span className="hidden w-[74px] shrink-0 text-right md:block">
-      <span className="block text-[10.5px] text-slate-400">{label}</span>
-      <span className={`block text-[12.5px] font-semibold tabular-nums ${tone}`}>{value}</span>
+    <span className="hidden w-[78px] shrink-0 text-right md:block">
+      <span className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        {Icon && <Icon size={10} aria-hidden />}
+        {label}
+      </span>
+      <span className={`block text-[13px] font-bold rx-num ${tone}`}>{value}</span>
     </span>
   );
 }
@@ -347,65 +439,51 @@ function TeacherRow({ r, onOpen }: { r: ControlTeacher; onOpen: (p: Person) => v
         type="button"
         disabled={!r.teacher_key}
         onClick={() => r.teacher_key && onOpen({ kind: 'teacher', key: r.teacher_key, name: r.teacher_name })}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent"
+        className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-indigo-50/40 disabled:cursor-default disabled:hover:bg-transparent sm:px-5"
         title={r.teacher_key ? 'Batafsil hisobotini ochish' : 'iMentor hisobi yo‘q'}
       >
-        <ChevronRight size={15} className={`shrink-0 ${r.teacher_key ? 'text-slate-400' : 'text-transparent'}`} />
+        <Avatar name={r.teacher_name} size={38} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-semibold text-slate-900">{r.teacher_name}</span>
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-slate-500">
-            <span className="truncate">{r.department || '—'}</span>
+          <span className="block truncate text-[14px] font-bold text-slate-900">{r.teacher_name}</span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500">
+            <span className="inline-flex max-w-[18rem] items-center gap-1 truncate"><Building2 size={11} className="shrink-0 text-slate-400" />{r.department || '—'}</span>
             {r.linked ? (
-              <span className={`rounded px-1.5 py-px text-[10.5px] font-medium ${depth.cls}`}>{depth.label}</span>
+              <Pill tone={depth.tone}>{depth.label}</Pill>
             ) : (
-              <span className="rounded bg-slate-100 px-1.5 py-px text-[10.5px] text-slate-500">hisobi yo‘q</span>
+              <Pill tone="slate">hisobi yo‘q</Pill>
             )}
-            {r.linked && r.subjects_linked === 0 && (
-              <span className="rounded bg-rose-50 px-1.5 py-px text-[10.5px] text-rose-700">fan biriktirilmagan</span>
-            )}
-            {r.linked && (r.profile_percent ?? 0) < 100 && (
-              <span className="rounded bg-amber-50 px-1.5 py-px text-[10.5px] text-amber-800">
-                profil {r.profile_percent ?? 0}%
-              </span>
-            )}
-            {r.state === 'partial' && (
-              <span className="rounded bg-amber-50 px-1.5 py-px text-[10.5px] font-medium text-amber-800">
-                {r.monitor_missed} darsini o‘tmagan
-              </span>
-            )}
-            {r.state === 'opened' && (
-              <span className="rounded bg-orange-50 px-1.5 py-px text-[10.5px] font-medium text-orange-800">
-                kirgan, to‘liq o‘tmagan
-              </span>
-            )}
-            {(r.pending_lessons ?? 0) > 0 && (
-              <span className="rounded bg-sky-50 px-1.5 py-px text-[10.5px] text-sky-800">
-                yana {r.pending_lessons} dars oldinda
-              </span>
-            )}
+            {r.linked && r.subjects_linked === 0 && <Pill tone="rose">fan biriktirilmagan</Pill>}
+            {r.linked && (r.profile_percent ?? 0) < 100 && <Pill tone="amber">profil {r.profile_percent ?? 0}%</Pill>}
+            {r.state === 'partial' && <Pill tone="amber">{r.monitor_missed} darsini o‘tmagan</Pill>}
+            {r.state === 'opened' && <Pill tone="orange">kirgan, to‘liq o‘tmagan</Pill>}
+            {(r.pending_lessons ?? 0) > 0 && <Pill tone="sky">yana {r.pending_lessons} dars oldinda</Pill>}
           </span>
         </span>
-        <Cell label="dars" value={r.monitor_lessons ? `${r.monitor_used}/${r.monitor_lessons}` : '—'} />
-        <Cell label="vaqt" value={minutesText(r.minutes)} tone={r.minutes ? 'text-slate-700' : 'text-rose-600'} />
+        <Cell icon={CalendarCheck} label="dars" value={r.monitor_lessons ? `${r.monitor_used}/${r.monitor_lessons}` : '—'} />
+        <Cell icon={Clock3} label="vaqt" value={minutesText(r.minutes)} tone={r.minutes ? 'text-slate-800' : 'text-rose-600'} />
         <Cell
+          icon={Sparkles}
           label="yaratgan"
           value={r.created_total}
           tone={r.created_total ? 'text-emerald-700' : 'text-rose-600'}
         />
-        <Cell label="material" value={r.material_percent === null ? '—' : `${r.material_percent}%`} />
-        <span className="w-[118px] shrink-0">
+        <Cell icon={BookOpen} label="material" value={r.material_percent === null ? '—' : `${r.material_percent}%`} />
+        <span className="w-[136px] shrink-0">
           {r.monitor_percent === null ? (
             <span className="block text-right text-[12px] text-slate-400">nazoratda emas</span>
           ) : (
-            <Bar percent={r.monitor_percent} band={r.band} />
+            <Meter value={r.monitor_percent} tone={BAND_TONE[r.band] || 'slate'} label={`${r.monitor_percent}%`} />
           )}
         </span>
+        <ChevronRight
+          size={16}
+          className={`shrink-0 transition group-hover:translate-x-0.5 ${r.teacher_key ? 'text-slate-300' : 'text-transparent'}`}
+        />
       </button>
     </li>
   );
 }
 
-/** Tepasida aqlli filtr, qidiruv va tartib — rektor kerakli ro'yxatni bir bosishda oladi. */
 /**
  * Monitorli xonada darsi UMUMAN yo'q o'qituvchilar: klinika bazasi,
  * dispanser, masofaviy dars. Ularni monitor bo'yicha baholab bo'lmaydi,
@@ -417,49 +495,54 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
   const o = data.offsite;
   if (!o || !o.count) return null;
   return (
-    <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
+    <section className="rx-card rx-rise overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-slate-50"
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50 sm:px-5"
       >
-        <MapPin size={15} className="shrink-0 text-slate-400" />
-        <span className="text-[13.5px] font-bold text-slate-800">Monitorsiz joyda dars o‘tadiganlar</span>
-        <span className="text-[12px] text-slate-400">{o.count} o‘qituvchi · {o.lessons} dars</span>
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-md ${TONE.teal.chip}`}>
+          <MapPin size={17} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14.5px] font-bold text-slate-900">Monitorsiz joyda dars o‘tadiganlar</span>
+          <span className="block text-[12px] text-slate-500 rx-num">
+            {o.count} o‘qituvchi · {o.lessons} dars
+          </span>
+        </span>
         <ChevronRight
-          size={16}
-          className={`ml-auto shrink-0 text-slate-300 transition-transform ${open ? 'rotate-90' : ''}`}
+          size={18}
+          className={`ml-auto shrink-0 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}
         />
       </button>
 
-      <p className="border-t border-slate-100 bg-slate-50/60 px-4 py-2 text-[12px] leading-relaxed text-slate-500">
+      <p className="border-t border-slate-100 bg-teal-50/40 px-4 py-2.5 text-[12px] leading-relaxed text-slate-600 sm:px-5">
         Klinika bazasi, dispanser va masofaviy darslar. Bu xonalarda monitor yo‘q, shuning uchun
         ular yuqoridagi foizga KIRMAYDI — aks holda ko‘rsatkich asossiz pasayardi.
       </p>
 
       {open && (
         <>
-          <div className="border-t border-slate-100 px-4 py-2">
-            <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Qayerda dars o‘tilmoqda
             </p>
-            <ul className="divide-y divide-slate-100">
+            <ul className="grid gap-1.5 sm:grid-cols-2">
               {o.places.slice(0, 12).map((p) => (
-                <li key={p.place} className="flex items-center gap-3 py-1.5">
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-slate-700" title={p.place}>
+                <li key={p.place} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                  <MapPin size={13} className="shrink-0 text-teal-500" />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-slate-700" title={p.place}>
                     {p.place}
                   </span>
-                  <span className="shrink-0 text-[11.5px] tabular-nums text-slate-500">
-                    {p.lessons} dars
-                  </span>
-                  <span className="w-[74px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400">
+                  <span className="shrink-0 text-[11.5px] font-semibold text-slate-600 rx-num">{p.lessons} dars</span>
+                  <span className="w-[78px] shrink-0 text-right text-[11.5px] text-slate-400 rx-num">
                     {p.teachers} o‘qituvchi
                   </span>
                 </li>
               ))}
             </ul>
             {o.places_total > 12 && (
-              <p className="pt-1.5 text-[11.5px] text-slate-400">yana {o.places_total - 12} ta joy</p>
+              <p className="pt-2 text-[11.5px] text-slate-400">yana {o.places_total - 12} ta joy</p>
             )}
           </div>
 
@@ -469,16 +552,15 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
                 <button
                   type="button"
                   onClick={() => onOpen({ kind: 'teacher', key: r.teacher_key, name: r.teacher_name })}
-                  className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-slate-50"
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-indigo-50/40 sm:px-5"
                 >
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-slate-800">{r.teacher_name}</span>
+                  <Avatar name={r.teacher_name} size={30} />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-800">{r.teacher_name}</span>
                   <span className="hidden min-w-0 flex-1 truncate text-[12px] text-slate-400 sm:block">
                     {r.department}
                   </span>
-                  <span className="shrink-0 text-[11.5px] tabular-nums text-slate-500">
-                    {r.other_lessons} dars
-                  </span>
-                  <span className="w-[86px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400">
+                  <span className="shrink-0 text-[11.5px] text-slate-500 rx-num">{r.other_lessons} dars</span>
+                  <span className="w-[86px] shrink-0 text-right text-[11.5px] text-slate-400 rx-num">
                     {minutesText(r.minutes)}
                   </span>
                 </button>
@@ -486,7 +568,7 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
             ))}
           </ul>
           {o.teachers.length > 60 && (
-            <p className="px-4 py-2 text-[11.5px] text-slate-400">yana {o.teachers.length - 60} o‘qituvchi</p>
+            <p className="px-5 py-2 text-[11.5px] text-slate-400">yana {o.teachers.length - 60} o‘qituvchi</p>
           )}
         </>
       )}
@@ -494,6 +576,7 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
   );
 }
 
+/** Tepasida aqlli filtr, qidiruv va tartib — rektor kerakli ro'yxatni bir bosishda oladi. */
 function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }) {
   const [flag, setFlag] = useState<Flag>('watched');
   const [sort, setSort] = useState<Sort>('percent');
@@ -510,26 +593,26 @@ function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void 
   );
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-      <div className="space-y-2 border-b border-slate-100 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[13.5px] font-bold text-slate-800">
-            Monitorli xonada dars o‘tadiganlar
-          </h2>
-          <span className="text-[12px] text-slate-400">{rows.length} ta</span>
-          <div className="relative ml-auto">
-            <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+    <Panel
+      icon={Users}
+      tone="indigo"
+      title="Monitorli xonada dars o‘tadiganlar"
+      hint={<span className="rx-num">{rows.length} ta o‘qituvchi — bosilsa batafsil hisoboti ochiladi</span>}
+      actions={
+        <>
+          <div className="relative">
+            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Ism, kafedra yoki Xodim ID"
-              className="h-8 w-[220px] rounded-lg border border-slate-200 pl-7 pr-2 text-[12.5px] outline-none focus:border-sky-400"
+              className="h-9 w-[220px] rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-2 text-[12.5px] outline-none transition focus:border-indigo-400 focus:bg-white"
             />
           </div>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as Sort)}
-            className="h-8 rounded-lg border border-slate-200 px-2 text-[12.5px] text-slate-700 outline-none focus:border-sky-400"
+            className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-[12.5px] text-slate-700 outline-none focus:border-indigo-400"
           >
             {SORTS.map(([key, label]) => (
               <option key={key} value={key}>
@@ -537,27 +620,30 @@ function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void 
               </option>
             ))}
           </select>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {CHIPS.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => {
-                setFlag(key);
-                setLimit(60);
-              }}
-              className={`rounded-full px-2.5 py-1 text-[12px] font-medium ${
-                flag === key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {label} <span className="tabular-nums opacity-70">{all.filter((r) => matches(r, key)).length}</span>
-            </button>
-          ))}
-        </div>
+        </>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/50 px-4 py-3 sm:px-5">
+        {CHIPS.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              setFlag(key);
+              setLimit(60);
+            }}
+            className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+              flag === key
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-500/25'
+                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-slate-300'
+            }`}
+          >
+            {label} <span className="rx-num opacity-70">{all.filter((r) => matches(r, key)).length}</span>
+          </button>
+        ))}
       </div>
       {rows.length === 0 ? (
-        <p className="px-4 py-6 text-center text-[13px] text-slate-400">Bu shartga mos o‘qituvchi yo‘q.</p>
+        <p className="px-4 py-8 text-center text-[13px] text-slate-400">Bu shartga mos o‘qituvchi yo‘q.</p>
       ) : (
         <ul className="divide-y divide-slate-100">
           {rows.slice(0, limit).map((r) => (
@@ -569,18 +655,18 @@ function Teachers({ data, onOpen }: { data: Report; onOpen: (p: Person) => void 
         <button
           type="button"
           onClick={() => setLimit((n) => n + 120)}
-          className="w-full border-t border-slate-100 py-2 text-[12.5px] font-medium text-sky-700 hover:bg-slate-50"
+          className="w-full border-t border-slate-100 py-3 text-[12.5px] font-bold text-indigo-600 transition hover:bg-indigo-50/50"
         >
           Yana ko‘rsatish ({rows.length - limit} ta qoldi)
         </button>
       )}
       {data.headline.unlinked_teachers > 0 && (
-        <p className="border-t border-slate-100 px-4 py-2 text-[12px] text-amber-700">
+        <p className="border-t border-slate-100 bg-amber-50/50 px-4 py-2.5 text-[12px] text-amber-800 sm:px-5">
           HEMIS jadvalida bor, lekin iMentor hisobi topilmagan {data.headline.unlinked_teachers} o‘qituvchi
           «Hammasi» ro‘yxatida ko‘rinadi — ularning faolligini o‘lchab bo‘lmaydi.
         </p>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -596,24 +682,31 @@ function Source({ data }: { data: Report }) {
   const src = data.source;
   const rs = data.room_summary;
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-slate-100 px-3 py-2 text-[11.5px] text-slate-600">
-      <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
-        <Database size={13} /> Manba: HEMIS dars jadvali
+    <div className="rx-rise flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-2xl bg-white/70 px-4 py-2.5 text-[11.5px] text-slate-600 ring-1 ring-slate-200/70 backdrop-blur">
+      <span className="inline-flex items-center gap-1.5 font-bold text-slate-700">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+          <Database size={13} />
+        </span>
+        Manba: HEMIS dars jadvali
       </span>
-      <span>oxirgi yangilanish {dayText(src.synced_at)}</span>
-      <span>
+      <span className="inline-flex items-center gap-1">
+        <Clock3 size={12} className="text-slate-400" /> oxirgi yangilanish {dayText(src.synced_at)}
+      </span>
+      <span className="rx-num">
         {src.lessons} dars ·{' '}
         <Stat metric="total_lessons" label="Jadvalda darsi bor barcha o‘qituvchilar" className="px-1">
           {src.teachers} o‘qituvchi
         </Stat>
       </span>
-      <span>{rs.rooms} monitor xonasi ({rs.ok} faollik qaydi bor, {rs.suspect} tekshirish kerak)</span>
+      <span className="rx-num">
+        {rs.rooms} monitor xonasi ({rs.ok} faollik qaydi bor, {rs.suspect} tekshirish kerak)
+      </span>
       {src.unlinked_teachers > 0 && (
         <Stat metric="unlinked" label="iMentor hisobi topilmaganlar" className="px-1">
-          <span className="text-amber-700">{src.unlinked_teachers} ta hisobi bog‘lanmagan</span>
+          <span className="font-semibold text-amber-700">{src.unlinked_teachers} ta hisobi bog‘lanmagan</span>
         </Stat>
       )}
-    </p>
+    </div>
   );
 }
 
@@ -633,29 +726,36 @@ function AttentionList({
   onOpen: (p: Person) => void;
 }) {
   if (!rows.length) return null;
-  const ring = tone === 'rose' ? 'bg-rose-50 ring-rose-200' : 'bg-amber-50 ring-amber-200';
+  const Icon = tone === 'rose' ? AlertTriangle : Wrench;
+  const edge = tone === 'rose' ? 'from-rose-500 to-pink-500' : 'from-amber-400 to-orange-500';
   const head = tone === 'rose' ? 'text-rose-900' : 'text-amber-900';
-  const icon = tone === 'rose' ? <AlertTriangle size={17} className="text-rose-600" /> : <Wrench size={17} className="text-amber-600" />;
+  const wash = tone === 'rose' ? 'bg-rose-50/60' : 'bg-amber-50/60';
   return (
-    <section className={`overflow-hidden rounded-2xl ring-1 ${ring}`}>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-        {icon}
-        <h2 className={`text-[14px] font-bold ${head}`}>
-          {title} — {Math.max(total ?? 0, rows.length)} o‘qituvchi
-          {(total ?? 0) > rows.length && (
-            <span className="ml-1 text-[11.5px] font-normal text-slate-500">(birinchi {rows.length} tasi)</span>
-          )}
-        </h2>
-        <span className="w-full text-[11.5px] text-slate-600 sm:w-auto">{hint}</span>
+    <section className="rx-card rx-rise relative overflow-hidden">
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${edge}`} />
+      <div className={`flex flex-wrap items-center gap-3 px-5 py-3.5 ${wash}`}>
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-md ${TONE[tone].chip}`}>
+          <Icon size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className={`text-[14.5px] font-bold ${head}`}>
+            {title} — {Math.max(total ?? 0, rows.length)} o‘qituvchi
+            {(total ?? 0) > rows.length && (
+              <span className="ml-1 text-[11.5px] font-normal text-slate-500">(birinchi {rows.length} tasi)</span>
+            )}
+          </h2>
+          <p className="text-[11.5px] text-slate-600">{hint}</p>
+        </div>
       </div>
-      <ul className="divide-y divide-white/70 bg-white/70">
+      <ul className="grid border-t border-slate-100 sm:grid-cols-2">
         {rows.map((r) => (
-          <li key={r.teacher_key}>
+          <li key={r.teacher_key} className="border-b border-slate-100 sm:odd:border-r">
             <button
               type="button"
               onClick={() => onOpen({ kind: 'teacher', key: r.teacher_key, name: r.teacher_name })}
-              className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-left hover:bg-white"
+              className="flex h-full w-full items-center gap-3 px-5 py-2.5 text-left transition hover:bg-slate-50"
             >
+              <Avatar name={r.teacher_name} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13.5px] font-semibold text-slate-900">
                   {r.teacher_name} <span className="font-normal text-slate-400">#{r.employee_id}</span>
@@ -663,10 +763,6 @@ function AttentionList({
                 <span className="block truncate text-[11.5px] text-slate-500">
                   {r.department} {r.rooms.length > 0 && `· ${r.rooms.slice(0, 3).join(', ')}`}
                 </span>
-              </span>
-              <span className="shrink-0 text-right text-[12.5px]">
-                <b className={tone === 'rose' ? 'text-rose-700' : 'text-amber-700'}>{r.monitor_lessons}</b>{' '}
-                <span className="text-slate-500">dars · {r.days} kun</span>
                 {tone === 'rose' && (
                   <span className="block text-[11px] text-slate-500">
                     shundan {r.proven_lessons} tasi dars vaqtida boshqa hisobda faollik qayd etilgan xonada
@@ -676,6 +772,10 @@ function AttentionList({
                   <span className="block text-[11px] text-slate-400">monitorsiz dars vaqtida {r.other_used} faollik qaydi</span>
                 )}
               </span>
+              <span className="shrink-0 text-right">
+                <b className={`block text-[17px] leading-tight rx-num ${TONE[tone].text}`}>{r.monitor_lessons}</b>
+                <span className="text-[11px] text-slate-500 rx-num">dars · {r.days} kun</span>
+              </span>
             </button>
           </li>
         ))}
@@ -684,23 +784,23 @@ function AttentionList({
   );
 }
 
-const ROOM_TONE: Record<string, string> = {
-  ok: 'bg-emerald-100 text-emerald-800',
-  suspect: 'bg-rose-100 text-rose-800',
-  quiet: 'bg-slate-100 text-slate-600',
+const ROOM_TONE: Record<string, Tone> = {
+  ok: 'emerald',
+  suspect: 'rose',
+  quiet: 'slate',
 };
 
 export function RoomTable({ rows, compact = false }: { rows: Report['rooms']; compact?: boolean }) {
   const [only, setOnly] = useState<'suspect' | 'all'>(rows.some((r) => r.status === 'suspect') ? 'suspect' : 'all');
   const shown = only === 'all' ? rows : rows.filter((r) => r.status !== 'ok');
   return (
-    <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
-        <h2 className="flex items-center gap-2 text-[13.5px] font-bold text-slate-800">
-          <Monitor size={15} className="text-slate-400" /> Monitor xonalari
-        </h2>
-        {!compact && (
-          <div className="ml-auto flex gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px]">
+    <Panel
+      icon={Monitor}
+      tone="sky"
+      title="Monitor xonalari"
+      actions={
+        !compact && (
+          <div className="flex gap-1 rounded-xl bg-slate-100 p-1 text-[12px]">
             {([
               ['suspect', 'Tekshirish kerak'],
               ['all', 'Hammasi'],
@@ -709,16 +809,18 @@ export function RoomTable({ rows, compact = false }: { rows: Report['rooms']; co
                 key={key}
                 type="button"
                 onClick={() => setOnly(key)}
-                className={`rounded-md px-2.5 py-1 font-medium ${only === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                className={`rounded-lg px-3 py-1 font-semibold transition ${only === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
               >
                 {label}
               </button>
             ))}
           </div>
-        )}
-      </div>
+        )
+      }
+    >
       {shown.length === 0 ? (
-        <p className="px-4 py-5 text-center text-[12.5px] text-slate-400">
+        <p className="flex items-center justify-center gap-2 px-4 py-6 text-center text-[12.5px] text-emerald-700">
+          <CheckCircle2 size={15} />
           Shubhali xona yo‘q — hamma monitorda kamida bitta dars ishlatilgan.
         </p>
       ) : (
@@ -728,176 +830,310 @@ export function RoomTable({ rows, compact = false }: { rows: Report['rooms']; co
               <Stat
                 metric={`room:${r.monitor_id}`}
                 label={`${r.room || r.monitor_id} — dars o‘tadiganlar`}
-                className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-left"
+                plain
+                className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left hover:bg-slate-50 sm:px-5"
               >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-slate-800">
-                  {r.room || r.hemis_rooms[0] || r.monitor_id}
-                  <span className="ml-1.5 font-normal text-slate-400">{r.monitor_id}</span>
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                    r.status === 'suspect' ? 'bg-rose-50 text-rose-500' : r.status === 'ok' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
+                  }`}
+                >
+                  {r.status === 'suspect' ? <MonitorOff size={15} /> : <Monitor size={15} />}
                 </span>
-                <span className="block truncate text-[11.5px] text-slate-500">
-                  {r.department || r.departments.join(', ')}
-                  {r.hemis_rooms.length > 0 && ` · HEMIS: ${r.hemis_rooms.join(' / ')}`}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold text-slate-800">
+                    {r.room || r.hemis_rooms[0] || r.monitor_id}
+                    <span className="ml-1.5 font-normal text-slate-400">{r.monitor_id}</span>
+                  </span>
+                  <span className="block truncate text-[11.5px] text-slate-500">
+                    {r.department || r.departments.join(', ')}
+                    {r.hemis_rooms.length > 0 && ` · HEMIS: ${r.hemis_rooms.join(' / ')}`}
+                  </span>
                 </span>
-              </span>
-              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${ROOM_TONE[r.status]}`}>
-                {r.status_label}
-              </span>
-              <span className="w-[92px] shrink-0 text-right text-[12px] tabular-nums text-slate-600">
-                {r.used}/{r.lessons} dars
-              </span>
-              <span className="w-[92px] shrink-0 text-right text-[11.5px] tabular-nums text-slate-400">
-                {r.used_teachers}/{r.teachers} o‘qituvchi
-              </span>
+                <Pill tone={ROOM_TONE[r.status] || 'slate'}>{r.status_label}</Pill>
+                <span className="w-[92px] shrink-0 text-right text-[12px] font-semibold text-slate-600 rx-num">
+                  {r.used}/{r.lessons} dars
+                </span>
+                <span className="w-[92px] shrink-0 text-right text-[11.5px] text-slate-400 rx-num">
+                  {r.used_teachers}/{r.teachers} o‘qituvchi
+                </span>
               </Stat>
             </li>
           ))}
         </ul>
       )}
       {!compact && (
-        <p className="border-t border-slate-100 px-4 py-2 text-[11.5px] text-slate-500">
+        <p className="border-t border-slate-100 bg-slate-50/60 px-4 py-2.5 text-[11.5px] text-slate-500 sm:px-5">
           «Tekshirish kerak» — xonada {8}+ dars va 3+ o‘qituvchi bo‘lgan, lekin birortasi ham iMentor
           ochmagan. Bu odatda o‘qituvchining emas, jihozning muammosi: monitorni tekshirib, keyin talab qilinadi.
         </p>
       )}
-    </section>
+    </Panel>
   );
 }
 
-/* ============================================================== talabalar */
+/* ==================================================== kafedralar reytingi */
 
-function Students({ data, onOpen }: { data: ControlStudents | null; onOpen: (p: Person) => void }) {
-  const [q, setQ] = useState('');
-  if (!data) return <Spinner />;
-  const t = data.totals;
-  const needle = q.trim().toLowerCase();
-  const rows = (data.students || []).filter((r) => !needle || `${r.name} ${r.group}`.toLowerCase().includes(needle));
+function Departments({ data }: { data: Report }) {
+  if (!data.departments.length) return null;
+  const rankTone = (i: number, total: number) =>
+    i < 3 ? 'bg-rose-500 text-white' : i >= total - 3 ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500';
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {(
-          [
-            ['Test topshirgan talaba', t.matched_to_contingent, `${t.contingent} talabadan`, 'students_tested'],
-            ['Qamrov', `${t.coverage}%`, 'kontingentdan', 'students_tested'],
-            ['Urinishlar', t.attempts, `o‘rtacha ball ${t.avg_score}%`, 'students_attempts'],
-            ['Faol guruh', t.groups_active, `${t.groups_total} guruhdan`, 'groups_active'],
-          ] as Array<[string, string | number, string, string]>
-        ).map(([label, value, hint, metric]) => (
-          <Stat
-            key={label}
-            metric={metric}
-            label={label}
-            className="rounded-xl bg-white p-3 text-left ring-1 ring-slate-900/[0.06]"
-          >
-            <p className="text-[11.5px] text-slate-500">{label}</p>
-            <p className="text-[19px] font-bold tabular-nums text-slate-900">{value}</p>
-            <p className="text-[11px] text-slate-400">{hint}</p>
-          </Stat>
-        ))}
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <section className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-900/[0.06]">
-          <h3 className="border-b border-slate-100 px-3 py-2 text-[12.5px] font-bold text-slate-700">
-            Guruhlar — eng faolidan
-          </h3>
-          <table className="w-full text-[12.5px]">
-            <thead className="text-slate-500">
-              <tr className="text-left">
-                <th className="px-3 py-1.5 font-medium">Guruh</th>
-                <th className="px-3 py-1.5 text-right font-medium">Qamrov</th>
-                <th className="px-3 py-1.5 text-right font-medium">Urinish</th>
-                <th className="px-3 py-1.5 text-right font-medium">Ball</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.groups.slice(0, 14).map((g) => (
-                <GroupRow key={g.group} group={g} />
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-900/[0.06]">
-          <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
-            <h3 className="text-[12.5px] font-bold text-slate-700">Talabalar</h3>
-            <div className="relative ml-auto">
-              <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Ism yoki guruh"
-                className="h-7 w-[170px] rounded-lg border border-slate-200 pl-7 pr-2 text-[12px] outline-none focus:border-sky-400"
-              />
-            </div>
-          </div>
-          <ul className="max-h-[320px] divide-y divide-slate-100 overflow-y-auto">
-            {rows.slice(0, 120).map((r: ControlStudentRow) => (
-              <li key={r.student_key}>
-                <button
-                  type="button"
-                  onClick={() => onOpen({ kind: 'student', key: r.student_key, name: r.name })}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-slate-800">{r.name}</span>
-                    <span className="block truncate text-[11px] text-slate-400">
-                      {r.group || 'kontingentda yo‘q'}
-                      {r.course ? ` · ${r.course}-kurs` : ''}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-[12px] tabular-nums text-slate-500">{r.attempts} urinish</span>
-                  <span
-                    className={`w-10 shrink-0 text-right text-[12.5px] font-bold tabular-nums ${
-                      r.avg_score >= 60 ? 'text-emerald-700' : r.avg_score >= 40 ? 'text-amber-700' : 'text-rose-700'
-                    }`}
-                  >
-                    {r.avg_score}%
-                  </span>
-                </button>
-              </li>
-            ))}
-            {rows.length === 0 && <li className="px-3 py-4 text-center text-[12.5px] text-slate-400">Topilmadi.</li>}
-          </ul>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-/** Guruh qatori — bosilsa shu guruhning test topshirgan talabalari chiqadi. */
-function GroupRow({ group: g }: { group: ControlStudents['groups'][number] }) {
-  const drill = useContext(DrillContext);
-  return (
-    <tr
-      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-      onClick={() => drill({ metric: `group:${g.group}`, label: `${g.group} — test topshirgan talabalar` })}
-      title="Guruh talabalarini ochish"
+    <Panel
+      icon={Building2}
+      tone="violet"
+      title="Kafedralar — eng past ko‘rsatkichdan"
+      hint="Bosilsa kafedra o‘qituvchilari ro‘yxati ochiladi"
     >
-      <td className="px-3 py-1.5 font-medium text-slate-800">{g.group}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
-        {g.tested_students}/{g.group_size}
-      </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{g.attempts}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{g.avg_score}%</td>
-    </tr>
+      <ul className="divide-y divide-slate-100">
+        {data.departments.map((d, i) => (
+          <li key={d.department}>
+            <Stat
+              metric={`department:${d.department}`}
+              label={`${d.department} — o‘qituvchilari`}
+              plain
+              className="flex w-full flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3 text-left hover:bg-violet-50/30 sm:px-5"
+            >
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11.5px] font-extrabold rx-num ${rankTone(
+                  i,
+                  data.departments.length,
+                )}`}
+              >
+                {i + 1}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-semibold text-slate-800" title={d.department}>
+                  {d.department}
+                </span>
+                <span className="flex flex-wrap items-center gap-x-3 text-[11.5px] text-slate-400 rx-num">
+                  <span className="inline-flex items-center gap-1"><Users size={11} />{d.active_teachers}/{d.teachers} o‘qituvchi</span>
+                  <span className="inline-flex items-center gap-1"><CalendarCheck size={11} />{d.monitor_used}/{d.monitor_lessons} dars</span>
+                </span>
+              </span>
+              <span className="w-full shrink-0 sm:w-[200px]">
+                {d.monitor_lessons ? (
+                  <Meter value={d.percent} tone={BAND_TONE[d.band] || 'slate'} height={10} delay={i * 30} label={`${d.percent}%`} />
+                ) : (
+                  <span className="block text-right text-[12px] text-slate-400">monitorsiz</span>
+                )}
+              </span>
+            </Stat>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+/* ==================================================== dinamika va xulosalar */
+
+/**
+ * Ma'lumoti bor haftalar. Boshidagi bo'sh yoki deyarli bo'sh haftalar
+ * (HEMIS ulanmasdan oldin; 7-sentabr haftasida bitta dars bo'lgan)
+ * tashlanadi — aks holda grafik "0% dan boshlangan" deb yolg'on aytardi.
+ */
+const MIN_WEEK_LESSONS = 20;
+
+export function filledWeeks(trend: ControlTrend | null) {
+  const weeks = trend?.weeks || [];
+  const first = weeks.findIndex((w) => w.lessons >= MIN_WEEK_LESSONS);
+  return first < 0 ? [] : weeks.slice(first);
+}
+
+/** Haftalar bo'yicha grafik: ishlatilgan va to'liq o'tilgan darslar ulushi. */
+function Trend({ trend, loading }: { trend: ControlTrend | null; loading: boolean }) {
+  const weeks = filledWeeks(trend);
+  if (!weeks.length) {
+    return loading ? (
+      <section className="rx-card p-5">
+        <p className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-slate-500">
+          <TrendingUp size={15} /> Haftalar bo‘yicha dinamika hisoblanmoqda — bu bir necha soniya olishi mumkin
+        </p>
+        <Skeleton className="h-[200px]" />
+      </section>
+    ) : null;
+  }
+  const first = weeks[0];
+  const last = weeks[weeks.length - 1];
+  const prev = weeks.length > 1 ? weeks[weeks.length - 2] : null;
+  return (
+    <Panel
+      icon={TrendingUp}
+      tone="violet"
+      title="Haftalar bo‘yicha dinamika"
+      hint={
+        <>
+          Monitorli darslarda iMentor ishlatilishi har hafta.{' '}
+          {first.touched_percent !== null && last.touched_percent !== null && weeks.length > 1 && (
+            <>
+              {uzDay(first.week_start)} haftasidan beri:{' '}
+              <b className="text-slate-800 rx-num">
+                {first.touched_percent}% → {last.touched_percent}%
+              </b>
+            </>
+          )}
+        </>
+      }
+      actions={
+        prev && (
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500">
+            o‘tgan haftaga nisbatan <Delta now={last.touched_percent} before={prev.touched_percent} unit="%" />
+          </span>
+        )
+      }
+      bodyClassName="px-3 pb-4 pt-3 sm:px-5"
+    >
+      <div className="mb-2 px-1">
+        <Legend
+          items={[
+            { label: 'Ishlatilgan (to‘liq + qisqa)', tone: 'indigo', value: last.touched_percent === null ? '—' : `${last.touched_percent}%` },
+            { label: 'To‘liq o‘tilgan', tone: 'emerald', value: last.percent === null ? '—' : `${last.percent}%` },
+          ]}
+        />
+      </div>
+      <TrendChart
+        labels={weeks.map((w) => uzDay(w.week_start))}
+        series={[
+          { key: 'touched', label: 'Ishlatilgan', tone: 'indigo', values: weeks.map((w) => w.touched_percent) },
+          { key: 'full', label: 'To‘liq o‘tilgan', tone: 'emerald', values: weeks.map((w) => w.percent) },
+        ]}
+      />
+      <p className="mt-1 px-1 text-[11.5px] text-slate-400 rx-num">
+        Har nuqta — dushanbadan yakshanbagacha; oxirgi hafta tanlangan kun bilan tugaydi. Darslar soni:{' '}
+        {weeks.map((w) => w.lessons).join(' · ')}
+      </p>
+    </Panel>
+  );
+}
+
+/** Sahifa tepasidagi xulosalar — hisobot ma'lumotining o'zidan, raqam bilan. */
+export function teacherInsights(data: Report, trend: ControlTrend | null, drill: (t: DrillTarget) => void): Insight[] {
+  const h = data.headline;
+  const out: Insight[] = [];
+  const b = h.teacher_buckets;
+  if (b?.none) {
+    out.push({
+      key: 'none', tone: 'rose', icon: UserX, action: 'Ro‘yxat',
+      text: <><b className="rx-num">{b.none}</b> o‘qituvchi dars vaqtida iMentor’ni umuman ochmagan</>,
+      onClick: () => drill({ metric: 't_none', label: 'Dars vaqtida iMentor’ni umuman ochmaganlar' }),
+    });
+  }
+  if (b?.partial) {
+    out.push({
+      key: 'partial', tone: 'amber', icon: Hourglass, action: 'Ro‘yxat',
+      text: (
+        <>
+          <b className="rx-num">{b.partial}</b> o‘qituvchi darslarining bir qismini o‘tmagan —{' '}
+          <b className="rx-num">{h.partial_missed_lessons ?? 0}</b> dars
+        </>
+      ),
+      onClick: () => drill({ metric: 't_partial', label: 'Ba’zi darsini o‘tgan, qolganini o‘tmaganlar' }),
+    });
+  }
+  const weeks = filledWeeks(trend);
+  if (weeks.length > 1) {
+    const last = weeks[weeks.length - 1];
+    const prev = weeks[weeks.length - 2];
+    if (last.touched_percent !== null && prev.touched_percent !== null) {
+      const diff = last.touched_percent - prev.touched_percent;
+      out.push({
+        key: 'trend', tone: diff >= 0 ? 'emerald' : 'rose', icon: diff >= 0 ? TrendingUp : TrendingDown,
+        text: (
+          <>
+            Bu hafta <b className="rx-num">{last.touched_percent}%</b> — o‘tgan haftadan{' '}
+            <b className="rx-num">{diff >= 0 ? `+${diff}` : diff}</b> foiz punkt
+            {weeks[0].touched_percent !== null && weeks.length > 2 && (
+              <> ({weeks[0].touched_percent}% dan boshlangan)</>
+            )}
+          </>
+        ),
+      });
+    }
+  }
+  const ranked = data.departments.filter((d) => d.monitor_lessons >= 10);
+  if (ranked.length > 1) {
+    const worst = ranked.reduce((a, c) => (c.percent < a.percent ? c : a));
+    const best = ranked.reduce((a, c) => (c.percent > a.percent ? c : a));
+    out.push({
+      key: 'worst', tone: 'rose', icon: Building2, action: 'O‘qituvchilar',
+      text: <>Eng past kafedra: <b>{worst.department}</b> — <b className="rx-num">{worst.percent}%</b></>,
+      onClick: () => drill({ metric: `department:${worst.department}`, label: `${worst.department} — o‘qituvchilari` }),
+    });
+    out.push({
+      key: 'best', tone: 'emerald', icon: Trophy, action: 'O‘qituvchilar',
+      text: <>Eng yaxshi kafedra: <b>{best.department}</b> — <b className="rx-num">{best.percent}%</b></>,
+      onClick: () => drill({ metric: `department:${best.department}`, label: `${best.department} — o‘qituvchilari` }),
+    });
+  }
+  if (data.room_summary?.suspect) {
+    out.push({
+      key: 'rooms', tone: 'amber', icon: MonitorOff,
+      text: <><b className="rx-num">{data.room_summary.suspect}</b> ta monitor xonasini tekshirish kerak — birorta o‘qituvchi ham ochmagan</>,
+    });
+  }
+  const noMaterial = data.teachers.filter((r) => r.linked && r.monitor_lessons > 0 && r.created_total === 0).length;
+  if (noMaterial) {
+    out.push({
+      key: 'material', tone: 'orange', icon: Sparkles,
+      text: <><b className="rx-num">{noMaterial}</b> nazoratdagi o‘qituvchi shu davrda birorta material yaratmagan</>,
+    });
+  }
+  if (h.unlinked_teachers) {
+    out.push({
+      key: 'unlinked', tone: 'slate', icon: Link2Off, action: 'Ro‘yxat',
+      text: <><b className="rx-num">{h.unlinked_teachers}</b> o‘qituvchining iMentor hisobi bog‘lanmagan — faolligini o‘lchab bo‘lmaydi</>,
+      onClick: () => drill({ metric: 'unlinked', label: 'iMentor hisobi topilmaganlar' }),
+    });
+  }
+  return out.slice(0, 6);
+}
+
+/** Qorong'i kartadagi kichik ko'rsatkich. */
+function HeroTile({
+  label,
+  children,
+  hint,
+  icon: Icon,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+  icon?: LucideIcon;
+}) {
+  return (
+    <div className="rx-glass rounded-2xl px-3.5 py-3">
+      <p className="flex items-center gap-1.5 text-[11.5px] font-medium text-indigo-100/80">
+        {Icon && (
+          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-indigo-100">
+            <Icon size={12} />
+          </span>
+        )}
+        {label}
+      </p>
+      {children}
+      {hint && <p className="text-[10.5px] text-indigo-200/60">{hint}</p>}
+    </div>
   );
 }
 
 /** Sof ko'rinish — tarmoqqa bormaydi, shuning uchun uni namuna ma'lumot bilan ham ko'rish mumkin. */
 export function ControlReportView({
   data,
-  students,
   onOpen,
   onDrill,
   department = '',
+  trend = null,
+  trendLoading = false,
 }: {
   data: Report;
-  students: ControlStudents | null;
   onOpen?: (p: Person) => void;
   onDrill?: (t: DrillTarget) => void;
   /** Yuqoridagi kafedra filtri — bo'sh natija sababini to'g'ri aytish uchun. */
   department?: string;
+  /** Haftalar bo'yicha dinamika — alohida, sekinroq so'rov. */
+  trend?: ControlTrend | null;
+  trendLoading?: boolean;
 }) {
   // Namuna ma'lumot bilan ko'rilganda (harness) hech narsa ochilmaydi.
   const open = onOpen ?? (() => {});
@@ -913,8 +1149,8 @@ export function ControlReportView({
   const waiting = h.pending && h.pending.lessons > 0 ? h.pending : null;
   const notOverYet = noLessons && !!waiting;
   const tone = BAND_TEXT[h.band] || BAND_TEXT.none;
-  const touchTone = BAND_TEXT[h.touch_band || h.band] || BAND_TEXT.none;
-  const peak = Math.max(5, ...data.daily.map((d) => d.percent));
+  const touched = h.monitor_touched_percent ?? h.monitor_percent;
+  const ringTone = BAND_TONE[h.touch_band || h.band] || 'indigo';
 
   return (
     <DrillContext.Provider value={drill}>
@@ -925,14 +1161,17 @@ export function ControlReportView({
           bo'yicha hisoblanadi, shuning uchun unda dars bo'lsa sabab filtr ham,
           dam olish kuni ham emas — dars hali tugamagan. */}
       {notOverYet && (
-        <p className="rounded-2xl bg-sky-50 px-4 py-3 text-[13px] text-sky-900 ring-1 ring-sky-200">
-          Jadvalda {department ? <b>«{department}»</b> : 'bugun'} bo‘yicha <b>{waiting!.lessons}</b> ta dars
-          bor, lekin soat {(waiting!.as_of || '').slice(11, 16)} holatiga biri ham tugamagan — shuning uchun
-          baho hali yo‘q.{' '}
-          {waiting!.next_at
-            ? `Birinchi dars ${waiting!.next_at.slice(11, 16)} da tugaydi, raqamlar shundan keyin to‘la boshlaydi.`
-            : 'Raqamlar darslar tugagach to‘la boshlaydi.'}{' '}
-          Tugagan darslarni ko‘rish uchun kechagi sanani tanlang.
+        <p className="rx-rise flex items-start gap-3 rounded-2xl bg-sky-50 px-4 py-3.5 text-[13px] text-sky-900 ring-1 ring-sky-200">
+          <Clock3 size={18} className="mt-0.5 shrink-0 text-sky-500" />
+          <span>
+            Jadvalda {department ? <b>«{department}»</b> : 'bugun'} bo‘yicha <b>{waiting!.lessons}</b> ta dars
+            bor, lekin soat {(waiting!.as_of || '').slice(11, 16)} holatiga biri ham tugamagan — shuning uchun
+            baho hali yo‘q.{' '}
+            {waiting!.next_at
+              ? `Birinchi dars ${waiting!.next_at.slice(11, 16)} da tugaydi, raqamlar shundan keyin to‘la boshlaydi.`
+              : 'Raqamlar darslar tugagach to‘la boshlaydi.'}{' '}
+            Tugagan darslarni ko‘rish uchun kechagi sanani tanlang.
+          </span>
         </p>
       )}
 
@@ -940,14 +1179,14 @@ export function ControlReportView({
           xabar "dam olish kuni" derdi va rektor hisobot buzilgan deb o'ylardi
           (2026-10-12: "Lotin tili" tanlangan, dushanba kuni 0 dars). */}
       {noLessons && !notOverYet && department && (
-        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+        <p className="rx-rise rounded-2xl bg-amber-50 px-4 py-3.5 text-[13px] text-amber-900 ring-1 ring-amber-200">
           <b>«{department}»</b> kafedrasida tanlangan davrda HEMIS jadvali bo‘yicha dars yo‘q. Butun institutni
           ko‘rish uchun yuqorida «Barcha kafedralar»ni tanlang yoki «Filtrlarni tozalash»ni bosing.
           Quyidagi talabalar ko‘rsatkichlari kafedra bo‘yicha filtrlanmaydi.
         </p>
       )}
       {noLessons && !notOverYet && !department && (
-        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+        <p className="rx-rise rounded-2xl bg-amber-50 px-4 py-3.5 text-[13px] text-amber-900 ring-1 ring-amber-200">
           Tanlangan davrda HEMIS jadvalida dars yo‘q (dam olish kuni yoki bayram bo‘lishi mumkin).
           Quyidagi talabalar va material ko‘rsatkichlari baribir ko‘rsatilmoqda — boshqa sanani tanlang.
         </p>
@@ -955,33 +1194,34 @@ export function ControlReportView({
 
       {/* ---------------------------------------------------- asosiy ko'rsatkich */}
       {!noLessons && (
-      <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-        <div className="flex flex-wrap items-end justify-between gap-4 p-4 sm:p-5">
-          <div>
-            <p className="text-[12.5px] font-semibold uppercase tracking-wide text-slate-500">
+      <section className="rx-hero rx-rise p-5 sm:p-7">
+        <div className="grid items-center gap-6 lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,360px)]">
+          {/* BITTA foiz: iMentor ishlatilgan darslar ulushi — to'liq
+              o'tilganlar va vaqti yetmaganlar birgalikda (rektor talabi,
+              2026-10-12). "To'liq o'tilgan" ulushi pastdagi jumlada. */}
+          <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" plain className="mx-auto rounded-full">
+            <Ring value={touched} size={176} stroke={16} tone={ringTone} track="rgba(255,255,255,0.12)">
+              <p className="text-[44px] font-extrabold leading-none text-white rx-num">
+                <CountUp value={touched ?? 0} suffix="%" />
+              </p>
+              <span className="mt-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-indigo-200/80">
+                ishlatilgan
+              </span>
+            </Ring>
+          </Stat>
+
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-[11.5px] font-bold uppercase tracking-[0.16em] text-indigo-200/90">
+              <MonitorCheck size={15} className="shrink-0" />
               Monitorli xonadagi darslarda iMentor ishlatilishi
             </p>
-            {/* BITTA foiz: iMentor ishlatilgan darslar ulushi — to'liq
-                o'tilganlar va vaqti yetmaganlar birgalikda (rektor talabi,
-                2026-10-12). "To'liq o'tilgan" ulushi pastdagi jumlada. */}
-            <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="-mx-1 px-1">
-              <p className={`mt-1 text-[44px] font-bold leading-none tabular-nums ${touchTone.text}`}>
-                {h.monitor_touched_percent ?? h.monitor_percent}%
-              </p>
-            </Stat>
-            <p className="text-[12px] text-slate-500">
-              Foiz — iMentor <b className="text-slate-700">ishlatilgan</b> darslar ulushi:
-              to‘liq o‘tilganlar va vaqti yetmaganlar birgalikda. Dars
-              “to‘liq o‘tilgan” deb faqat kamida{' '}
-              <b className="text-slate-700">{h.min_lesson_minutes} daqiqa</b> ishlangan bo‘lsa sanaladi.
-            </p>
-            <p className="mt-1 text-[13px] text-slate-500">
-              <Stat metric="monitor_lessons" label="Shu darslarni o‘tadigan o‘qituvchilar" className="px-1">
+            <p className="mt-2 text-[19px] font-bold leading-snug text-white sm:text-[21px]">
+              <Stat metric="monitor_lessons" label="Shu darslarni o‘tadigan o‘qituvchilar" dark className="px-1">
                 {h.monitor_lessons}
               </Stat>{' '}
               ta darsdan{' '}
-              <Stat metric="monitor_used" label="Shu darslarni iMentor’da o‘tgan o‘qituvchilar" className="px-1">
-                <b className="text-slate-700">{h.monitor_used}</b>
+              <Stat metric="monitor_used" label="Shu darslarni iMentor’da o‘tgan o‘qituvchilar" dark className="px-1">
+                <b className="text-emerald-300">{h.monitor_used}</b>
               </Stat>{' '}
               tasida to‘liq o‘tilgan
               {h.work_buckets && h.work_buckets.near + h.work_buckets.brief > 0 && (
@@ -990,111 +1230,120 @@ export function ControlReportView({
                   <Stat
                     metric="short"
                     label={`Kirgan, lekin ${h.min_lesson_minutes} daqiqadan kam ishlagan`}
+                    dark
                     className="px-1"
                   >
-                    <b className="text-amber-600">{h.work_buckets.near + h.work_buckets.brief}</b>
+                    <b className="text-amber-300">{h.work_buckets.near + h.work_buckets.brief}</b>
                   </Stat>{' '}
                   tasida ishlatilgan, lekin {h.min_lesson_minutes} daqiqaga yetmagan
                 </>
               )}
             </p>
-            <p className="mt-0.5 text-[11.5px] text-slate-400">
+            <p className="mt-2.5 text-[12.5px] leading-relaxed text-indigo-100/75">
+              Foiz — iMentor <b className="text-white">ishlatilgan</b> darslar ulushi:
+              to‘liq o‘tilganlar va vaqti yetmaganlar birgalikda. Dars
+              “to‘liq o‘tilgan” deb faqat kamida{' '}
+              <b className="text-white">{h.min_lesson_minutes} daqiqa</b> ishlangan bo‘lsa sanaladi.
+            </p>
+            <p className="mt-1 text-[11.5px] text-indigo-200/60">
               Bir vaqtda bir nechta guruhga o‘tilgan dars bitta dars sifatida sanaladi.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-3">
-            <div>
-              <p className="text-slate-500">Darsi bor o‘qituvchi</p>
-              <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" className="px-1">
-                <p className="text-[19px] font-bold tabular-nums text-slate-900">{h.watched_teachers}</p>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <HeroTile icon={Users} label="Darsi bor o‘qituvchi">
+              <Stat metric="watched" label="Nazoratdagi o‘qituvchilar" dark className="-mx-1 px-1">
+                <p className="text-[24px] font-extrabold text-white rx-num">{h.watched_teachers}</p>
               </Stat>
-            </div>
-            <div>
-              <p className="text-slate-500">Darsini iMentor’da o‘tgan</p>
-              <Stat metric="t_used" label="Kamida bitta darsini iMentor’da o‘tganlar" className="px-1">
-                <p className="text-[19px] font-bold tabular-nums text-slate-900">
+            </HeroTile>
+            <HeroTile icon={UserCheck} label="Darsini iMentor’da o‘tgan" hint="kamida bitta darsini">
+              <Stat metric="t_used" label="Kamida bitta darsini iMentor’da o‘tganlar" dark className="-mx-1 px-1">
+                <p className="text-[24px] font-extrabold text-white rx-num">
                   {h.teachers_used ?? 0}{' '}
-                  <span className={`text-[14px] ${tone.text}`}>{h.teacher_percent ?? 0}%</span>
+                  <span className={`text-[14px] ${h.band === 'good' ? 'text-emerald-300' : h.band === 'warn' ? 'text-amber-300' : h.band === 'bad' ? 'text-rose-300' : 'text-slate-300'}`}>
+                    {h.teacher_percent ?? 0}%
+                  </span>
                 </p>
               </Stat>
-              <p className="text-[11px] text-slate-400">kamida bitta darsini</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Umuman ochmagan</p>
-              <Stat metric="t_none" label="Dars vaqtida iMentor’ni umuman ochmaganlar" className="px-1">
-                <p className={`text-[19px] font-bold tabular-nums ${h.teacher_buckets?.none ? 'text-rose-600' : 'text-emerald-600'}`}>
+            </HeroTile>
+            <HeroTile icon={UserX} label="Umuman ochmagan">
+              <Stat metric="t_none" label="Dars vaqtida iMentor’ni umuman ochmaganlar" dark className="-mx-1 px-1">
+                <p className={`text-[24px] font-extrabold rx-num ${h.teacher_buckets?.none ? 'text-rose-300' : 'text-emerald-300'}`}>
                   {h.teacher_buckets?.none ?? h.idle_teachers}
                 </p>
               </Stat>
-            </div>
-            <div>
-              <p className="text-slate-500">Monitorsiz darslar</p>
-              <p className="text-[19px] font-bold tabular-nums text-slate-900">
-                <Stat metric="other_used" label="Monitorsiz darsda ishlagan o‘qituvchilar" className="px-1">
+            </HeroTile>
+            <HeroTile icon={MonitorOff} label="Monitorsiz darslar" hint="o‘z qurilmasidan">
+              <p className="text-[24px] font-extrabold text-white rx-num">
+                <Stat metric="other_used" label="Monitorsiz darsda ishlagan o‘qituvchilar" dark className="px-0.5">
                   {h.other_used}
                 </Stat>
-                /
-                <Stat metric="other_lessons" label="Monitorsiz xonada darsi bor o‘qituvchilar" className="px-1">
+                <span className="text-indigo-300/70">/</span>
+                <Stat metric="other_lessons" label="Monitorsiz xonada darsi bor o‘qituvchilar" dark className="px-0.5">
                   {h.other_lessons}
                 </Stat>
               </p>
-              <p className="text-[11px] text-slate-400">o‘z qurilmasidan</p>
-            </div>
+            </HeroTile>
           </div>
         </div>
         {h.pending && h.pending.monitor_lessons > 0 && (
-          <p className="border-t border-slate-100 bg-sky-50/60 px-4 py-2 text-[12px] text-sky-900 sm:px-5">
-            Soat {(h.pending.as_of || '').slice(11, 16)} holatiga: hali tugamagan{' '}
-            <b>{h.pending.monitor_lessons}</b> ta monitorli dars ({h.pending.teachers} o‘qituvchi) hisobga
-            olinmagan — foizlar faqat tugagan darslar bo‘yicha.
+          <p className="rx-glass mt-5 flex items-center gap-2 rounded-xl px-3.5 py-2 text-[12px] text-sky-100">
+            <Clock3 size={14} className="shrink-0 text-sky-300" />
+            <span>
+              Soat {(h.pending.as_of || '').slice(11, 16)} holatiga: hali tugamagan{' '}
+              <b className="text-white">{h.pending.monitor_lessons}</b> ta monitorli dars ({h.pending.teachers} o‘qituvchi) hisobga
+              olinmagan — foizlar faqat tugagan darslar bo‘yicha.
+            </span>
           </p>
         )}
-        <TeacherBuckets h={h} />
-        {h.work_buckets && h.monitor_lessons > 0 && (
-          <WorkBuckets
-            buckets={h.work_buckets}
-            total={h.monitor_lessons}
-            minMinutes={h.min_lesson_minutes}
-            nearMinutes={h.near_minutes ?? 30}
-            nearTeachers={h.short_near_teachers ?? 0}
-            briefTeachers={h.short_brief_teachers ?? 0}
-          />
-        )}
-        {data.daily.length > 1 && (
-          <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
-            <p className="mb-2 text-[11.5px] text-slate-400">
-              Kunlar bo‘yicha ishlatilish ulushi <span className="text-slate-300">· eng baland ustun {peak}%</span>
-            </p>
-            <div className="flex items-end gap-1.5">
-              {data.daily.map((d) => {
-                const band = d.percent >= 70 ? 'bg-emerald-500' : d.percent >= 40 ? 'bg-amber-500' : 'bg-rose-400';
-                return (
-                  <Stat
-                    key={d.date}
-                    metric={`day:${d.date}`}
-                    label={`${d.date} — monitorli darsi bo‘lganlar`}
-                    className="flex flex-1 flex-col items-center gap-1 px-0"
-                  >
-                    <div className="flex h-16 w-full items-end justify-center">
-                      <div
-                        className={`w-full max-w-[36px] rounded-t ${d.lessons ? band : 'bg-slate-200'}`}
-                        // Balandlik eng yuqori kunga nisbatan — past foizlarda ham kunlar taqqoslansin.
-                        style={{ height: `${Math.max(4, (d.percent / peak) * 100)}%` }}
-                        title={`${d.used} / ${d.lessons} dars`}
-                      />
-                    </div>
-                    <span className="text-[10.5px] text-slate-400">{d.weekday.slice(0, 3)}</span>
-                    <span className="text-[11.5px] font-bold tabular-nums text-slate-700">{d.percent}%</span>
-                    <span className="text-[10px] tabular-nums text-slate-400">
-                      {d.used}/{d.lessons}
-                    </span>
-                  </Stat>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </section>
+      )}
+
+      {/* ------------------------------------------ xulosalar va dinamika */}
+      {!noLessons && <Insights items={teacherInsights(data, trend, drill)} />}
+      <Trend trend={trend} loading={trendLoading} />
+
+      {/* ------------------------------------------ taqsimotlar va kunlar */}
+      {!noLessons && (h.teacher_buckets || h.work_buckets || data.daily.length > 1) && (
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <Panel icon={UserCheck} tone="emerald" title="Taqsimot" hint="Har o‘qituvchi va har dars faqat bitta toifada — bosilsa ro‘yxati ochiladi" bodyClassName="divide-y divide-slate-100">
+            <TeacherBuckets h={h} />
+            {h.work_buckets && h.monitor_lessons > 0 && (
+              <WorkBuckets
+                buckets={h.work_buckets}
+                total={h.monitor_lessons}
+                minMinutes={h.min_lesson_minutes}
+                nearMinutes={h.near_minutes ?? 30}
+                nearTeachers={h.short_near_teachers ?? 0}
+                briefTeachers={h.short_brief_teachers ?? 0}
+              />
+            )}
+          </Panel>
+          {data.daily.length > 1 && (
+            <Panel
+              icon={BarChart3}
+              tone="sky"
+              title="Kunlar bo‘yicha ishlatilish ulushi"
+              hint={<>Ustun balandligi — o‘sha kuni iMentor ishlatilgan monitorli darslar ulushi. <span className={tone.text}>Bosilsa — o‘sha kun ro‘yxati.</span></>}
+              bodyClassName="px-4 pb-4 pt-5 sm:px-5"
+            >
+              <Columns
+                height={150}
+                items={data.daily.map((d) => ({
+                  key: d.date,
+                  label: d.weekday.slice(0, 3),
+                  value: d.percent,
+                  caption: `${d.percent}%`,
+                  sub: `${d.used}/${d.lessons}`,
+                  title: `${d.date}: ${d.used} / ${d.lessons} dars`,
+                  tone: d.percent >= 70 ? 'emerald' : d.percent >= 40 ? 'amber' : 'rose',
+                  muted: !d.lessons,
+                }))}
+                onPick={(date) => drill({ metric: `day:${date}`, label: `${date} — monitorli darsi bo‘lganlar` })}
+              />
+            </Panel>
+          )}
+        </div>
       )}
 
       {/* ------------------------------------------ bahonasi yo'qlar va xonasi shubhalilar */}
@@ -1113,42 +1362,11 @@ export function ControlReportView({
         hint="Dars vaqtida iMentor umuman ochilmagan. Xona va qayd tizimi holati tekshirilishi kerak."
         onOpen={open}
       />
-      <RoomTable rows={data.rooms} />
 
-      {/* ---------------------------------------------------- kafedralar */}
-      <section className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-900/[0.07]">
-        <h2 className="border-b border-slate-100 px-4 py-3 text-[13.5px] font-bold text-slate-800">
-          Kafedralar — eng past ko‘rsatkichdan
-        </h2>
-        <ul className="divide-y divide-slate-100">
-          {data.departments.map((d) => (
-            <li key={d.department}>
-              <Stat
-                metric={`department:${d.department}`}
-                label={`${d.department} — o‘qituvchilari`}
-                className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-left"
-              >
-              <span className="min-w-0 flex-1 truncate text-[13.5px] text-slate-800" title={d.department}>
-                {d.department}
-              </span>
-              <span className="shrink-0 text-[12px] text-slate-500">
-                {d.active_teachers}/{d.teachers} o‘qituvchi
-              </span>
-              <span className="w-[86px] shrink-0 text-right text-[12.5px] tabular-nums text-slate-600">
-                {d.monitor_used}/{d.monitor_lessons}
-              </span>
-              <span className="w-[130px] shrink-0">
-                {d.monitor_lessons ? (
-                  <Bar percent={d.percent} band={d.band} />
-                ) : (
-                  <span className="block text-right text-[12px] text-slate-400">monitorsiz</span>
-                )}
-              </span>
-              </Stat>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Departments data={data} />
+        <RoomTable rows={data.rooms} />
+      </div>
 
       {/* ---------------------------------------------------- o'qituvchilar */}
       <Teachers data={data} onOpen={open} />
@@ -1156,21 +1374,13 @@ export function ControlReportView({
       {/* --------------------------------- monitorsiz joyda dars o'tadiganlar */}
       <Offsite data={data} onOpen={open} />
 
-      {/* ---------------------------------------------------- talabalar */}
-      <section className="space-y-3">
-        <h2 className="flex items-center gap-2 px-1 text-[13.5px] font-bold text-slate-800">
-          <Users size={16} className="text-slate-400" /> Talabalar
-        </h2>
-        <Students data={students} onOpen={open} />
-      </section>
-
       <p className="flex items-start gap-2 px-1 text-[12px] leading-relaxed text-slate-400">
-        <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+        <ShieldAlert size={14} className="mt-0.5 shrink-0" />
         <span>
           Jadval HEMIS’dan har kuni yangilanadi, toq va juft haftalar (surat/maxraj) o‘z holicha hisobga olinadi.
           «Ishlatgan» — o‘qituvchi dars vaqtida (boshlanishidan 15 daqiqa oldin — tugagach 5 daqiqa) jonli test
           ochgan yoki QR bilan kompyuterga kirgan. Vaqt esa haqiqiy ishlangan vaqt: varaq yashirilsa yoki 5 daqiqa
-          tegilmasa sanoq to‘xtaydi.
+          tegilmasa sanoq to‘xtaydi. Talabalar bo‘yicha to‘liq tahlil — yuqoridagi «Talabalar» tomonida.
         </span>
       </p>
     </div>
@@ -1184,9 +1394,11 @@ export default function ControlReport({ filters, onUnauthorized }: Props) {
     [filters.from, filters.to, filters.department, filters.q, filters.refreshKey],
     onUnauthorized,
   );
-  const students = useLoad<ControlStudents>(
-    () => fetchControlStudents(filters),
-    [filters.from, filters.to, filters.refreshKey],
+  // Dinamika sekin (8 hafta) — har daqiqalik yangilanishga bog'lanmaydi,
+  // faqat sana va kafedra o'zgarganda qayta so'raladi.
+  const trend = useLoad<ControlTrend>(
+    () => fetchControlTrend(filters),
+    [filters.to, filters.department],
     onUnauthorized,
   );
   const [person, setPerson] = useState<Person | null>(null);
@@ -1199,10 +1411,11 @@ export default function ControlReport({ filters, onUnauthorized }: Props) {
     <>
       <ControlReportView
         data={report.data}
-        students={students.data}
         onOpen={setPerson}
         onDrill={setDrill}
         department={filters.department}
+        trend={trend.data}
+        trendLoading={trend.loading}
       />
       {drill && (
         <StatDrill

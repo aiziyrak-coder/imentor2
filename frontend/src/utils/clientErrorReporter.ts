@@ -19,6 +19,18 @@ function apiBaseUrl(): string {
   return env?.VITE_API_BASE_URL?.trim() || '/api';
 }
 
+/**
+ * Qaysi build ekanini bilish uchun — asosiy skript nomidagi hash
+ * (index-AbC123.js).
+ *
+ * Material yaratilganda ham yoziladi: 2026-10-15 da sifat qoidalari
+ * kuchaytirilgach, yangi testlar hamon zaif chiqdi va ular ESKI nusxadagi
+ * brauzerdan kelganini isbotlab bo'lmadi — endi har to'plamda versiya turadi.
+ */
+export function currentAppVersion(): string {
+  return appVersion();
+}
+
 /** Qaysi build ekanini bilish uchun — asosiy skript nomidagi hash (index-AbC123.js). */
 function appVersion(): string {
   try {
