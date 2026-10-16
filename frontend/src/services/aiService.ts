@@ -2492,7 +2492,19 @@ export const aiService = {
         // Kuchsiz va nuqsonlilar ham qo'shilgandan keyin hamon kam bo'lsa —
         // yana so'raladi. 10 tadan kam test o'qituvchiga berilmaydi.
         data = await topUp(data);
-        data = { ...data, questions: judge(data.questions || []).kept };
+        const again = judge([...(data.questions || []), ...finalCheck.rough]);
+        let kept = again.kept;
+        // Toza savollar baribir yetmasa — 10 talik talab (2026-10-16) uchun
+        // shakli biroz nuqsonli savollar to'ldiradi. "Bitta savolda bir nechta
+        // savol" esa hech qachon olinmaydi: uni to'g'ri baholab bo'lmaydi.
+        if (kept.length < safeCount) {
+          const seen = new Set(kept.map((q) => q.question.trim().toLowerCase()));
+          const filler = again.rough.filter(
+            (q) => !questionFlaws(q).includes('ikki_savol') && !seen.has(q.question.trim().toLowerCase()),
+          );
+          kept = [...kept, ...filler].slice(0, safeCount);
+        }
+        data = { ...data, questions: kept };
       }
       // Sifat filtri hammasini tashlasa ham bo'sh test qaytmaydi (2026-10-13).
       return requireQuestions({ ...normalizeTestSession(topic, data, safeCount), primaryLanguage: language, difficulty, domain, appVersion: currentAppVersion() }, lastRaw, safeCount);
