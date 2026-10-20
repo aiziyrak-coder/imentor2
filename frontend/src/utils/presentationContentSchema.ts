@@ -87,6 +87,18 @@ export function clipWords(text: string, maxWords: number): string {
   return words.slice(0, maxWords).join(' ');
 }
 
+/** Mazmun bermaydigan yakuniy/xizmat slaydlari (uch tilda). */
+const FILLER_SLIDE_TITLE_RE =
+  /^(?:taqdimot(?:ni)? (?:yakun\w*|tugadi|tayyorlandi)|yakun|e'?tiboringiz uchun rahmat|rahmat|tashakkur|savollar(?: va (?:javoblar|muhokama))?|manbalar|foydalanilgan (?:manbalar|adabiyotlar)|adabiyotlar|thank you|thanks|end of (?:the )?(?:presentation|lecture)|questions(?: and (?:answers|discussion))?|q ?& ?a|references(?: and further reading)?|additional notes|спасибо(?: за внимание)?|благодарю за внимание|вопросы|конец (?:презентации|лекции)|литература|список литературы|источники(?: информации)?)[\s!.?]*$/i;
+
+export function isFillerSlideTitle(title: string): boolean {
+  return FILLER_SLIDE_TITLE_RE.test(title.replace(/[’‘`ʻʼ]/g, "'").trim());
+}
+
+function capitalizeFirst(text: string): string {
+  return text ? text.charAt(0).toLocaleUpperCase() + text.slice(1) : text;
+}
+
 function asSlideType(raw: unknown): SlideType {
   const s = String(raw || '').trim().toLowerCase();
   return (SLIDE_TYPES as readonly string[]).includes(s) ? (s as SlideType) : 'content_bullets';
@@ -144,7 +156,12 @@ function normalizeBody(raw: unknown, slideType: SlideType): SlideBody {
   body.bullets =
     slideType === 'references' ? normalizeReferenceBullets(b.bullets) : normalizeBullets(b.bullets);
 
-  if (b.key_stat && typeof b.key_stat === 'object') {
+  // Sxema `key_stat` ni HAR slaydda majburiy qiladi va model uni bo'sh
+  // qoldirmay "14 — Yakuniy fikrlar", "3 — asosiy bosqich" kabi soxta raqam
+  // bilan to'ldiradi. Prod'da 400 taqdimotdan 545 ta matnli slayd shu sabab
+  // `statistics` ga aylanib, birinchi punkt o'rniga shu soxta qator chizilgan
+  // (2026-10-20). Faqat model o'zi statistika slaydi degan joyda olinadi.
+  if (slideType === 'statistics' && b.key_stat && typeof b.key_stat === 'object') {
     const ks = b.key_stat as Record<string, unknown>;
     body.key_stat = {
       number: String(ks.number || '').trim().slice(0, 24),
@@ -152,7 +169,7 @@ function normalizeBody(raw: unknown, slideType: SlideType): SlideBody {
     };
   }
 
-  if (Array.isArray(b.stats)) {
+  if (slideType === 'statistics' && Array.isArray(b.stats)) {
     body.stats = b.stats
       .slice(0, 4)
       .map((row) => {
@@ -217,7 +234,7 @@ function hasDataForType(slide: ContentSlide, type: SlideType): boolean {
   const b = slide.body;
   switch (type) {
     case 'statistics':
-      return (b.stats || []).filter((x) => isRealStat(x)).length >= 2 || isRealStat(b.key_stat);
+      return (b.stats || []).filter((x) => isRealStat(x)).length >= 2;
     case 'comparison_table':
       return (b.comparison_rows?.length || 0) >= 2;
     case 'process_flow':
@@ -397,9 +414,11 @@ export function normalizePresentationContent(
   raw: Partial<PresentationContent> | null | undefined,
   defaults: { title: string; subject: string; author?: string },
 ): PresentationContent {
-  const presentation_title = String(raw?.presentation_title || defaults.title || 'Taqdimot')
-    .trim()
-    .slice(0, 120);
+  const presentation_title = capitalizeFirst(
+    String(raw?.presentation_title || defaults.title || 'Taqdimot')
+      .trim()
+      .slice(0, 120),
+  );
   const subject_area = String(raw?.subject_area || defaults.subject || '')
     .trim()
     .slice(0, 80);
@@ -410,19 +429,35 @@ export function normalizePresentationContent(
   const mapped: ContentSlide[] = [];
   for (const [i, s] of (Array.isArray(raw?.slides) ? raw!.slides! : []).entries()) {
     const slide_type = asSlideType(s?.slide_type);
-    const title = String(s?.title || `Slayd ${i + 1}`)
-      .trim()
-      .slice(0, 90);
-    if (!title) continue;
+    const rawTitle = String(s?.title || '').trim();
+    // Sarlavhasiz slayd — `presentation_continue` minItems ni to'ldirish uchun
+    // bo'sh slayd qaytaradi. Ilgari ular "Slayd 15", "Slayd 16"… bo'lib
+    // taqdimotga tushardi (prod'da 400 taqdimotdan ~10% ida).
+    if (i > 0 && (!rawTitle || /^(?:slayd|slide|слайд)\s*\d+$/i.test(rawTitle))) continue;
+    // "sentence case" ni gpt-4.1-mini butunlay kichik harf deb tushundi
+    // (harness, 2026-10-20: 60 sarlavhadan 58 tasi kichik harfda boshlangan).
+    const title = capitalizeFirst((rawTitle || `Slayd ${i + 1}`).slice(0, 90));
     const body = normalizeBody(s?.body, slide_type);
-    if (
+    // Eski saqlangan taqdimotlarda bo'sh slaydga sarlavha punkt qilib qo'yilgan.
+    if (i > 0 && body.bullets?.length === 1 && body.bullets[0] === clipWords(title, MAX_WORDS_PER_BULLET)) {
+      body.bullets = [];
+    }
+    const empty =
       !body.bullets?.length &&
       !body.stats?.length &&
       !body.columns?.length &&
       !body.comparison_rows?.length &&
       !body.process_steps?.length &&
-      !body.quote_text
-    ) {
+      !body.quote_text;
+    // Mazmunsiz slayd — "Taqdimot yakuni", "Thank you", "Manbalar",
+    // "Savollar". Ilgari ularga sarlavhaning o'zi punkt qilib qo'yilardi va
+    // prod'da 400 taqdimotda 269 ta shunday bo'sh slayd chiqqan. Faqat
+    // birinchi (muqova) slayd mazmunsiz bo'lishi mumkin.
+    // `references` — tizimning o'z manbalar slaydi, `summary` — yakuniy xulosa:
+    // sarlavhasi "Manbalar"/"Taqdimot yakuni" bo'lsa ham mazmuni bor.
+    const keepsTitle = slide_type === 'references' || slide_type === 'summary';
+    if (i > 0 && (empty || (!keepsTitle && isFillerSlideTitle(title)))) continue;
+    if (empty) {
       body.bullets = [clipWords(title, MAX_WORDS_PER_BULLET)];
     }
     const image_query = s?.image_query
@@ -462,6 +497,13 @@ export function normalizePresentationContent(
   } else if (slides[0]) {
     slides[0] = { ...slides[0], slide_type: 'title' };
   }
+  // Muqova faqat bitta. Model bo'lim boshini ham `title` deb belgilaydi
+  // (prod'da bir taqdimotda 16 tagacha) — ular muqova shablonida chizilib,
+  // punktlari yo'qolardi. Ikkinchi qism (`presentation_continue`) ham
+  // ko'pincha yana muqova bilan boshlanadi.
+  slides = slides.map((s, i) =>
+    i > 0 && s.slide_type === 'title' ? { ...s, slide_type: 'content_bullets' as SlideType } : s,
+  );
 
   // Xulosa HAR DOIM oxirida bo'lsin. Model ba'zan bir nechta "summary"
   // slaydini o'rtada ham yaratadi — bunda oxirgisi yakuniy xulosa sifatida

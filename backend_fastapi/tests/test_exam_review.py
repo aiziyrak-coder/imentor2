@@ -57,9 +57,14 @@ def test_review_failure_returns_questions_unchanged():
         assert exam_review.review_exam_questions("k", qs, subject="s", department="d", lang_name="o'zbek") == qs
 
 
-def test_presentation_purposes_keep_their_model():
-    assert oai.model_for("presentation_generate") == "gpt-4.1-mini"
-    assert oai.model_for("presentation_language_repair") == "gpt-4.1-nano"
+def test_presentation_model_defaults_to_gpt54_and_is_configurable(monkeypatch):
+    monkeypatch.delenv("OPENAI_PRESENTATION_MODEL", raising=False)
+    for purpose in ("presentation_generate", "presentation_continue", "presentation_language_repair"):
+        assert oai.model_for(purpose) == "gpt-5.4"
+    monkeypatch.setenv("OPENAI_PRESENTATION_MODEL", "gpt-5.4-mini")
+    assert oai.model_for("presentation_generate") == "gpt-5.4-mini"
+    monkeypatch.setenv("OPENAI_PRESENTATION_MODEL", "gpt-5.5-pro")
+    assert oai.model_for("presentation_generate") == "gpt-5.4"
 
 
 def test_review_chunks_map_back_to_the_right_questions():
@@ -80,3 +85,13 @@ def test_lecture_uses_test_generate_model(monkeypatch):
     assert oai.model_for("lecture_translate") == "gpt-4.1-nano"
     monkeypatch.setenv("OPENAI_TEST_GENERATE_MODEL", "gpt-4.1-mini")
     assert oai.model_for("lecture_generate") == "gpt-4.1-mini"
+
+
+def test_presentation_timeout_and_fast_retry_model(monkeypatch):
+    monkeypatch.delenv("OPENAI_TEST_GENERATE_MODEL", raising=False)
+    assert oai.timeout_for("presentation_generate") == 540
+    assert oai.timeout_for("presentation_continue_fast") == 540
+    assert oai.timeout_for("test_generate") == 280
+    assert oai.timeout_for(None) == 280
+    assert oai.model_for("presentation_generate_fast") == "gpt-5.4-mini"
+    assert oai.model_for("presentation_continue_fast") == "gpt-5.4-mini"

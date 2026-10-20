@@ -48,16 +48,33 @@ class OpenAiClientError(Exception):
 DEFAULT_TEST_GENERATE_MODEL = "gpt-5.4-mini"
 DEFAULT_TEST_REVIEW_MODEL = "gpt-5.4-mini"
 DEFAULT_EXAM_REVIEW_MODEL = "gpt-5.4"
+DEFAULT_PRESENTATION_MODEL = "gpt-5.4"
 #: Reasoning modellar uchun fikrlash darajasi: "low" sifat va tezlik o'rtasi.
 QUALITY_REASONING_EFFORT = "low"
 GENERATE_PURPOSES = frozenset({"test_generate", "test_generate_brief", "exam_generate"})
 REVIEW_PURPOSES = frozenset({"test_repair"})
 EXAM_REVIEW_PURPOSES = frozenset({"exam_review"})
 #: Taqdimot mazmuni (2026-10-20, "kuchliroq taqdimot"): ~1200 ta/hafta,
-#: nano'da ~$2.7, mini'da ~$11 haftasiga. Tarjima va til tuzatish — nano.
-PRESENTATION_MODEL = "gpt-4.1-mini"
+#: nano'da ~$2.7, mini'da ~$11 haftasiga.
+#:
+#: 2026-10-20 (kech): test bilan bir xil model — `gpt-5.4-mini`. 4.1-mini
+#: dagi 400 ta prod taqdimotda: punktlarning 98% i 12 so'zdan qisqa (prompt
+#: 15–30 so'z so'raydi), 67% i 20 slayddan kam, ma'ruzadagi fan xatosi
+#: (masalan "Brucella gram-musbat") slaydga ko'chadi.
+#:
+#: Harness (3 ta prod ma'ruzasi, ma'ruza matni bilan):
+#:  - 4.1-mini: xatoni 3 marta ko'chirdi, "Bezgak" qismi yo'q, ~$0.01, 39–123 s;
+#:  - 5.4-mini: gram xatosini tuzatdi, lekin ma'ruzadagi uydirma "проба Роттера"
+#:    (igna bilan) ni ko'chirdi, ~$0.04, 27–34 s;
+#:  - gpt-5.4: ikkalasini ham tuzatdi (Rotter — C vitamini sinamasi, Shiller–Pisarev
+#:    — yod/glikogen), darslik darajasi (selektin/integrin, gipnozoit, G6FD),
+#:    ~$0.16 (~$175 haftasiga), 119–157 s (backend chegarasi 280 s).
+#: `.env`: OPENAI_PRESENTATION_MODEL=gpt-5.4-mini — arzonroq va tezroq zaxira.
+#: Til tuzatish ham shu modelda — nano tarjimasi yana tekshiruvdan o'tmay
+#: butun taqdimotni xato bilan yiqitardi.
 PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
+    "presentation_language_repair",
 })
 #: Keys (vaziyatli masala), 2026-10-20: nano'da prod keyslarining hech biri
 #: o'qituvchi ishlata oladigan darajada emas edi (105 savol qo'lda baholandi,
@@ -72,8 +89,16 @@ CASE_REVIEW_PURPOSES = frozenset({"case_review"})
 #: to'g'ri. Test bilan bir xil model — OPENAI_TEST_GENERATE_MODEL.
 #: Hajmi kichik: haftasiga ~30-50 ta ma'ruza, bittasi ~$0.03.
 LECTURE_PURPOSES = frozenset({"lecture_generate"})
+#: Brauzerdagi oxirgi (3-) qayta urinish: gpt-5.4 ketma-ket uzilgan bo'lsa,
+#: tezkor modelda (~30 s) yakunlanadi — o'qituvchi bo'sh qo'l qaytmasin.
+PRESENTATION_FAST_PURPOSES = frozenset({"presentation_generate_fast", "presentation_continue_fast"})
+#: gpt-5.4 bitta taqdimotga 119–157 s sarflaydi (harness). 280 s zaxirasi
+#: OpenAI sekinlashganda yetmasdi. Zanjir: OpenAI 540 s < brauzer 590 s <
+#: nginx 600 s (konteyner va host nginx ikkalasida ham).
+PRESENTATION_TIMEOUT_SEC = 540
+DEFAULT_TIMEOUT_SEC = 280
 QUALITY_PURPOSES = (
-    GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+    GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES | PRESENTATION_FAST_PURPOSES
     | CASE_GENERATE_PURPOSES | CASE_REVIEW_PURPOSES | LECTURE_PURPOSES
 )
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
@@ -98,6 +123,10 @@ def test_review_model() -> str:
 
 def exam_review_model() -> str:
     return _env_model("OPENAI_EXAM_REVIEW_MODEL", DEFAULT_EXAM_REVIEW_MODEL)
+
+
+def presentation_model() -> str:
+    return _env_model("OPENAI_PRESENTATION_MODEL", DEFAULT_PRESENTATION_MODEL)
 
 
 #: Test tarjimasi (2026-10-20): `gpt-4.1-nano` test tarjimasida kalitni
@@ -128,8 +157,18 @@ def model_for(purpose: str | None) -> str:
     if p in EXAM_REVIEW_PURPOSES:
         return exam_review_model()
     if p in PRESENTATION_PURPOSES:
-        return PRESENTATION_MODEL
+        return presentation_model()
+    if p in PRESENTATION_FAST_PURPOSES:
+        return test_generate_model()
     return "gpt-4.1-nano"
+
+
+def timeout_for(purpose: str | None) -> int:
+    """OpenAI so'rovi uchun vaqt chegarasi (soniya): taqdimot uzoqroq kutadi."""
+    p = purpose or ""
+    if p in PRESENTATION_PURPOSES or p in PRESENTATION_FAST_PURPOSES:
+        return PRESENTATION_TIMEOUT_SEC
+    return DEFAULT_TIMEOUT_SEC
 
 
 def _economy_model_name(model: str) -> str:
