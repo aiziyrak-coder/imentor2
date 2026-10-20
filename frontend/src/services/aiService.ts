@@ -352,65 +352,71 @@ function stripSourcesSection(text: string): string {
   return [...lines.slice(0, idx), ...kept].join('\n').trimEnd();
 }
 
-/** Ma'ruza tuzilmasi — domenga qarab: [sarlavha, bo'lim mazmuni]. Ilgari faqat
- * "7-9 ta asosiy bo'lim" so'ralardi: nano bir mexanizmni 3 bo'limda takrorlar,
- * eklampsiya ma'ruzasida magniy sulfat umuman tilga olinmasdi (2026-10-20 sinovi). */
-const LECTURE_PLAN: Record<SubjectDomain, Array<[string, string]>> = {
+/** Ma'ruza tuzilmasi — domenga qarab: sarlavha uch tilda + bo'lim mazmuni (inglizcha
+ * izoh). Ilgari faqat "7-9 ta asosiy bo'lim" so'ralardi: nano bir mexanizmni
+ * 3 bo'limda takrorlar, eklampsiya ma'ruzasida magniy sulfat umuman tilga
+ * olinmasdi (2026-10-20 sinovi). Sarlavha CHIQISH tilida beriladi: faqat
+ * o'zbekcha berilganda ruscha ma'ruzada "## Кириш", "## Хулоса" chiqdi. */
+type LecturePlanItem = { uz: string; ru: string; en: string; hint: string };
+const plan = (uz: string, ru: string, en: string, hint = ''): LecturePlanItem => ({ uz, ru, en, hint });
+const PLAN_INTRO_END = [
+  plan('Xulosa', 'Заключение', 'Conclusion', '5-7 key take-away points'),
+  plan('Nazorat savollari', 'Контрольные вопросы', 'Review questions', '5-7 questions'),
+];
+const LECTURE_PLAN: Record<SubjectDomain, LecturePlanItem[]> = {
   clinical: [
-    ['Kirish', 'dolzarbligi, epidemiologiya raqamlari, ma\'ruza rejasi'],
-    ['Ta\'rif va tasnif', 'amaldagi xalqaro tasnif nomi bilan'],
-    ['Etiologiya va xavf omillari', ''],
-    ['Patogenez', 'bosqichma-bosqich mexanizm'],
-    ['Klinik manzara', 'shakllar, bosqichlar, og\'irlik darajalari'],
-    ['Diagnostika', 'mezonlar, chegara qiymatlar, laborator va instrumental usullar'],
-    ['Differensial diagnostika', 'har bir o\'xshash holat uchun farqlovchi belgilar'],
-    ['Davolash', 'tamoyillar, birinchi tanlov dorilari dozalari bilan, shoshilinch yordam, jarrohlik ko\'rsatmalari'],
-    ['Asoratlar, prognoz va profilaktika', ''],
-    ['Xulosa', 'asosiy 5-7 tezis'],
-    ['Nazorat savollari', '5-7 ta'],
+    plan('Kirish', 'Введение', 'Introduction', 'relevance, epidemiology figures, lecture outline'),
+    plan('Ta\'rif va tasnif', 'Определение и классификация', 'Definition and classification', 'current international classification, named'),
+    plan('Etiologiya va xavf omillari', 'Этиология и факторы риска', 'Etiology and risk factors'),
+    plan('Patogenez', 'Патогенез', 'Pathogenesis', 'step-by-step mechanism'),
+    plan('Klinik manzara', 'Клиническая картина', 'Clinical picture', 'forms, stages, severity grades'),
+    plan('Diagnostika', 'Диагностика', 'Diagnosis', 'criteria, cut-off values, laboratory and instrumental methods'),
+    plan('Differensial diagnostika', 'Дифференциальная диагностика', 'Differential diagnosis', 'distinguishing features for each similar condition'),
+    plan('Davolash', 'Лечение', 'Treatment', 'principles, first-line drugs with doses, emergency care, surgical indications'),
+    plan('Asoratlar, prognoz va profilaktika', 'Осложнения, прогноз и профилактика', 'Complications, prognosis and prevention'),
+    ...PLAN_INTRO_END,
   ],
   biomedical: [
-    ['Kirish', 'mavzuning fan va tibbiyotdagi o\'rni, ma\'ruza rejasi'],
-    ['Asosiy tushunchalar va tasnif', ''],
-    ['Tuzilma va asoslar', 'morfologik, fizik yoki kimyoviy asoslar'],
-    ['Mexanizmlar va jarayonlar', 'bosqichma-bosqich, fermentlar/retseptorlar/mediatorlar nomi bilan'],
-    ['Boshqarilishi va me\'yoriy ko\'rsatkichlar', 'regulyatsiya; me\'yorlar raqam va birlik bilan'],
-    ['Buzilishlar va ularning tibbiy ahamiyati', ''],
-    ['Tekshirish usullari', 'laboratoriya, tasvirlash yoki tajriba usullari va ularning talqini'],
-    ['Xulosa', 'asosiy 5-7 tezis'],
-    ['Nazorat savollari', '5-7 ta'],
+    plan('Kirish', 'Введение', 'Introduction', 'place of the topic in the subject and in medicine, lecture outline'),
+    plan('Asosiy tushunchalar va tasnif', 'Основные понятия и классификация', 'Key concepts and classification'),
+    plan('Tuzilma va asoslar', 'Строение и основы', 'Structure and foundations', 'morphological, physical or chemical basis'),
+    plan('Mexanizmlar va jarayonlar', 'Механизмы и процессы', 'Mechanisms and processes', 'step by step, naming enzymes/receptors/mediators'),
+    plan('Boshqarilishi va me\'yoriy ko\'rsatkichlar', 'Регуляция и нормальные показатели', 'Regulation and normal values', 'reference values with units'),
+    plan('Buzilishlar va ularning tibbiy ahamiyati', 'Нарушения и их медицинское значение', 'Disorders and their medical significance'),
+    plan('Tekshirish usullari', 'Методы исследования', 'Investigation methods', 'laboratory, imaging or experimental methods and their interpretation'),
+    ...PLAN_INTRO_END,
   ],
   academic: [
-    ['Kirish', 'mavzuning fandagi o\'rni, ma\'ruza rejasi'],
-    ['Asosiy tushunchalar va ta\'riflar', ''],
-    ['Nazariy asoslar', 'qonunlar, formulalar, ularning keltirib chiqarilishi yoki asoslanishi'],
-    ['Turlari va tasnifi', ''],
-    ['Ishlangan misollar', 'kamida 2 ta, bosqichma-bosqich yechim yoki tahlil bilan'],
-    ['Amaliy qo\'llanilishi', 'shu fan sohasida'],
-    ['Xulosa', 'asosiy 5-7 tezis'],
-    ['Nazorat savollari', '5-7 ta'],
+    plan('Kirish', 'Введение', 'Introduction', 'place of the topic in the subject, lecture outline'),
+    plan('Asosiy tushunchalar va ta\'riflar', 'Основные понятия и определения', 'Key concepts and definitions'),
+    plan('Nazariy asoslar', 'Теоретические основы', 'Theoretical foundations', 'laws, formulas, their derivation or justification'),
+    plan('Turlari va tasnifi', 'Виды и классификация', 'Types and classification'),
+    plan('Ishlangan misollar', 'Разобранные примеры', 'Worked examples', 'at least 2, with step-by-step solution or analysis'),
+    plan('Amaliy qo\'llanilishi', 'Практическое применение', 'Practical applications', 'within this field'),
+    ...PLAN_INTRO_END,
   ],
 };
 
-function lecturePlanText(domain: SubjectDomain): string {
+function lecturePlanText(domain: SubjectDomain, language: AppLanguage): string {
   return (LECTURE_PLAN[domain] ?? LECTURE_PLAN.clinical)
-    .map(([title, hint]) => `## ${title}${hint ? `  [mazmuni: ${hint}]` : ''}`)
+    .map((item) => `## ${item[language] ?? item.uz}${item.hint ? `  [content: ${item.hint}]` : ''}`)
     .join('\n');
 }
 
 /** Model ba'zan reja izohini sarlavhaga ko'chirib yozadi
- * ("## Kirish (mavzuning o'rni, ma'ruza rejasi)") — izoh olib tashlanadi. */
-function stripPlanHintsFromHeadings(text: string, domain: SubjectDomain): string {
-  const plan = LECTURE_PLAN[domain] ?? LECTURE_PLAN.clinical;
+ * ("## Kirish [content: ...]" yoki qavs ichida) — izoh olib tashlanadi. */
+function stripPlanHintsFromHeadings(text: string, domain: SubjectDomain, language: AppLanguage): string {
+  const items = LECTURE_PLAN[domain] ?? LECTURE_PLAN.clinical;
   return text
     .split('\n')
     .map((line) => {
       const m = /^##\s+(.+)$/.exec(line);
       if (!m) return line;
-      for (const [title, hint] of plan) {
-        if (!hint || !m[1].startsWith(title)) continue;
+      for (const item of items) {
+        const title = item[language] ?? item.uz;
+        if (!m[1].startsWith(title)) continue;
         const tail = m[1].slice(title.length).trim();
-        if (tail.replace(/^[(\[]|[)\]]$/g, '').replace(/^mazmuni:\s*/, '').trim() === hint) return `## ${title}`;
+        if (/^[([]/.test(tail) && /[)\]]$/.test(tail)) return `## ${title}`;
       }
       return line;
     })
@@ -2868,7 +2874,7 @@ export const aiService = {
               'nurli tashxis). Mexanizm, tuzilma, me\'yor va laboratoriya ko\'rsatkichi o\'rinli; klinik ahamiyati ' +
               'eslatib o\'tiladi, lekin INDIVIDUAL BEMOR kartasi va tashxis-davolash vignette YOZILMAYDI. '
             : '';
-      const lecturePlan = lecturePlanText(domain);
+      const lecturePlan = lecturePlanText(domain, language);
       const requestLecture = () => openaiTextStream({
         model: OPENAI_CHAT,
         system: `${sysRole(domain)} Siz oliy ta'lim (universitet, 3-6 kurs yoki rezidentura) uchun ma'ruza ` +
@@ -2876,7 +2882,8 @@ export const aiService = {
           'bilan vaqt yo\'qotmang. ' +
           domainGuard +
           'FORMAT: faqat Markdown. # sarlavha (mavzu nomi), keyin quyidagi ## bo\'limlar AYNAN shu tartibda. ' +
-          'Kvadrat qavsdagi [mazmuni: ...] — faqat siz uchun izoh, uni sarlavhaga YOZMANG; birorta bo\'limni ' +
+          'Kvadrat qavsdagi [content: ...] — faqat siz uchun izoh, uni sarlavhaga YOZMANG; sarlavhalarni ' +
+          'AYNAN shu ko\'rinishda (shu tilda) yozing, birorta bo\'limni ' +
           `tashlab ketmang:\n${lecturePlan}\n` +
           'HAJM: 2500-4000 so\'z (60-80 daqiqalik ma\'ruza). Uzunlik suv bilan emas, FAKTLAR bilan ' +
           'to\'ldiriladi.\n' +
@@ -2900,7 +2907,7 @@ export const aiService = {
           '6. Atamalar o\'zbek tibbiy/ilmiy adabiyotida qabul qilingan shaklda; inglizcha so\'zni so\'zma-so\'z ' +
           'tarjima qilmang (masalan foam cells = "ko\'pikli hujayralar"). Lotin/xalqaro atama kerak bo\'lsa ' +
           'qavs ichida bir marta beriladi.\n' +
-          '7. Bu ko\'rsatmalarning so\'zlarini ("NIMA", "NEGA", "imtihon", "asosiy faktlar", "mazmuni") ' +
+          '7. Bu ko\'rsatmalarning so\'zlarini ("NIMA", "NEGA", "imtihon", "asosiy faktlar", "content") ' +
           'matnga yorliq qilib yozmang.\n' +
           (bookContext
             ? 'Berilgan darslik parchalari asosiy manba: ulardagi tegishli tafsilotlardan to\'liq foydalaning. ' +
@@ -2943,7 +2950,7 @@ export const aiService = {
         topic: topic,
         content: normalizeSourceHeading(
           stripPlaceholderManba(
-            stripPlanHintsFromHeadings(bookContext ? content || '' : stripSourcesSection(content || ''), domain),
+            stripPlanHintsFromHeadings(bookContext ? content || '' : stripSourcesSection(content || ''), domain, language),
           ),
           language,
         ),

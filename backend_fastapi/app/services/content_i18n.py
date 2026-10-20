@@ -131,9 +131,21 @@ def primary_language(kind: str, payload: dict | None) -> str:
     return raw if raw in SUPPORTED_LANGS else "uz"
 
 
+#: Shundan uzun matnda til aniqlanmasa ("?") — tarjima yaroqsiz. Ilgari "?"
+#: doim o'tardi va lotin harflarida yozilgan "ruscha" bo'lak ("Lechenie",
+#: "Obshchie printsipy") ma'ruzaga tushib qolardi (2026-10-20 sinovi).
+_UNDETECTED_MAX_LETTERS = 200
+
+
 def _language_ok(text: str, target: str) -> bool:
-    got = ci.detect_language(ci._without_references(text))
-    return got in ("?", target)
+    clean = ci._without_references(text)
+    got = ci.detect_language(clean)
+    if got == target:
+        return True
+    if got != "?":
+        return False
+    letters = len(ci._CYR.findall(clean)) + len(ci._LAT.findall(clean))
+    return letters < _UNDETECTED_MAX_LETTERS
 
 
 def has_translation(kind: str, payload: dict | None, lang: str) -> bool:
@@ -162,6 +174,8 @@ def _translate_piece(api_key: str, model: str, kind: str, text: str, source: str
         if out and out.strip() and not ci._is_copy(text, out) and _language_ok(out, target):
             return out
         note = ci._rejected_note(target, ci.detect_language(out or ""))
+        if target == "ru":
+            note += " Russian must be written in Cyrillic letters, never transliterated into Latin."
     return None
 
 
@@ -171,13 +185,22 @@ def _translate_many(api_key: str, model: str, kind: str, texts: list[str], sourc
     return None if any(r is None for r in results) else results  # type: ignore[return-value]
 
 
+def _keep_edges(source: str, translated: str) -> str:
+    lead = source[: len(source) - len(source.lstrip())]
+    trail = source[len(source.rstrip()):]
+    return lead + translated.strip() + trail
+
+
 def _translate_lecture(api_key: str, model: str, payload: dict, source: str, target: str) -> dict | None:
     content = str(payload.get("content") or "")
     pieces = ci._split_long(content)
     translated = _translate_many(api_key, model, KIND_LECTURE, pieces, source, target)
     if translated is None:
         return None
-    block = {"content": "".join(translated)}
+    # Bo'lak chegarasidagi bo'sh qatorlar asl matndan qaytariladi: model ularni
+    # kesib tashlaydi va keyingi bo'lak sarlavhasi oldingi qatorga yopishardi
+    # ("печени.### Нефрология" — Markdown sarlavha bo'lmay qoladi).
+    block = {"content": "".join(_keep_edges(src, out) for src, out in zip(pieces, translated))}
     topic = str(payload.get("topic") or "").strip()
     if topic:
         got = ci._translate_strings(api_key, model, [topic], target, kind=KIND_LECTURE, source=source)
