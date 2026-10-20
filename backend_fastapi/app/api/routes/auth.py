@@ -16,6 +16,7 @@ from app.core.staff_login import normalize_listener_login
 from app.core.throttling import throttle_login_account
 from app.models.online_edu import MalakaListener
 from app.models.face_template import FaceTemplate
+from app.models.staff_merge_log import StaffMergeLog
 from app.models.person_identity import STAFF
 from app.models.staff_location import StaffProfile
 from app.models.student_contingent import StudentContingent
@@ -84,6 +85,7 @@ def _login_response(
         student_id=student_id,
         group_name=group_name,
         must_change_password=must_change,
+        pinfl="" if student_id else staff_pinfl.pinfl_for(db, user.username),
     )
 
 
@@ -102,6 +104,19 @@ def _disabled_account_message(db: Session, user: User) -> str:
     ro'yxatdan Xodim ID yozib "parol xato" deb qolishardi. Parol to'g'ri kiritilgandan
     keyingina (shu funksiya shundan so'ng chaqiriladi) ishlaydigan loginning yashirilgan
     ko'rinishi aytiladi."""
+    # Admin birlashtirgan hisob: qayerga ko'chgani tarixda aniq yozilgan (ismi qanday yozilganidan qat'i nazar).
+    merged_into = db.execute(
+        select(User.username)
+        .join(StaffMergeLog, StaffMergeLog.primary_key == User.username)
+        .where(StaffMergeLog.merged_key == user.username, User.is_active.is_(True))
+        .order_by(StaffMergeLog.merged_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if merged_into:
+        return (
+            "Bu hisob boshqa hisob bilan birlashtirilgan. Endi shu login bilan kiring: "
+            f"{_mask_login(merged_into)}. JSHSHIR bilan ham kirish mumkin."
+        )
     first = (user.first_name or "").strip().lower()
     last = (user.last_name or "").strip().lower()
     if first and last:

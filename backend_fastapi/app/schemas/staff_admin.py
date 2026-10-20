@@ -20,6 +20,7 @@ class MeOut(BaseModel):
     last_name: str = ""
     photo_url: str = ""
     student_id: str | None = None
+    pinfl: str = ""
 
 
 class ChangePasswordRequest(BaseModel):
@@ -86,3 +87,6 @@ class AdminStaffListEntry(BaseModel):
     # Xodim hali bir marta ham kirmagan — paroli hamon import qo'ygan
     # boshlang'ich parol. Admin login ro'yxatini shu bo'yicha chop etadi.
     password_is_initial: bool = False
+    # cam.fermi.uz dan bog'langan JSHSHIR va bog'lanish manbasi ("face" | "name" | "admin").
+    pinfl: str = ""
+    pinfl_source: str = ""

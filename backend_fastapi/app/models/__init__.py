@@ -19,6 +19,7 @@ from app.models import (  # noqa: F401
     platform_stat,
     prepared_content,
     staff_location,
+    staff_merge_log,
     staff_pinfl,
     startup,
     student_contingent,

@@ -37,6 +37,7 @@ from app.api.routes import (
     prepared_content,
     rector,
     staff_admin,
+    staff_merge,
     staff_self,
     staff_location,
     student_contingent,
@@ -153,6 +154,7 @@ app.include_router(clinic_admin.router, prefix="/api/v1", tags=["clinic-admin"])
 app.include_router(subject_book.router, prefix="/api/v1", tags=["subject-book"])
 app.include_router(device_pairing.router, prefix="/api/v1", tags=["device-pairing"])
 app.include_router(staff_admin.router, prefix="/api/v1", tags=["staff-admin"])
+app.include_router(staff_merge.router, prefix="/api/v1", tags=["staff-merge"])
 app.include_router(staff_self.router, prefix="/api/v1", tags=["staff-self"])
 app.include_router(client_errors.router, prefix="/api/v1", tags=["client-errors"])
 app.include_router(content_catalog.router, prefix="/api/v1", tags=["content-catalog"])
