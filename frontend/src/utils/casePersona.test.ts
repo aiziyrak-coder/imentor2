@@ -20,6 +20,13 @@ describe('pickCasePersona', () => {
     expect(p.age).toBeGreaterThanOrEqual(19);
   });
 
+  it('bepushtlik mavzusida reproduktiv yosh', () => {
+    for (const focus of ['tashxis', 'davolash', 'profilaktika'] as const) {
+      const p = pickCasePersona(focus, 'Ayollar jinsiy a’zolarining rivojlanish nuqsonlari. Bepusht nikoh.', '', seq(0.99));
+      expect(p.age).toBeLessThanOrEqual(41);
+    }
+  });
+
   it('prostata mavzusida erkak', () => {
     expect(pickCasePersona('profilaktika', 'Prostata bezi giperplaziyasi', 'Urologiya', seq(0.1)).sex).toBe('male');
   });

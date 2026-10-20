@@ -78,8 +78,11 @@ export function pickCasePersona(
   }
   const sex = female ? 'female' : male ? 'male' : rnd() < 0.5 ? 'female' : 'male';
   let [lo, hi] = ADULT_AGES[focus];
-  if (female && /homilador|tug['‘’ʻʼ]?ruq|preeklamps|eklamps|беремен|pregnan/i.test(text)) {
+  // Sinov (2026-10-20): bepushtlik va rivojlanish nuqsoni keysida 60–77 yoshli bemor chiqdi.
+  if (/homilador|tug['‘’ʻʼ]?ruq|preeklamps|eklamps|bepusht|infertil|rivojlanish\s+nuqson|hayz|беремен|бесплод|pregnan/i.test(text)) {
     [lo, hi] = [19, 41];
+  } else if (female && /menopauza|klimakter|климакс|menopaus/i.test(text)) {
+    [lo, hi] = [45, 62];
   }
   return { name: pick(sex === 'female' ? FEMALE_NAMES : MALE_NAMES, rnd), age: between(lo, hi, rnd), sex };
 }

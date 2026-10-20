@@ -146,7 +146,7 @@ const DISEASE_TOPIC_RE =
  * va testlar chiqardi (2026-09-17 auditida ~300 ta shunday material).
  */
 const THEORY_TOPIC_RE =
-  /predmeti|vazifalari|fanining|tarixi|tashkil\s+etish|tashkiliy|tashkiloti|boshqaruv|boshqarish|menejment|rahbarlik|qonunchilik|huquqiy|meyoriy|standartlar|\betika\b|deontolog|kasbiy\s+xavfsizlik|ish\s+joyi|metodologiya|tadqiqot\s+usul|statistika|gigi[ey]?enik\s+(ahamiyat|baho)|sanitariya|mikroiqlim|atrof[-\s]+muhit|ekologiya|falsafa|predmet\s+i\s+zadach|istoriya|organizats|upravlen/i;
+  /predmeti|vazifalari|fanining|tarixi|tashkil\s+etish|tashkiliy|tashkiloti|boshqaruv|boshqarish|menejment|rahbarlik|qonunchilik|huquqiy|meyoriy|standartlar|\betika\b|deontolog|kasbiy\s+xavfsizlik|ish\s+joyi|metodologiya|tadqiqot\s+usul|statistika|gigi[ey]?enik\s+(ahamiyat|baho)|sanitariya|mikroiqlim|yoritil|insolyats|shamollat|atrof[-\s]+muhit|ekologiya|falsafa|predmet\s+i\s+zadach|istoriya|organizats|upravlen/i;
 
 export function resolveSubjectDomain(input: {
   departmentName?: string;

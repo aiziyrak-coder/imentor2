@@ -55,6 +55,7 @@ import {
   GENERATION_UNIQUENESS_RULE,
   summarizeCaseForAvoid,
   summarizeTestForAvoid,
+  topicSubThemes,
   type CaseStudyFocus,
 } from '../utils/generationVariety';
 import { listPreparedForTopicSynced, loadPreparedByIdSynced } from '../utils/preparedContentStore';
@@ -732,16 +733,35 @@ const CASE_FOCUS_HINTS: Record<CaseStudyFocus, string> = {
  * shuning uchun ginekologiya keysida erkak bemor chiqardi. Bu yerda faqat
  * fokusning klinik vazifasi qoladi.
  */
+// Sinov (2026-10-20): profilaktika keysi ham, davolash keysi ham aslida tashxis
+// masalasi edi va uchala keys bir-birini takrorlardi. Topshiriq fokusga bog'lanadi.
 const CASE_PERSONA_HINTS: Record<CaseStudyFocus, string> = {
   profilaktika:
-    'Bemor mavzudagi kasallik bo\'yicha xavf guruhida yoki erta bosqichda; qaror — skrining, profilaktika yoki ' +
-    'qayta kasallanishning oldini olish.',
+    'Bemor mavzudagi kasallik bo\'yicha xavf guruhida, erta bosqichda yoki tuzalgan; vaziyat ambulator (poliklinika, ' +
+    'skrining, dispanser). "task" — skrining/profilaktika/qayta kasallanishning oldini olish QARORI (kimga, nima, qachon), ' +
+    'tashxis qo\'yish EMAS.',
   davolash:
-    'Tashxis aniqlangan yoki aniqlanmoqda; qaror — ushbu bemor uchun davolash usuli, dori va doza.',
+    'Tashxis vaziyatda AYTILGAN yoki aniq (tasdiqlovchi tekshiruv natijasi bilan); vaziyat statsionar. "task" — ushbu bemor ' +
+    'uchun davolash usuli, dori, doza va nazorat; tashxis savoli EMAS.',
   tashxis:
-    'Belgilari ikki yaqin tashxisni ham qo\'llab-quvvatlasin; bitta topilma hal qiluvchi bo\'lsin. ' +
-    'Kam lab + pastki qorin = appenditsit kabi oson ssenariy YO\'Q.',
+    'Vaziyat qabul bo\'limi yoki birinchi murojaat. Belgilari ikki yaqin tashxisni ham qo\'llab-quvvatlasin; bitta topilma ' +
+    'hal qiluvchi bo\'lsin. Kam lab + pastki qorin = appenditsit kabi oson ssenariy YO\'Q.',
 };
+
+/**
+ * Uch keys parallel, bir-biridan xabarsiz yoziladi — mavzu bir necha bo'limdan
+ * iborat bo'lsa, har fokusga boshqa bo'lim beriladi (2026-10-20: 7 klinik
+ * mavzuning 5 tasida keyslar deyarli bir xil chiqdi).
+ */
+function caseThemeHint(topic: string, focus: CaseStudyFocus): string {
+  const themes = topicSubThemes(topic).filter((t) => t.split(/\s+/).length <= 12);
+  if (themes.length < 2) {
+    return 'Boshqa ikki keys shu mavzuning BOSHQA kasalligi/shakli haqida — bu keysda mavzudagi kamroq uchraydigan, ' +
+      'lekin dasturga kiradigan holatni tanlang, agar mavzu bitta kasallik bo\'lsa — uning boshqa bosqichi yoki shaklini.';
+  }
+  const i = CASE_STUDY_FOCUS_ORDER.indexOf(focus);
+  return `Bu keys asosan mavzuning "${themes[i % themes.length]}" qismiga bag'ishlansin (boshqa keyslar boshqa qismlarga).`;
+}
 
 /** Keys yechimi bo'limlarga ajratilgan holda so'raladi — bitta uzun "answer"
  *  so'ralganda model hajm ko'rsatmasini bajarmay qisqarardi. Alohida maydonlar
@@ -959,8 +979,11 @@ const CASE_CLINICAL_FIELDS =
   '   "patient" (55–75 so\'z) — BEMOR qatoridagi ism, yosh va jins; tana tuzilishi, kasb, qayerga/qachon kelgan.\n' +
   '   "complaints" (90–120 so\'z) — boshlang\'ich (soat/kun), migratsiya/irradiatsiya, kuchaytiruvchi/yengillatiruvchi, ' +
   'hamroh belgilar (ishtaha, ko\'ngil aynishi, isitma, siydik/najas). Takrorlamang.\n' +
-  '   "history" (110–150 so\'z) — kasalliklar, JARROHLIK, DORILAR (nomi+doza+muddat), allergiya, ' +
-  'oxirgi 48 soatdagi muhim voqea. Faqat qarorga ta\'sir qiladigan fakt.\n' +
+  // Sinov (2026-10-20): "oxirgi 48 soat" jumlasi 21 savolning ~19 tasida, penitsillin
+  // allergiyasi ~9 tasida, amlodipin ~8 tasida — mavzuga aloqasiz to'ldiruvchi bo'lib qoldi.
+  '   "history" (90–140 so\'z) — shu kasallikning rivojlanishi, o\'tkazilgan kasallik va jarrohlik; dorilar (nomi+doza+muddat) ' +
+  'va allergiya FAQAT haqiqatan bo\'lsa va qarorga ta\'sir qilsa. Har bemorga allergiya, antikoagulyant yoki ' +
+  'antigipertenziv dori QO\'SHILMAYDI.\n' +
   '   "lifestyle" (50–75 so\'z) — FAQAT qarorni o\'zgartiradigan odat/kasb/epidemiologiya. ' +
   '"Chekmaydi, haftasiga 3 marta yuradi" TAQIQLANADI agar bu taktika o\'zgartirmasa.\n' +
   // 2026-10-20: "T, AB, puls, RR, SpO2; qorin/o'pka/yurak" har keysga
@@ -979,7 +1002,7 @@ const CASE_CLINICAL_FIELDS =
   '   "investigations" (110–150 so\'z) — 2–3 tekshiruv: nima uchun USHBU bemorda, kutiladigan aniq natija, ' +
   'nima qilinMASLIGI kerak (masalan oddiy appenditsitda qon ekilmasi).\n' +
   '   "management" (160–210 so\'z) — 1-qator taktika (dori/doza/yo\'l YOKI operatsiya turi); ' +
-  'komorbidlik tufayli nima tanlanmadi; asorat xavfi.\n' +
+  'bemorda qarorni o\'zgartiradigan holat BO\'LSA — shu tufayli nima tanlanmadi; dori o\'zaro ta\'sirini tekshiring; asorat xavfi.\n' +
   '   "recommendations" (80–110 so\'z) — qizil bayroqlar (qachon qayta murojaat) + aniq nazorat muddati. Umumiy nasihat YO\'Q.\n' +
   '3. Aniq yozing: nozologiya, mezon, dori, doza, qiymat. "Ehtimol" o\'rniga dalil.\n' +
   '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Bemorning ismi, yoshi va jinsi user xabaridagi BEMOR qatorida — o\'zgartirmang. ' +
@@ -1147,7 +1170,8 @@ async function generateSingleCaseQuestion(
       ? CASE_PERSONA_HINTS_ACADEMIC[focus]
       : domain === 'biomedical'
         ? CASE_PERSONA_HINTS_BIOMEDICAL[focus]
-        : `${CASE_PERSONA_HINTS[focus]} ${casePersonaLine(pickCasePersona(focus, topic, scope.subjectName))}`;
+        : `${CASE_PERSONA_HINTS[focus]} ${caseThemeHint(topic, focus)} ` +
+          casePersonaLine(pickCasePersona(focus, topic, scope.subjectName));
   const fields =
     domain === 'academic' ? CASE_ACADEMIC_FIELDS : domain === 'biomedical' ? CASE_BIOMEDICAL_FIELDS : CASE_CLINICAL_FIELDS;
   const specialtyRule = domain === 'clinical' ? caseSpecialtyRule(topic, scope) : '';
