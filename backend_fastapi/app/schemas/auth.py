@@ -47,6 +47,8 @@ class LoginResponse(BaseModel):
     # Hisob boshqa odam bergan parol bilan yaratilgan (masalan pasport
     # seriyasi) — foydalanuvchi avval o'z parolini qo'yishi kerak.
     must_change_password: bool = False
+    # Xodimning JSHSHIRi (bog'langan bo'lsa); yuz bilan kirganda ham to'ldiriladi.
+    pinfl: str = ""
 
 
 class TokenRefreshRequest(BaseModel):

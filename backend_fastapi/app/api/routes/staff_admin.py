@@ -26,7 +26,7 @@ from app.services import auth_service
 from app.services import password_policy_service as pwd_policy
 from app.services import file_storage as storage
 from app.services import staff_department as staff_dept
-from app.services import staff_profile
+from app.services import staff_merge, staff_pinfl, staff_profile
 from app.services.pagination import paginate
 
 router = APIRouter()
@@ -45,6 +45,7 @@ def me(db: Session = Depends(get_db), auth: AuthContext = Depends(require_roles(
         last_name=auth.user.last_name or "",
         photo_url=staff_profile.staff_photo_url_for_user(auth.user.username, db),
         student_id=auth.student_id,
+        pinfl=staff_pinfl.pinfl_for(db, auth.user.username) if auth.role != "student" else "",
     )
 
 
@@ -283,8 +284,22 @@ def admin_staff_list(
         ).scalars().all()
     }
 
+    # Birlashtirilib nofaol qilingan takror hisoblar ro'yxatda ko'rinmaydi.
+    merged = staff_merge.merged_usernames(db)
+    links = {
+        p.owner_key: p
+        for p in db.execute(
+            select(staff_pinfl.StaffPinfl).where(
+                staff_pinfl.StaffPinfl.is_active.is_(True),
+                staff_pinfl.StaffPinfl.owner_key.in_([u.username for u in users] or [""]),
+            )
+        ).scalars().all()
+    }
+
     rows = []
     for u in users:
+        if u.username in merged and not u.is_active:
+            continue
         role = auth_service.resolve_user_role_from_db(db, u) or ""
         if role not in allowed_roles:
             continue
@@ -314,6 +329,8 @@ def admin_staff_list(
                     and bool(u.password)
                     and not u.password.startswith("!")
                 ),
+                pinfl=links[u.username].pinfl if u.username in links else "",
+                pinfl_source=links[u.username].link_source if u.username in links else "",
             ).model_dump()
         )
     return paginate(rows, request, default_page_size=200, max_page_size=1000)

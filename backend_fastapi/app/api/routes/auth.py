@@ -35,6 +35,7 @@ from app.services import staff_department as staff_dept
 from app.services import online_test_client as otc
 from app.services import person_identity as pid
 from app.services import cam_students
+from app.services import staff_merge
 from app.services import staff_pinfl
 from app.services import staff_profile as sp
 from app.services.analytics_service import record_activity_event
@@ -84,6 +85,7 @@ def _login_response(
         student_id=student_id,
         group_name=group_name,
         must_change_password=must_change,
+        pinfl="" if student_id else staff_pinfl.pinfl_for(db, user.username),
     )
 
 
@@ -102,6 +104,13 @@ def _disabled_account_message(db: Session, user: User) -> str:
     ro'yxatdan Xodim ID yozib "parol xato" deb qolishardi. Parol to'g'ri kiritilgandan
     keyingina (shu funksiya shundan so'ng chaqiriladi) ishlaydigan loginning yashirilgan
     ko'rinishi aytiladi."""
+    # Admin birlashtirgan hisob: qayerga ko'chgani tarixda aniq yozilgan (ismi qanday yozilganidan qat'i nazar).
+    merged_into = staff_merge.merged_into(db, user.username)
+    if merged_into:
+        return (
+            "Bu hisob boshqa hisob bilan birlashtirilgan. Endi shu login bilan kiring: "
+            f"{_mask_login(merged_into)}. JSHSHIR bilan ham kirish mumkin."
+        )
     first = (user.first_name or "").strip().lower()
     last = (user.last_name or "").strip().lower()
     if first and last:

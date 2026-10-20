@@ -24,6 +24,7 @@ from app.schemas.auth import LoginResponse
 from app.services import auth_service
 from app.services import face_login as fl
 from app.services import password_policy_service as pwd_policy
+from app.services import staff_pinfl
 from app.services.analytics_service import record_activity_event
 
 logger = logging.getLogger("imentor.face_login")
@@ -102,6 +103,13 @@ def face_login(
         )
     auth_service.touch_last_login(db, user)
     record_activity_event(db, owner_key=user.username, role=role, event_type="login", meta={"method": "face"})
+    # Yuz tanilgan odamning JSHSHIRi hisobga darhol yoziladi (soatlik sinxronni kutmasdan).
+    if tpl is not None:
+        try:
+            with db.begin_nested():  # savepoint: xato bo'lsa faqat JSHSHIR yozuvi bekor bo'ladi
+                staff_pinfl.link_from_face(db, user.username, tpl.source_person_id)
+        except Exception:  # noqa: BLE001 — JSHSHIRni yozib bo'lmasa ham odam kirishi kerak
+            logger.exception("yuz bilan kirishda JSHSHIRni yozib bo'lmadi: %s", user.username)
     db.commit()
     return _login_response(db, user, role)
 

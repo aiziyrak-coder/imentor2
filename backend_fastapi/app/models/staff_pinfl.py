@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -18,6 +18,17 @@ from app.core.db import Base
 
 class StaffPinfl(Base):
     __tablename__ = "core_staffpinfl"
+    # Bitta hisobga ko'pi bilan bitta JSHSHIR: ikki odam bitta hisobni bo'lishmasin,
+    # bitta odamning ikki JSHSHIRi bitta hisobga yig'ilmasin. Bo'sh `owner_key`
+    # (hali bog'lanmagan) va nofaol (cam.fermi.uz dan tushib qolgan) yozuvlar bundan mustasno.
+    __table_args__ = (
+        Index(
+            "uq_core_staffpinfl_owner_key",
+            "owner_key",
+            unique=True,
+            postgresql_where=text("owner_key <> '' AND is_active"),
+        ),
+    )
 
     pinfl: Mapped[str] = mapped_column(String(14), primary_key=True)
     full_name: Mapped[str] = mapped_column(String(255), default="")

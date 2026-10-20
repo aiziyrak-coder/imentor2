@@ -45,6 +45,52 @@ def owner_for(db: Session, pinfl: str) -> str | None:
     return rec.owner_key
 
 
+def pinfl_for(db: Session, owner_key: str) -> str:
+    """Hisobga bog'langan faol JSHSHIR yoki ''."""
+    if not owner_key:
+        return ""
+    return (
+        db.execute(
+            select(StaffPinfl.pinfl).where(StaffPinfl.owner_key == owner_key, StaffPinfl.is_active.is_(True))
+        ).scalar_one_or_none()
+        or ""
+    )
+
+
+def link_from_face(db: Session, owner_key: str, source_person_id: str) -> str:
+    """Yuz bilan kirgan o'qituvchining JSHSHIRini hisobga yozib qo'yish.
+
+    Yuz shabloni cam.fermi.uz dagi aynan shu odamga (`source_person_id`) tegishli, uning JSHSHIRi
+    esa `core_personidentity` da. Soatlik sinxronlashni kutmasdan bog'lanish darhol qo'yiladi.
+    Mavjud bog'lanishga TEGILMAYDI: JSHSHIR boshqa hisobda yoki hisobning boshqa JSHSHIRi bo'lsa,
+    jim qaytadi (ziddiyatni admin hal qiladi). Qaytaradi: hisobning JSHSHIRi yoki ''.
+    """
+    from app.models.person_identity import PersonIdentity
+
+    current = pinfl_for(db, owner_key)
+    if current or not owner_key or not source_person_id:
+        return current
+    person = db.execute(
+        select(PersonIdentity).where(PersonIdentity.source_id == source_person_id, PersonIdentity.is_active.is_(True))
+    ).scalar_one_or_none()
+    if person is None or not is_pinfl(person.pinfl):
+        return ""
+    rec = db.get(StaffPinfl, person.pinfl)
+    if rec is None:
+        db.add(
+            StaffPinfl(
+                pinfl=person.pinfl, full_name=(person.full_name or "")[:255], owner_key=owner_key,
+                link_source="face", is_active=True,
+            )
+        )
+    elif not rec.owner_key:
+        rec.owner_key, rec.link_source, rec.is_active = owner_key, "face", True
+    else:
+        return ""
+    db.flush()
+    return person.pinfl
+
+
 @dataclass
 class PinflSyncResult:
     received: int = 0
@@ -143,6 +189,15 @@ def sync_pinfl(db: Session, rows: list[dict], *, dry_run: bool = False) -> Pinfl
     plan = plan_links(rows, face_owner_by_person, users, info, admin_links,
                       {pinfl: p.link_source for pinfl, p in kept.items()})
     names = {r["pinfl"]: r["full_name"][:255] for r in rows}
+    # Hisob bo'yicha unikal cheklov bor (`uq_core_staffpinfl_owner_key`): hisob bir JSHSHIRdan
+    # ikkinchisiga o'tadigan bo'lsa, avval eskisi bo'shatiladi — aks holda saqlash paytida
+    # vaqtincha ikkala yozuv bir hisobda turib, cheklov buziladi.
+    old_owner = {pinfl: rec.owner_key for pinfl, rec in existing.items()}
+    for pinfl, (owner, _source) in plan.items():
+        rec = existing.get(pinfl)
+        if rec is not None and rec.owner_key and rec.owner_key != owner:
+            rec.owner_key = ""
+    db.flush()
     for pinfl, (owner, source) in plan.items():
         rec = existing.get(pinfl)
         if rec is None:
@@ -150,8 +205,8 @@ def sync_pinfl(db: Session, rows: list[dict], *, dry_run: bool = False) -> Pinfl
             db.add(rec)
             existing[pinfl] = rec
             result.created += 1
-        if rec.owner_key != owner:
-            result.changed_links.append((names[pinfl], rec.owner_key, owner))
+        if old_owner.get(pinfl, "") != owner:
+            result.changed_links.append((names[pinfl], old_owner.get(pinfl, ""), owner))
         rec.full_name, rec.owner_key, rec.link_source, rec.is_active, rec.synced_at = (
             names[pinfl], owner, source, True, now,
         )

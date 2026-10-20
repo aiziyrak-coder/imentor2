@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search, FilterX, ChevronLeft, ChevronRight, Printer, ScanFace } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Loader2, AlertCircle, Shield, ArrowUpDown, ArrowUp, ArrowDown, X, Search, FilterX, ChevronLeft, ChevronRight, Printer, ScanFace, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isValidStaffLogin, normalizeStaffLogin, type UserRole } from '../../utils/localStaffAuth';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../utils/staffDirectoryApi';
 import { openStaffCredentials } from '../../utils/staffCredentialsHtml';
 import AdminFaceLinks from './AdminFaceLinks';
+import AdminStaffDetail from './AdminStaffDetail';
 import { fetchAdminSyllabusCatalogStats } from '../../utils/syllabusApi';
 import { fetchPublicKafedralar } from '../../utils/academicCatalogApi';
 import { matchDepartmentByName } from '../../utils/departmentMatch';
@@ -83,6 +84,7 @@ export default function AdminStaffManagement() {
   const [form, setForm] = useState(emptyForm);
   const [showAdd, setShowAdd] = useState(false);
   const [showFaceLinks, setShowFaceLinks] = useState(false);
+  const [detailFor, setDetailFor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
@@ -356,7 +358,7 @@ export default function AdminStaffManagement() {
       if (deptFilter === '__none__' && dept) return false;
       if (deptFilter && deptFilter !== '__none__' && dept !== deptFilter) return false;
       if (!q) return true;
-      const hay = [u.display_name, u.phone_display, u.phone_digits, u.role, u.department]
+      const hay = [u.display_name, u.phone_display, u.phone_digits, u.role, u.department, u.pinfl ?? '']
         .join(' ')
         .toLocaleLowerCase();
       return hay.includes(q);
@@ -460,6 +462,7 @@ export default function AdminStaffManagement() {
       </div>
 
       {showFaceLinks && <AdminFaceLinks staff={rows} onClose={() => setShowFaceLinks(false)} />}
+      {detailFor && <AdminStaffDetail username={detailFor} onClose={() => setDetailFor(null)} />}
 
       {error && !(showAdd || editing) && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-800">
@@ -543,6 +546,7 @@ export default function AdminStaffManagement() {
                 <th className="px-4 py-3">{sortLabel('phoneDisplay', t('admin.phone'))}</th>
                 <th className="px-4 py-3">{sortLabel('role', t('admin.role'))}</th>
                 <th className="px-4 py-3">{sortLabel('department', t('admin.department'))}</th>
+                <th className="px-4 py-3 whitespace-nowrap">JSHSHIR</th>
                 <th className="px-4 py-3 whitespace-nowrap min-w-[140px]">{sortLabel('lastActiveAt', t('admin.lastActivity'))}</th>
                 <th className="px-4 py-3 w-28"></th>
               </tr>
@@ -550,14 +554,14 @@ export default function AdminStaffManagement() {
             <tbody className="divide-y divide-black/5">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-black/45">
+                  <td colSpan={8} className="px-4 py-12 text-center text-black/45">
                     <Loader2 className="animate-spin inline mr-2" size={18} />
                     {t('admin.loading')}
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-black/45">
+                  <td colSpan={8} className="px-4 py-12 text-center text-black/45">
                     {filtersActive ? t('admin.noResults') : t('admin.noStaffInList')}
                   </td>
                 </tr>
@@ -574,11 +578,28 @@ export default function AdminStaffManagement() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-black/65 max-w-[180px] truncate">{u.department}</td>
+                    <td className="px-4 py-2.5 font-mono text-[12px] whitespace-nowrap">
+                      {u.pinfl ? (
+                        u.pinfl
+                      ) : u.role === 'hodim' ? (
+                        <span className="text-amber-700 font-sans font-semibold">bog'lanmagan</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-black/55 tabular-nums text-[12px] whitespace-nowrap">
                       {formatLastActive(u.last_login)}
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setDetailFor(u.phone_digits)}
+                          className="p-2 rounded-lg hover:bg-black/5 text-slate-500"
+                          title="To'liq ma'lumot"
+                        >
+                          <Info size={16} />
+                        </button>
                         <button
                           type="button"
                           onClick={() => startEdit(u)}

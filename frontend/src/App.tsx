@@ -22,6 +22,7 @@ import {
   ClipboardList,
   FileText,
   Users,
+  GitMerge,
   MapPin,
   Building2,
   Landmark,
@@ -87,6 +88,7 @@ import TopicVideos from './components/TopicVideos';
 import HandoutMaterials from './components/HandoutMaterials';
 import AdminDashboardHome from './components/admin/AdminDashboardHome';
 import AdminStaffManagement from './components/admin/AdminStaffManagement';
+import AdminStaffMerge from './components/admin/AdminStaffMerge';
 import AdminCasesLibrary from './components/admin/AdminCasesLibrary';
 import AdminTestsLibrary from './components/admin/AdminTestsLibrary';
 import AdminLiveTestResultsPage from './components/admin/AdminLiveTestResultsPage';
@@ -122,6 +124,7 @@ export type { SyllabusTopic };
 type View =
   | 'admin-dashboard'
   | 'admin-staff'
+  | 'admin-staff-merge'
   | 'admin-staff-location'
   | 'admin-live-teaching'
   | 'admin-campus-buildings'
@@ -152,6 +155,7 @@ type NavItemDef = { id: View; label: string; icon: LucideIcon };
 const NAV_ICONS: Record<View, LucideIcon> = {
   'admin-dashboard': LayoutDashboard,
   'admin-staff': Users,
+  'admin-staff-merge': GitMerge,
   'admin-staff-location': MapPin,
   'admin-live-teaching': Monitor,
   'admin-campus-buildings': Building2,
@@ -191,6 +195,7 @@ const HODIM_NAV_IDS: View[] = [
 const ADMIN_NAV_IDS: View[] = [
   'admin-dashboard',
   'admin-staff',
+  'admin-staff-merge',
   'admin-staff-location',
   'admin-live-teaching',
   'admin-campus-buildings',
@@ -687,6 +692,8 @@ export default function App() {
         return <AdminDashboardHome />;
       case 'admin-staff':
         return <AdminStaffManagement />;
+      case 'admin-staff-merge':
+        return <AdminStaffMerge />;
       case 'admin-staff-location':
         return <AdminStaffLocationConsole />;
       case 'admin-live-teaching':

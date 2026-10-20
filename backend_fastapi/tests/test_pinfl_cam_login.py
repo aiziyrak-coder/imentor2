@@ -98,7 +98,8 @@ def _account(existing: dict, linked_owner=None):
             patch.object(cam_login.auth_service, "create_user", side_effect=create), \
             patch.object(cam_login.auth_service, "set_user_role_group"), \
             patch.object(cam_login.auth_service, "resolve_user_role_from_db", side_effect=lambda _db, u: u.role), \
-            patch.object(cam_login, "_fill_profile"):
+            patch.object(cam_login, "_fill_profile"), \
+            patch.object(cam_login.staff_merge, "merged_into", return_value=None):
         db.get.return_value = link
         out = cam_login.account_for(db, PINFL, PERSON)
     return out, created, link
