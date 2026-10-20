@@ -753,9 +753,14 @@ const CASE_PERSONA_HINTS: Record<CaseStudyFocus, string> = {
  * iborat bo'lsa, har fokusga boshqa bo'lim beriladi (2026-10-20: 7 klinik
  * mavzuning 5 tasida keyslar deyarli bir xil chiqdi).
  */
-function caseThemeHint(topic: string, focus: CaseStudyFocus): string {
+function caseThemeHint(topic: string, focus: CaseStudyFocus, domain: SubjectDomain = 'clinical'): string {
   const themes = topicSubThemes(topic).filter((t) => t.split(/\s+/).length <= 12);
   if (themes.length < 2) {
+    if (domain !== 'clinical') {
+      // Sinov: 9 fanning 5 tasida uchala keys bitta qoida/jadval atrofida aylandi.
+      return 'Boshqa ikki keys mavzuning BOSHQA tushunchasi, qoidasi yoki o\'lchovi haqida — bu keys ular takrorlamaydigan ' +
+        `jihatga (${focus === 'tashxis' ? 'tuzilma/tushunchaning o\'zi' : focus === 'davolash' ? 'jarayon/qo\'llash' : 'usul/texnika'}) qaratilsin.`;
+    }
     return 'Boshqa ikki keys shu mavzuning BOSHQA kasalligi/shakli haqida — bu keysda mavzudagi kamroq uchraydigan, ' +
       'lekin dasturga kiradigan holatni tanlang, agar mavzu bitta kasallik bo\'lsa — uning boshqa bosqichi yoki shaklini.';
   }
@@ -895,16 +900,20 @@ const CASE_TASK_FIELD_RULE =
 const CASE_BIOMEDICAL_FIELDS =
   'MAYDONLAR (JSON kalitlari o\'sha, mazmuni BEMOR KARTASI EMAS — preparat, tajriba, namuna yoki tuzilma tahlili):\n' +
   '1. Vaziyat (jami 300–480 so\'z):\n' +
-  '   "patient" (30–60 so\'z) — OBYEKT: aniq preparat, tajriba hayvoni/modeli, biologik namuna, anatomik soha yoki ' +
-  'kimyoviy tizim (masalan "baqa boldir mushagi-nerv preparati", "jigar biopsiyasi, gematoksilin-eozin", ' +
-  '"0,05 N KMnO4 bilan Fe2+ eritmasini titrlash").\n' +
+  // Sinov (2026-10-20): bu yerdagi aniq misollar ("baqa mushak-nerv preparati")
+  // marketing fanining keysiga ham ko'chib o'tdi — misol berilmaydi, talab beriladi.
+  '   "patient" (30–60 so\'z) — OBYEKT: shu FAN va MAVZUDAGI aniq preparat, tajriba modeli, biologik namuna, ' +
+  'anatomik soha, kimyoviy tizim, hujjat yoki holat. Obyekt so\'ralgan kuzatuvni REAL ko\'rsata oladigan bo\'lsin ' +
+  '(gips modeli javob bermaydi, plazmada hujayra yo\'q, manekenda qon quyilmaydi, hujayrasiz tizimda hujayra yo\'q).\n' +
   '   "complaints" (50–90 so\'z) — USUL VA SHAROIT: qaysi usul, asbob, bo\'yash, reaktiv, konsentratsiya, harorat, vaqt.\n' +
   '   "history" (0–70 so\'z) — boshlang\'ich holat yoki nazorat guruhi; kerak bo\'lmasa bo\'sh "" qoldiring.\n' +
   '   "lifestyle" (0–50 so\'z) — o\'zgartirilgan bitta omil (ta\'sir, dori, harorat, mutatsiya); kerak bo\'lmasa "".\n' +
   '   "examination" (70–130 so\'z) — KUZATUV: morfologik, mikroskopik yoki eksperimental tasvir (rang, shakl, joylashuv, ' +
-  'tuzilma nomi). Xulosa YOZILMAYDI — faqat ko\'rilgan narsa.\n' +
-  '   "labs" (40–110 so\'z) — O\'LCHOV: 3–6 ta qiymat birligi va me\'yori bilan. Morfologik mavzuda raqam majburiy emas — ' +
-  'uydirma son yozgandan ko\'ra tasvir yaxshi.\n' +
+  'tuzilma nomi). Xulosa YOZILMAYDI — faqat ko\'rilgan narsa; "... ga mos keladi", "... ni ko\'rsatadi" kabi talqin ' +
+  'vaziyatning hech qaysi maydonida yo\'q, qalin belgi ham xulosaga emas, kuzatuvga qo\'yiladi.\n' +
+  '   "labs" (0–110 so\'z) — O\'LCHOV: darslikda me\'yori bor 3–6 ta qiymat, birligi va me\'yori bilan. Me\'yori yo\'q ' +
+  'narsaga (burma eni, tirnalish oralig\'i, "rang koeffitsienti") me\'yor O\'YLAB TOPILMAYDI; sifat testi (musbat/manfiy) ' +
+  'me\'yorsiz yoziladi. Morfologik mavzuda raqam kerak bo\'lmasa "" qoldiring.\n' +
   `   ${CASE_TASK_FIELD_RULE}` +
   '2. Yechim (jami 450–650 so\'z):\n' +
   '   "diagnosis" (110–170 so\'z) — "task" dagi HAR savolga raqami bilan to\'g\'ridan-to\'g\'ri javob ' +
@@ -943,7 +952,9 @@ const CASE_ACADEMIC_FIELDS =
   '   "recommendations" (40–80 so\'z) — eslab qolish uchun qisqa qoida va tipik xato.\n' +
   '3. TAQIQLANGAN: kasallik, bemor, dori, lab, vital belgi; tibbiy "tashxis/davolash" qolipi; "xavfsizlik va ' +
   'standartlarga rioya qilish", "ma\'lumotlar xavfsizligi" kabi umumiy gap (mavzu aynan shu haqda bo\'lmasa).\n' +
-  '4. Fakt, sana, qoida va so\'z shakllari aniq bo\'lsin; ishonchingiz komil bo\'lmagan faktni yozmang.\n' +
+  '4. Fakt, sana, qoida va so\'z shakllari aniq bo\'lsin; ishonchingiz komil bo\'lmagan faktni yozmang. Javob berilgan ' +
+  'materialga tayanadi: materialda yo\'q shaklni "xato" deb ko\'rsatmang, to\'g\'ri shaklni xato demang. Vaziyat javobni ' +
+  'yoki talqinni aytmaydi.\n' +
   '5. QALIN: hal qiluvchi qoida, shakl yoki raqamni `**...**` ichiga oling, jami 3–8 ta; butun gap qalin QILINMAYDI.\n';
 
 /**
@@ -1060,7 +1071,7 @@ async function reviewCaseSections(
   focus: CaseStudyFocus,
   language: AppLanguage,
   scope: GenerationScope,
-): Promise<CaseSections> {
+): Promise<{ sections: CaseSections; offTopic: boolean }> {
   const domain = scope.domain;
   const listed = CASE_REVIEW_KEYS.map((k) => `"${k}": ${JSON.stringify(String(raw[k] || ''))}`).join(',\n');
   const domainChecks =
@@ -1069,8 +1080,9 @@ async function reviewCaseSections(
         '(me\'yor deb atalgan qiymat haqiqatan me\'yorda); (c) bemorning jinsi/yoshi va a\'zolari izchil; ' +
         '(d) tashxis vaziyatdagi ma\'lumotdan chiqadi va aniq nozologiya; (e) vaziyat tashxisni ochiq aytmaydi; '
       : domain === 'biomedical'
-        ? '(a) atama, me\'yor, birlik, usul va mexanizm darslikdagidek to\'g\'ri; (b) individual bemor va davolash ' +
-          'rejasi yo\'q; (c) "task" savollari vaziyatdagi ma\'lumot bilan yechiladi; '
+        ? '(a) atama, me\'yor, birlik, usul va mexanizm darslikdagidek to\'g\'ri, uydirma me\'yor yo\'q; (b) individual bemor va ' +
+          'davolash rejasi yo\'q; (c) "task" savollari vaziyatdagi ma\'lumot bilan yechiladi; (d) obyekt kuzatilgan narsani real ' +
+          'ko\'rsata oladi (model, plazma, maneken, hujayrasiz tizim); '
         : '(a) fakt, sana, qoida, so\'z shakli va hisob to\'g\'ri; (b) tibbiyot va umumiy "xavfsizlik/standart" gaplari ' +
           'yo\'q (mavzu shu haqda bo\'lmasa); (c) "task" savollari berilgan material bilan yechiladi; ';
   try {
@@ -1090,7 +1102,10 @@ async function reviewCaseSections(
         'Har topilgan xato uchun shu maydonning TO\'LIQ tuzatilgan matnini "fixes" ga yozing (faqat xato maydonlar; ' +
         'boshqa maydonlarga tegmang). Tuzatish uslubi, `**qalin**` belgilari va hajmi asl maydonga yaqin bo\'lsin; ' +
         'vaziyatni o\'zgartirsangiz — yechim unga mos qolsin. ' +
-        'JSON: {"issues":["qisqa izoh"],"verdict":"ok|fix","fixes":{"<maydon>":"<to\'liq matn>"}}. ' +
+        // Sinov (2026-10-20): marketing fani keysi butunlay baqa yuragi va Gram bo'yash
+        // haqida chiqdi — buni maydonma-maydon tuzatib bo'lmaydi, qayta yoziladi.
+        'Keys umuman boshqa fan yoki mavzu haqida bo\'lsa — verdict "offtopic" (fixes bo\'sh). ' +
+        'JSON: {"issues":["qisqa izoh"],"verdict":"ok|fix|offtopic","fixes":{"<maydon>":"<to\'liq matn>"}}. ' +
         '"ok" bo\'lsa fixes bo\'sh obyekt. ' +
         `Til: ${languageName(language)}. ${strictLanguageDirective(language)}`,
       user:
@@ -1100,8 +1115,10 @@ async function reviewCaseSections(
       responseFormat: { type: 'json_object' },
       parse: (t) => parseJSONSafe(t),
     });
-    if (String(parsed?.verdict || 'ok').toLowerCase() !== 'fix' || !parsed?.fixes || typeof parsed.fixes !== 'object') {
-      return raw;
+    const verdict = String(parsed?.verdict || 'ok').toLowerCase();
+    if (verdict === 'offtopic') return { sections: raw, offTopic: true };
+    if (verdict !== 'fix' || !parsed?.fixes || typeof parsed.fixes !== 'object') {
+      return { sections: raw, offTopic: false };
     }
     const next: CaseSections = { ...raw };
     let changed = 0;
@@ -1115,18 +1132,19 @@ async function reviewCaseSections(
       next[key] = text;
       changed += 1;
     }
-    if (!changed) return raw;
+    const keep = { sections: raw, offTopic: false };
+    if (!changed) return keep;
     // Tuzatish tilni buzsa yoki yangi shablon/takror olib kirsa — asl keys qoladi.
-    if (outputLanguageLooksWrong(joinCaseSections(next, language, domain), language)) return raw;
+    if (outputLanguageLooksWrong(joinCaseSections(next, language, domain), language)) return keep;
     if (caseTextFlaws(Object.values(next).map((v) => String(v || ''))).length >
       caseTextFlaws(Object.values(raw).map((v) => String(v || ''))).length) {
-      return raw;
+      return keep;
     }
     console.warn(`Keys ekspert tekshiruvi (${focus}): ${changed} ta maydon tuzatildi`);
-    return next;
+    return { sections: next, offTopic: false };
   } catch (err) {
     console.warn('Keys ekspert tekshiruvi bajarilmadi:', err);
-    return raw;
+    return { sections: raw, offTopic: false };
   }
 }
 
@@ -1167,9 +1185,9 @@ async function generateSingleCaseQuestion(
   )[focus];
   const personaHint =
     domain === 'academic'
-      ? CASE_PERSONA_HINTS_ACADEMIC[focus]
+      ? `${CASE_PERSONA_HINTS_ACADEMIC[focus]} ${caseThemeHint(topic, focus, domain)}`
       : domain === 'biomedical'
-        ? CASE_PERSONA_HINTS_BIOMEDICAL[focus]
+        ? `${CASE_PERSONA_HINTS_BIOMEDICAL[focus]} ${caseThemeHint(topic, focus, domain)}`
         : `${CASE_PERSONA_HINTS[focus]} ${caseThemeHint(topic, focus)} ` +
           casePersonaLine(pickCasePersona(focus, topic, scope.subjectName));
   const fields =
@@ -1378,7 +1396,24 @@ async function generateSingleCaseQuestion(
     }
   }
 
-  if (!thin(raw)) raw = await reviewCaseSections(raw, topic, focus, language, scope);
+  if (!thin(raw)) {
+    const reviewed = await reviewCaseSections(raw, topic, focus, language, scope);
+    raw = reviewed.sections;
+    if (reviewed.offTopic) {
+      // Bir marta mavzu izohi bilan qayta yoziladi va yana tekshiriladi;
+      // yangisi ham yaroqsiz bo'lsa — eskisi qoladi (keys bo'sh chiqmasin).
+      console.warn(`Case focus "${focus}": ekspert keysni mavzudan tashqari deb topdi, qayta yozilmoqda`);
+      try {
+        const retry = await request(true, false, true);
+        if (!thin(retry) && !outputLanguageLooksWrong(joinCaseSections(retry, language, domain), language)) {
+          const again = await reviewCaseSections(retry, topic, focus, language, scope);
+          if (!again.offTopic) raw = again.sections;
+        }
+      } catch (err) {
+        console.warn('Case mavzu (ekspert) bo\'yicha qayta urinish muvaffaqiyatsiz:', err);
+      }
+    }
+  }
 
   const answer = joinCaseSections(raw, language, domain);
   const scenarioText = joinCaseScenario(raw, language, domain);
