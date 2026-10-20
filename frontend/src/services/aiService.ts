@@ -65,6 +65,7 @@ import {
   caseWeaknesses,
   localizeCaseLabels,
   stripCaseHtml,
+  stripScenarioInterpretation,
   weakCaseRetryNote,
 } from '../utils/caseQuality';
 import { CASE_SHAPE_RETRY_NOTE, caseShapeSummary, repairCaseShape } from '../utils/caseShape';
@@ -1396,6 +1397,18 @@ async function generateSingleCaseQuestion(
     }
   }
 
+  // Talqin gaplari (promptga qaramay qoldi) — ekspertdan oldin olib tashlanadi,
+  // tekshiruv tozalangan vaziyatga qarab yechimni moslay oladi.
+  const cleanScenario = (r: CaseSections): CaseSections => {
+    if (domain === 'academic') return r;
+    const next = { ...r };
+    for (const key of ['patient', 'complaints', 'history', 'lifestyle', 'examination', 'labs'] as const) {
+      if (next[key]) next[key] = stripScenarioInterpretation(String(next[key]));
+    }
+    return next;
+  };
+  raw = cleanScenario(raw);
+
   if (!thin(raw)) {
     const reviewed = await reviewCaseSections(raw, topic, focus, language, scope);
     raw = reviewed.sections;
@@ -1406,7 +1419,7 @@ async function generateSingleCaseQuestion(
       try {
         const retry = await request(true, false, true);
         if (!thin(retry) && !outputLanguageLooksWrong(joinCaseSections(retry, language, domain), language)) {
-          const again = await reviewCaseSections(retry, topic, focus, language, scope);
+          const again = await reviewCaseSections(cleanScenario(retry), topic, focus, language, scope);
           if (!again.offTopic) raw = again.sections;
         }
       } catch (err) {

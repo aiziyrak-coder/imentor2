@@ -180,3 +180,58 @@ export function localizeCaseLabels(text: string, language: string): string {
   if (language !== 'ru' && language !== 'en') return text;
   return LABELS[language].reduce((acc, [re, to]) => acc.replace(re, to), text || '');
 }
+
+/**
+ * Vaziyatdagi TALQIN gaplarini olib tashlaydi (2026-10-20, harness v2).
+ *
+ * Promptdagi "vaziyat faqat fakt" qoidasi bajarilmadi: v2 da bitta vaziyatda
+ * ~8 ta "bu ... bekor qilmaydi", "bu oddiy bronxospazmga xos emas" kabi gap
+ * bor edi — talaba yechishi kerak bo'lgan xulosa oldindan aytilardi. Bunday
+ * gaplar deyarli doim talqin, shuning uchun kod ularni o'chiradi. Fakt
+ * yo'qolmasin deb: maydon gaplarining yarmidan ko'pi tushsa, maydon o'zgarmaydi.
+ */
+const INTERPRETIVE_RE = new RegExp(
+  [
+    "ko['’`ʻ‘]rsatadi", 'foydasiga', 'mos\\s+keladi', 'xos\\s+emas', "xos\\s+bo['’`ʻ‘]?l", 'ehtimol(?:ini|li)',
+    'bekor\\s+qilmaydi', 'farqlash\\s+uchun', 'tasdiqlaydi', 'istisno\\s+qil', 'inkor\\s+etmaydi', 'shubha\\s+uyg',
+    'zaiflashtiradi', 'kuchaytiradi', 'ishora\\s+qiladi', 'dalolat\\s+beradi', 'gumon\\s+qilish', 'muhim\\s+ahamiyat',
+    'указывает', 'свидетельствует', 'в\\s+пользу', 'характерн', 'исключает', 'подтверждает', 'соответствует',
+    'suggests?', 'consistent\\s+with', 'in\\s+favou?r\\s+of', 'rules?\\s+out', 'indicates?', 'confirms?', 'typical\\s+of',
+  ].join('|'),
+  'iu',
+);
+
+/** Talqin bo'lagi boshlanadigan joy: ", bu ...", " — bu ...", "... bo'lib, ...". */
+const CLAUSE_CUT_RE =
+  /(?:,|\s[—–-])\s*(?:lekin\s+|ammo\s+|biroq\s+|va\s+)?(?:bu|bular|shu|что|это|which|this)(?=\s)|\s+bo['’`ʻ‘]?lib,/giu;
+
+export function stripScenarioInterpretation(text: string): string {
+  const src = (text || '').trim();
+  if (!src) return src;
+  const lines = src.split('\n');
+  let total = 0;
+  let dropped = 0;
+  const out = lines.map((line) => {
+    const sentences = line.split(/(?<=[.!?])\s+(?=[\p{Lu}\d(«"*])/u);
+    const kept = sentences.flatMap((s) => {
+      if (!s.trim()) return [s];
+      total += 1;
+      const hit = INTERPRETIVE_RE.exec(s);
+      if (!hit) return [s];
+      // Avval faqat talqin qismini kesamiz: "Hb 116 g/L bo'lib, ... mos keladi" —
+      // qiymat qoladi. Kesish nuqtasi talqin so'zidan OLDIN bo'lishi kerak.
+      const cuts = Array.from(s.matchAll(CLAUSE_CUT_RE)).filter((m) => (m.index ?? 0) < hit.index && (m.index ?? 0) > 8);
+      if (cuts.length) {
+        dropped += 1;
+        return [`${s.slice(0, cuts[cuts.length - 1].index).replace(/[\s,;:—-]+$/, '')}.`];
+      }
+      // Kesib bo'lmasa va gapda fakt bo'lsa (raqam, qalin belgi, "yo'q") — qoladi.
+      if (/\d|\*\*|yo['’`ʻ‘]q|нет|absent|\bno\b/i.test(s)) return [s];
+      dropped += 1;
+      return [];
+    });
+    return kept.join(' ');
+  });
+  if (!dropped || dropped * 2 > total) return src;
+  return out.join('\n').replace(/[ \t]+\n/g, '\n').trim();
+}

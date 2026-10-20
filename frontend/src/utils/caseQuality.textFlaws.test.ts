@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { caseTextFlaws, caseWeaknesses, localizeCaseLabels, repetitionShare, stripCaseHtml } from './caseQuality';
+import {
+  caseTextFlaws,
+  caseWeaknesses,
+  localizeCaseLabels,
+  repetitionShare,
+  stripCaseHtml,
+  stripScenarioInterpretation,
+} from './caseQuality';
 
 describe('caseTextFlaws', () => {
   it('to‘ldirilmagan shablonni ushlaydi, taqqoslash belgisini emas', () => {
@@ -51,4 +58,33 @@ describe('localizeCaseLabels', () => {
 
 it('stripCaseHtml <br> ni qatorga aylantiradi', () => {
   expect(stripCaseHtml('a<br>b<br/>c')).toBe('a\nb\nc');
+});
+
+describe('stripScenarioInterpretation', () => {
+  it('talqin gaplarini olib tashlaydi, faktlarni qoldiradi', () => {
+    const src =
+      'Leykotsitlar 14,8 x10^9/L, CRP 62 mg/L. Laktat 3,1 mmol/L, bu to‘qima gipoperfuziyasi foydasiga. ' +
+      'Amilaza 62 U/L normal, bu pankreatitni zaiflashtiradi. Najasda eritrotsitlar bor. Gemoglobin 116 g/L.';
+    const out = stripScenarioInterpretation(src);
+    expect(out).toContain('CRP 62 mg/L.');
+    expect(out).toContain('Najasda eritrotsitlar bor.');
+    expect(out).not.toMatch(/foydasiga|zaiflashtiradi/);
+    expect(out).toContain('Laktat 3,1 mmol/L.');
+    expect(out).toContain('Amilaza 62 U/L normal.');
+  });
+
+  it('qiymatni saqlab, faqat talqin bo‘lagini kesadi', () => {
+    const src =
+      'Gemoglobin 116 g/L (me’yor 120–150) va gematokrit 35% bo‘lib, o‘tkir qon yo‘qotish bilan mos keladi. ' +
+      'Peritoneal simptomlar **yo‘q**, bu perforatsiya ehtimolini pasaytiradi. Harorat 37,8 °C. Puls 108/min.';
+    const out = stripScenarioInterpretation(src);
+    expect(out).toContain('gematokrit 35%.');
+    expect(out).toContain('Peritoneal simptomlar **yo‘q**.');
+    expect(out).not.toMatch(/mos keladi|ehtimolini/);
+  });
+
+  it('ko‘p gap tushadigan bo‘lsa, matnga tegmaydi', () => {
+    const src = 'Bu infeksiyani ko‘rsatadi. Bu sepsis foydasiga. Harorat 39 °C.';
+    expect(stripScenarioInterpretation(src)).toBe(src);
+  });
 });
