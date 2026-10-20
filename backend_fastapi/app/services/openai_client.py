@@ -59,8 +59,10 @@ EXAM_REVIEW_PURPOSES = frozenset({"exam_review"})
 #: 2026-10-20 (kech): test bilan bir xil model — `gpt-5.4-mini`. 4.1-mini
 #: dagi 400 ta prod taqdimotda: punktlarning 98% i 12 so'zdan qisqa (prompt
 #: 15–30 so'z so'raydi), 67% i 20 slayddan kam, ma'ruzadagi fan xatosi
-#: (masalan "Brucella gram-musbat") slaydga ko'chadi. Taxminiy narx:
-#: ~$0.08/taqdimot, ~$90 haftasiga. `.env`: OPENAI_PRESENTATION_MODEL.
+#: (masalan "Brucella gram-musbat") slaydga ko'chadi. Harness (3 ta prod
+#: ma'ruzasi): 5.4-mini xatoni tuzatdi, mavzudagi ikkinchi kasallikni yoritdi,
+#: 27–34 s (4.1-mini 39–123 s), ~$0.04/taqdimot (~$40 haftasiga, 4.1-mini
+#: ~$0.01). `.env`: OPENAI_PRESENTATION_MODEL.
 #: Til tuzatish ham shu modelda — nano tarjimasi yana tekshiruvdan o'tmay
 #: butun taqdimotni xato bilan yiqitardi.
 PRESENTATION_PURPOSES = frozenset({

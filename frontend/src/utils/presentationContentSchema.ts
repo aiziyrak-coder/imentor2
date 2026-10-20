@@ -95,6 +95,10 @@ export function isFillerSlideTitle(title: string): boolean {
   return FILLER_SLIDE_TITLE_RE.test(title.replace(/[’‘`ʻʼ]/g, "'").trim());
 }
 
+function capitalizeFirst(text: string): string {
+  return text ? text.charAt(0).toLocaleUpperCase() + text.slice(1) : text;
+}
+
 function asSlideType(raw: unknown): SlideType {
   const s = String(raw || '').trim().toLowerCase();
   return (SLIDE_TYPES as readonly string[]).includes(s) ? (s as SlideType) : 'content_bullets';
@@ -410,9 +414,11 @@ export function normalizePresentationContent(
   raw: Partial<PresentationContent> | null | undefined,
   defaults: { title: string; subject: string; author?: string },
 ): PresentationContent {
-  const presentation_title = String(raw?.presentation_title || defaults.title || 'Taqdimot')
-    .trim()
-    .slice(0, 120);
+  const presentation_title = capitalizeFirst(
+    String(raw?.presentation_title || defaults.title || 'Taqdimot')
+      .trim()
+      .slice(0, 120),
+  );
   const subject_area = String(raw?.subject_area || defaults.subject || '')
     .trim()
     .slice(0, 80);
@@ -428,7 +434,9 @@ export function normalizePresentationContent(
     // bo'sh slayd qaytaradi. Ilgari ular "Slayd 15", "Slayd 16"… bo'lib
     // taqdimotga tushardi (prod'da 400 taqdimotdan ~10% ida).
     if (i > 0 && (!rawTitle || /^(?:slayd|slide|слайд)\s*\d+$/i.test(rawTitle))) continue;
-    const title = (rawTitle || `Slayd ${i + 1}`).slice(0, 90);
+    // "sentence case" ni gpt-4.1-mini butunlay kichik harf deb tushundi
+    // (harness, 2026-10-20: 60 sarlavhadan 58 tasi kichik harfda boshlangan).
+    const title = capitalizeFirst((rawTitle || `Slayd ${i + 1}`).slice(0, 90));
     const body = normalizeBody(s?.body, slide_type);
     // Eski saqlangan taqdimotlarda bo'sh slaydga sarlavha punkt qilib qo'yilgan.
     if (i > 0 && body.bullets?.length === 1 && body.bullets[0] === clipWords(title, MAX_WORDS_PER_BULLET)) {

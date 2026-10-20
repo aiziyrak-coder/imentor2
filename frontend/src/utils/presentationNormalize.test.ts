@@ -81,4 +81,13 @@ describe('normalizePresentationContent (prod nuqsonlari, 2026-10-20)', () => {
     for (const t of ['Xulosa', 'Manbalar va ularning tasnifi', 'Yakuniy tashxis mezonlari'])
       expect(isFillerSlideTitle(t), t).toBe(false);
   });
+
+  it('sarlavha kichik harf bilan boshlansa, bosh harf tiklanadi', () => {
+    const out = norm([
+      { slide_type: 'title', title: 'brutsellyoz', body: { bullets: [] } },
+      text('ekssudatsiya'),
+      text('эксудация'),
+    ]);
+    expect(out.slides.map((s) => s.title)).toEqual(['Brutsellyoz', 'Ekssudatsiya', 'Эксудация']);
+  });
 });
