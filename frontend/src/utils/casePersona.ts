@@ -89,7 +89,9 @@ export function casePersonaLine(p: CasePersona): string {
   const sex = p.sex === 'female' ? 'ayol' : 'erkak';
   const kid = p.age < 18 ? (p.sex === 'female' ? 'qiz bola' : 'o\'g\'il bola') : sex;
   return (
-    `BEMOR (o'zgartirmang): ${p.name}, ${p.age} yosh, ${kid}. Kasbi yoki holati shu yoshga va mavzuga mos bo'lsin. ` +
-    'Ism, yosh va jins vaziyatning hamma bo\'limida bir xil bo\'lsin.'
+    // 2026-10-20 sinovida "Ism, yosh va jins mosligi saqlangan holda" degan
+    // ko'rsatma so'zma-so'z vaziyatga tushdi — qator ko'rsatma ekani aniq aytiladi.
+    `BEMOR: ${p.name}, ${p.age} yosh, ${kid}. Kasbi shu yoshga va mavzuga mos bo'lsin. ` +
+    '(Bu qavs ichidagi gap faqat siz uchun ko\'rsatma, matnga yozilmaydi: ism, yosh va jins hamma bo\'limda bir xil.)'
   );
 }

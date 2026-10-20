@@ -984,8 +984,13 @@ const CASE_CLINICAL_FIELDS =
   '3. Aniq yozing: nozologiya, mezon, dori, doza, qiymat. "Ehtimol" o\'rniga dalil.\n' +
   '4. Bu 3 ta vaziyatdan FAQAT BITTASI. Bemorning ismi, yoshi va jinsi user xabaridagi BEMOR qatorida — o\'zgartirmang. ' +
   'Jinsga xos a\'zo va belgilar shu jinsga mos bo\'lsin.\n' +
-  '5. IZCHILLIK: vaziyatdagi har fakt bitta (yosh, raqam, operatsiyalar, dorilar bo\'limlar orasida bir xil); yechim faqat ' +
-  'vaziyatda BERILGAN ma\'lumotga tayanadi, yangi topilma qo\'shmaydi. Vaziyat tashxisni aytmaydi.\n' +
+  '5. IZCHILLIK: vaziyatdagi har fakt bitta (yosh, harorat, raqam, operatsiyalar, dorilar bo\'limlar orasida bir xil); yechim faqat ' +
+  'vaziyatda BERILGAN ma\'lumotga tayanadi, yangi fakt (o\'tkazilmagan tekshiruv, yangi raqam) qo\'shmaydi. ' +
+  'Yechim bemor allaqachon qilgan ishni (to\'xtatgan dori, olgan muolaja) yangi tavsiya qilib yozmaydi — shu faktni hisobga oladi.\n' +
+  // Sinov (2026-10-20): vaziyat o'zi "metabolik asidozni ko'rsatadi",
+  // "pankreatitni zaiflashtiradi" deb talqin qilib qo'yardi — bu talabaning ishi.
+  '   VAZIYAT FAQAT FAKT: topilmaga talqin ("... ni ko\'rsatadi", "... foydasiga", "... ehtimolini kamaytiradi", ' +
+  '"... bilan mos keladi") vaziyatda YOZILMAYDI — me\'yor oralig\'i beriladi, talqin yechimda. Vaziyat tashxisni aytmaydi.\n' +
   '6. TAQIQLANGAN ssenariy: kam lab + pastki qorin og\'rig\'i = appenditsit; yoki bitta klassik belgi = tashxis.\n' +
   CASE_BOLD_RULE;
 
@@ -1053,7 +1058,10 @@ async function reviewCaseSections(
         `${sysRole(domain)} Siz o'quv keyslarini talabaga berishdan oldin tekshiruvchi QATTIQ ekspertsiz ` +
         '(KEYS TEKSHIRUVCHI). Tekshiring: ' +
         domainChecks +
-        '(f) yechim faqat vaziyatda berilgan ma\'lumotga tayanadi va unga zid emas; (g) "diagnosis" "task" dagi har ' +
+        '(f) yechim faqat vaziyatda berilgan ma\'lumotga tayanadi, unga zid emas, yangi fakt yoki raqam qo\'shmaydi ' +
+        'va allaqachon bajarilgan ishni (to\'xtatilgan dori, o\'tkazilgan tekshiruv) yangi tavsiya qilmaydi; ' +
+        '(f2) vaziyatda topilmaning talqini ("... ni ko\'rsatadi", "... foydasiga") yoki ko\'rsatma so\'zlari yo\'q — ' +
+        'bo\'lsa, vaziyat maydonidan olib tashlang; (g) "diagnosis" "task" dagi har ' +
         'savolga javob beradi; (h) keys mavzu va fanga tegishli; (i) "<...>" kabi to\'ldirilmagan shablon, takrorlangan ' +
         'gaplar va boshqa tildagi so\'zlar yo\'q. ' +
         'Har topilgan xato uchun shu maydonning TO\'LIQ tuzatilgan matnini "fixes" ga yozing (faqat xato maydonlar; ' +

@@ -17,6 +17,10 @@ describe('caseTextFlaws', () => {
     expect(caseTextFlaws([loop])).toContain('takrorlanish');
   });
 
+  it('ko‘rsatma matnga ko‘chganini ushlaydi', () => {
+    expect(caseTextFlaws(['Ism, yosh va jins mosligi saqlangan holda, bemor yurib kelgan.'])).toContain('korsatma_sizdi');
+  });
+
   it('oddiy keys matni toza', () => {
     const text =
       'Dilfuza, 34 yosh, ayol, o‘qituvchi. Uch kundan beri o‘ng qovurg‘a ostida og‘riq, ko‘ngil aynishi va ' +

@@ -97,11 +97,15 @@ export function weakCaseRetryNote(found: CaseWeakness[]): string {
  *   * takrorlanish halqasi: "qattiq, qattiq, qattiq og'riq" bir maydonda 5–10 marta.
  * Bunday matn talabaga ko'rsatilmasligi kerak — bir marta qayta so'raladi.
  */
-export type CaseTextFlaw = 'shablon_qoldi' | 'kalit_nomi' | 'takrorlanish';
+export type CaseTextFlaw = 'shablon_qoldi' | 'kalit_nomi' | 'takrorlanish' | 'korsatma_sizdi';
 
 const PLACEHOLDER_RE = /<\s*[\p{L}][\p{L}\s'’ʻ‘`/.-]{1,40}\s*>/u;
 const KEY_LEAK_RE =
   /(?:^|\n)\s*(?:patient|complaints|history|lifestyle|examination|labs|diagnosis|differential|investigations|management|recommendations|task)\s*:/i;
+
+/** Prompt ko'rsatmasi matnga ko'chgan (2026-10-20: "Ism, yosh va jins mosligi saqlangan holda"). */
+const INSTRUCTION_LEAK_RE =
+  /mosligi\s+saqlangan|BEMOR\s+qator|o['’`ʻ‘]zgartirmang|matnga\s+yozilmaydi|user\s+xabar|JSON\s+(?:maydon|kalit)|focus\s*=/i;
 
 /** Matndagi 6 so'zli bo'laklarning necha ulushi takror (0..1). */
 export function repetitionShare(text: string): number {
@@ -126,6 +130,7 @@ export function caseTextFlaws(fields: Array<string | undefined | null>): CaseTex
   const out: CaseTextFlaw[] = [];
   if (PLACEHOLDER_RE.test(all)) out.push('shablon_qoldi');
   if (parts.some((p) => KEY_LEAK_RE.test(p))) out.push('kalit_nomi');
+  if (INSTRUCTION_LEAK_RE.test(all)) out.push('korsatma_sizdi');
   if (parts.some((p) => repetitionShare(p) > REPETITION_LIMIT) || repetitionShare(all) > REPETITION_LIMIT) {
     out.push('takrorlanish');
   }
@@ -137,6 +142,7 @@ export function caseTextRetryNote(found: CaseTextFlaw[]): string {
     shablon_qoldi: 'matnda to\'ldirilmagan shablon qolgan (masalan "<Muqobil>", "<Nozologiya>") — o\'rniga aniq nom yozing',
     kalit_nomi: 'matnda JSON kalit nomi qolgan ("patient:", "labs:") — har maydon oddiy matn bo\'lsin',
     takrorlanish: 'bir xil gap yoki ibora qayta-qayta takrorlangan — har gap yangi fakt bersin',
+    korsatma_sizdi: 'matnga ko\'rsatma so\'zlari tushgan (masalan "mosligi saqlangan holda") — faqat keys mazmunini yozing',
   };
   return [
     'OLDINGI NATIJA YAROQSIZ:',
