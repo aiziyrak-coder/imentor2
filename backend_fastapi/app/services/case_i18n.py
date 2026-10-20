@@ -656,7 +656,8 @@ def ensure_translations(
     probe = {**payload, "translations": translations}
     missing = [lang for lang in langs if lang != primary and not _valid_block(probe, lang, kind)]
 
-    model = settings.openai_fast_model
+    # Test — imtihon savoli: xato tarjima kalitni buzadi, shuning uchun kuchliroq model.
+    model = oai.test_translate_model() if kind == KIND_TEST else settings.openai_fast_model
     for lang in missing:
         # Avval hamma savol bitta partiyada (bo'laklab) — keyin faqat yaroqsiz chiqqan savol alohida qayta so'raladi.
         rows: list[dict] = []

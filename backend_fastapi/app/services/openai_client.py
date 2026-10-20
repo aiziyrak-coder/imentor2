@@ -84,6 +84,20 @@ def exam_review_model() -> str:
     return _env_model("OPENAI_EXAM_REVIEW_MODEL", DEFAULT_EXAM_REVIEW_MODEL)
 
 
+#: Test tarjimasi (2026-10-20): `gpt-4.1-nano` test tarjimasida kalitni
+#: buzardi (inglizchada to'g'ri javob boshqa variantga ko'chdi), ma'noni
+#: teskari qilardi ("dizuriyasiz" -> "dizuriya bilan") va atamani almashtirardi
+#: ("ko'krak qafasi" -> "bo'yin", "АД" -> "bosh bosimi"). 30 savollik sinovda
+#: nano 14 ta muammoli joyning hammasida xato qildi, `gpt-4.1-mini` deyarli
+#: toza (~$0.04/test, 2 til). Tarjima OnlineTest yakuniy imtihoniga ru/en/uz
+#: da beriladi. `.env`: OPENAI_TEST_TRANSLATE_MODEL (masalan "gpt-5.4-mini").
+DEFAULT_TEST_TRANSLATE_MODEL = "gpt-4.1-mini"
+
+
+def test_translate_model() -> str:
+    return _env_model("OPENAI_TEST_TRANSLATE_MODEL", DEFAULT_TEST_TRANSLATE_MODEL)
+
+
 #: Eski nom: tashqi MCQ (OnlineTest) shu bilan yaratadi.
 QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 

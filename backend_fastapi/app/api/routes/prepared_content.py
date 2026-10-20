@@ -20,7 +20,7 @@ from app.services.prepared_translation import (
     translate_saved_content,
 )
 from app.models.content import CourseSyllabus, StaffCourseSelection
-from app.models.prepared_content import PreparedContent
+from app.models.prepared_content import KIND_TEST, PreparedContent
 from app.schemas.prepared_content import (
     PreparedContentIn,
     PreparedContentLatestOut,
@@ -336,6 +336,17 @@ def _reject_short_test(kind: str, payload: object) -> None:
         )
 
 
+def _test_awaiting_enrichment(kind: str, payload: object) -> bool:
+    """Test birinchi marta variant izohlarisiz saqlanadi; izohlar fonda qo'shilib,
+    PATCH bilan qayta yoziladi (`TestQuestions.tsx`). Izohlar ham tarjima qilinadi,
+    shuning uchun POST dagi tarjima PATCH dan keyin eskirib, bekorga ketardi —
+    test PATCH dan keyin bir marta tarjima qilinadi (2026-10-20)."""
+    if kind != KIND_TEST or not isinstance(payload, dict):
+        return False
+    questions = [q for q in payload.get("questions") or [] if isinstance(q, dict)]
+    return bool(questions) and not any(q.get("optionExplanations") for q in questions)
+
+
 @router.post("/prepared-content/", response_model=PreparedContentOut, status_code=status.HTTP_201_CREATED)
 def create_prepared_content(
     payload: PreparedContentIn,
@@ -419,7 +430,7 @@ def create_prepared_content(
 
     # Qolgan tillarga darhol FONDA tarjima — o'qituvchi interfeys tilini
     # almashtirganda material odatda allaqachon tarjima qilingan bo'ladi.
-    if obj.kind in TRANSLATABLE_KINDS:
+    if obj.kind in TRANSLATABLE_KINDS and not _test_awaiting_enrichment(obj.kind, obj.payload):
         background.add_task(translate_in_background, obj.id)
     return _out(obj)
 
