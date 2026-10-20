@@ -162,84 +162,137 @@ async function chatViaBackendStream(params: {
   });
 
   const doStream = async (authToken: string): Promise<string> => {
-    const res = await fetch(`${apiBaseUrl()}/v1/education-ai/completion/stream/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({
-        model: params.model,
-        messages: params.messages,
-        max_tokens: params.maxTokens,
-        temperature: params.temperature ?? 0.35,
-        ...(params.bookContext?.subjectCode
-          ? { subject_code: params.bookContext.subjectCode, topic_query: params.bookContext.topicQuery }
-          : {}),
-        ...(params.purpose ? { purpose: params.purpose } : {}),
-      }),
-    });
+    // Server jim turganda har 15 s ": ping" yuboradi — 2 daqiqa hech narsa
+    // kelmasa ulanish o'lgan: uziladi va qaytadan so'raladi.
+    const controller = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), STREAM_IDLE_MS);
+    };
+    armIdle();
+    try {
+      const res = await fetch(`${apiBaseUrl()}/v1/education-ai/completion/stream/`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          model: params.model,
+          messages: params.messages,
+          max_tokens: params.maxTokens,
+          temperature: params.temperature ?? 0.35,
+          ...(params.bookContext?.subjectCode
+            ? { subject_code: params.bookContext.subjectCode, topic_query: params.bookContext.topicQuery }
+            : {}),
+          ...(params.purpose ? { purpose: params.purpose } : {}),
+        }),
+      });
 
-    if (res.status === 401) {
-      const err = new Error('unauthorized') as Error & { status?: number };
-      err.status = 401;
-      throw err;
-    }
-    if (!res.ok || !res.body) {
-      const text = await res.text().catch(() => '');
-      throw new Error(text || `HTTP ${res.status}`);
-    }
+      if (res.status === 401) {
+        const err = new Error('unauthorized') as Error & { status?: number };
+        err.status = 401;
+        throw err;
+      }
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '');
+        const err = new Error(text || `HTTP ${res.status}`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let full = '';
-    let streamError: string | null = null;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let full = '';
+      let streamError: string | null = null;
 
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() ?? '';
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trim();
-        if (!raw) continue;
-        let evt: { delta?: string; done?: boolean; book_references?: MedicalReference[]; error?: string };
-        try {
-          evt = JSON.parse(raw);
-        } catch {
-          continue;
-        }
-        if (evt.error) {
-          streamError = evt.error;
-        } else if (evt.delta) {
-          full += evt.delta;
-          params.onDelta(full);
-        } else if (evt.done) {
-          if (Array.isArray(evt.book_references) && evt.book_references.length) {
-            params.onBookReferences?.(evt.book_references);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armIdle();
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          let evt: { delta?: string; done?: boolean; book_references?: MedicalReference[]; error?: string };
+          try {
+            evt = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+          if (evt.error) {
+            streamError = evt.error;
+          } else if (evt.delta) {
+            full += evt.delta;
+            params.onDelta(full);
+          } else if (evt.done) {
+            if (Array.isArray(evt.book_references) && evt.book_references.length) {
+              params.onBookReferences?.(evt.book_references);
+            }
           }
         }
       }
-    }
 
-    if (streamError) throw new Error(streamError);
-    if (!full.trim()) throw new Error('OpenAI: bo‘sh javob (server proxy, stream)');
-    return full.trim();
+      if (streamError) throw new Error(streamError);
+      if (!full.trim()) throw new Error('OpenAI: bo‘sh javob (server proxy, stream)');
+      return full.trim();
+    } finally {
+      clearTimeout(idleTimer);
+    }
   };
 
-  try {
-    return await doStream(token);
-  } catch (e: unknown) {
-    const status = e && typeof e === 'object' && 'status' in e ? (e as { status: number }).status : 0;
-    if (status !== 401) throw e;
-    const retryToken = await getBackendAccessToken();
-    if (!retryToken || retryToken === token) throw new Error('no-backend-token');
-    return doStream(retryToken);
+  const withAuthRetry = async (): Promise<string> => {
+    try {
+      return await doStream(token);
+    } catch (e: unknown) {
+      if (errorStatus(e) !== 401) throw e;
+      const retryToken = await getBackendAccessToken();
+      if (!retryToken || retryToken === token) throw new Error('no-backend-token');
+      token = retryToken;
+      return doStream(retryToken);
+    }
+  };
+
+  // Oqim o'rtada uzilsa server qayta urina olmaydi (yarim matn yuborilgan) —
+  // butun javob qaytadan so'raladi, ekrandagi chala matn tozalanadi.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await withAuthRetry();
+    } catch (e: unknown) {
+      if (attempt >= STREAM_ATTEMPTS || !isTransientStreamError(e)) throw e;
+      console.warn(`AI oqimi uzildi (${attempt}/${STREAM_ATTEMPTS}), qayta urinilmoqda:`, e);
+      params.onDelta('');
+      await new Promise((r) => setTimeout(r, STREAM_RETRY_DELAY_MS * attempt));
+    }
   }
+}
+
+const STREAM_ATTEMPTS = 3;
+const STREAM_IDLE_MS = 120_000;
+const STREAM_RETRY_DELAY_MS = 2_000;
+
+function errorStatus(e: unknown): number {
+  return e && typeof e === 'object' && 'status' in e ? Number((e as { status: unknown }).status) || 0 : 0;
+}
+
+/** Qayta so'rasa o'tishi mumkin: tarmoq uzilishi, jimlik (abort), 429/5xx,
+ * server "oqim yakunlanmadi". Mablag' tugashi, 4xx, kalit yo'qligi — yo'q. */
+export function isTransientStreamError(e: unknown): boolean {
+  const status = errorStatus(e);
+  if (status === 429 || status >= 500) return true;
+  if (status) return false;
+  const name = e instanceof Error ? e.name : '';
+  const msg = e instanceof Error ? e.message : String(e ?? '');
+  if (/mablag'|quota|no-backend-token|OPENAI_API_KEY|incomplete/i.test(msg)) return false;
+  if (name === 'AbortError' || name === 'TypeError') return true;
+  return /stream ended|Please retry|HTTP (429|5\d\d)|timed? ?out|Read timed out|Connection|bo‘sh javob/i.test(msg);
 }
 
 async function chatViaDirectApi(params: {
