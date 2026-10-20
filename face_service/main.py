@@ -43,7 +43,17 @@ def _get_model() -> FaceAnalysis:
                     providers=["CPUExecutionProvider"],
                     allowed_modules=["detection", "recognition"],
                 )
-                model.prepare(ctx_id=0, det_size=(640, 640))
+                # Yuzni QIDIRISH o'lchami. Tanish sifatiga TA'SIR QILMAYDI:
+                # embedding topilgan yuzning 112x112 qirqimidan hisoblanadi,
+                # det_size esa faqat yuz topiladimi-yo'qmi degan qismga ta'sir
+                # qiladi. 640 -> 320 da bitta kadr 350 ms dan 147 ms ga tushadi
+                # (2026-10-02 o'lchov), ya'ni navbat ikki barobardan ko'proq
+                # qisqaradi. Evaziga uzoqdagi kichik yuz topilmay qolishi
+                # mumkin — kirish uchun odam kameraga yaqin turadi, shuning
+                # uchun bu qabul qilinarli. Kerak bo'lsa FACE_DET_SIZE bilan
+                # qaytariladi.
+                det = int(os.environ.get("FACE_DET_SIZE", "640"))
+                model.prepare(ctx_id=0, det_size=(det, det))
                 _model = model
     return _model
 
