@@ -157,7 +157,10 @@ const MORPHOLOGY_TEST_RULE =
  * vital/lab qiymat") stomatologik savolga tishga aloqasiz qon bosimi, puls
  * va glyukoza qo'shtirardi; 8 stomatologik fanning o'rtachasi 6/10 edi.
  */
-const DENTAL_SCOPE_RE = /stomatolog|tish|endodont|periodont|parodont|ortodont|ortoped(ik)?\s*stom|og'?iz\s*bo'?shlig|yuz[-\s]?jag|kariyes|karies|pulpit|стомат|зуб/i;
+// `tish` faqat so'z boshida: "-tish" qo'shimchasi ("tashkil etish", "yaratish")
+// stomatologiya qoidasini stomatologiyaga aloqasiz testlarga yoqib yuborardi (2026-10-20).
+const DENTAL_SCOPE_RE =
+  /stomatolog|(?<![\p{L}'‘’ʻʼ])tish|endodont|periodont|parodont|ortodont|ortoped(ik)?\s*stom|og['‘’ʻʼ]?iz\s*bo['‘’ʻʼ]?shlig|yuz[-\s]?jag|kariyes|karies|pulpit|стомат|зуб/iu;
 
 export function isDentalScope(...parts: Array<string | undefined>): boolean {
   return DENTAL_SCOPE_RE.test(parts.filter(Boolean).join(' '));
