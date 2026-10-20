@@ -27,6 +27,8 @@ const TASK_KEY_ACADEMIC: Record<CaseStudyFocus, UiTextKey> = {
   profilaktika: 'case.taskProfilaktikaAcademic',
 };
 
+const TASK_TITLE_RE = /^(topshiriq|задание|task)$/i;
+
 /** Klinik keys — kasalxona kartasi: sarlavha + matn, qalin devor emas. */
 export default function CaseScenarioView({
   text,
@@ -38,7 +40,10 @@ export default function CaseScenarioView({
   const { t } = useUiText();
   const blocks = parseCaseScenario(text, language);
   const keys = isPatientFree(domain) ? TASK_KEY_ACADEMIC : TASK_KEY;
-  const task = focus ? t(keys[focus]) : '';
+  // 2026-10-20 dan keys o'zining aniq "Topshiriq" bo'limi bilan keladi —
+  // unda fokusga bog'langan umumiy savol takror ko'rsatilmaydi.
+  const hasOwnTask = blocks.some((b) => TASK_TITLE_RE.test(stripBold(b.title)));
+  const task = focus && !hasOwnTask ? t(keys[focus]) : '';
   const taskLabel = t('case.taskLabel');
 
   if (blocks.length === 1 && !blocks[0].title) {

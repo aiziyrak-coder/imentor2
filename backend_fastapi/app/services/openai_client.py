@@ -59,7 +59,17 @@ PRESENTATION_MODEL = "gpt-4.1-mini"
 PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
 })
-QUALITY_PURPOSES = GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+#: Keys (vaziyatli masala), 2026-10-20: nano'da prod keyslarining hech biri
+#: o'qituvchi ishlata oladigan darajada emas edi (105 savol qo'lda baholandi,
+#: o'rtacha ~2/10): takrorlanish halqalari, shablon qoldiqlari, dori/doza
+#: xatolari. Test bilan bir xil modellar: yozish OPENAI_TEST_GENERATE_MODEL,
+#: ekspert tekshiruv OPENAI_TEST_REVIEW_MODEL.
+CASE_GENERATE_PURPOSES = frozenset({"case_generate"})
+CASE_REVIEW_PURPOSES = frozenset({"case_review"})
+QUALITY_PURPOSES = (
+    GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+    | CASE_GENERATE_PURPOSES | CASE_REVIEW_PURPOSES
+)
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
 #: o'tib ketmasin (masalan "gpt-5.5-pro").
 ALLOWED_QUALITY_MODELS = frozenset({"gpt-4.1-mini", "gpt-4.1", "gpt-5.4-mini", "gpt-5.4", "gpt-5-mini"})
@@ -84,16 +94,30 @@ def exam_review_model() -> str:
     return _env_model("OPENAI_EXAM_REVIEW_MODEL", DEFAULT_EXAM_REVIEW_MODEL)
 
 
+#: Test tarjimasi (2026-10-20): `gpt-4.1-nano` test tarjimasida kalitni
+#: buzardi (inglizchada to'g'ri javob boshqa variantga ko'chdi), ma'noni
+#: teskari qilardi ("dizuriyasiz" -> "dizuriya bilan") va atamani almashtirardi
+#: ("ko'krak qafasi" -> "bo'yin", "АД" -> "bosh bosimi"). 30 savollik sinovda
+#: nano 14 ta muammoli joyning hammasida xato qildi, `gpt-4.1-mini` deyarli
+#: toza (~$0.04/test, 2 til). Tarjima OnlineTest yakuniy imtihoniga ru/en/uz
+#: da beriladi. `.env`: OPENAI_TEST_TRANSLATE_MODEL (masalan "gpt-5.4-mini").
+DEFAULT_TEST_TRANSLATE_MODEL = "gpt-4.1-mini"
+
+
+def test_translate_model() -> str:
+    return _env_model("OPENAI_TEST_TRANSLATE_MODEL", DEFAULT_TEST_TRANSLATE_MODEL)
+
+
 #: Eski nom: tashqi MCQ (OnlineTest) shu bilan yaratadi.
 QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 
 
 def model_for(purpose: str | None) -> str:
-    """Vazifaga qarab model: test, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
+    """Vazifaga qarab model: test, keys, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
     p = purpose or ""
-    if p in GENERATE_PURPOSES:
+    if p in GENERATE_PURPOSES or p in CASE_GENERATE_PURPOSES:
         return test_generate_model()
-    if p in REVIEW_PURPOSES:
+    if p in REVIEW_PURPOSES or p in CASE_REVIEW_PURPOSES:
         return test_review_model()
     if p in EXAM_REVIEW_PURPOSES:
         return exam_review_model()

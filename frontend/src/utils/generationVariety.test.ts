@@ -70,7 +70,7 @@ describe('Test generatsiya qoidalari', () => {
     expect(prompt).not.toMatch(/ABG=tashxis/);
 
     const casePrompt = buildCaseStructurePrompt('Elektron pochta', 'academic');
-    expect(casePrompt).toMatch(/Individual bemor kartasi/);
+    expect(casePrompt).toMatch(/Individual bemor, kasallik va dori YO'Q/);
     expect(casePrompt).not.toMatch(/appenditsit/);
 
     const rules = buildCaseClinicalRules('academic');

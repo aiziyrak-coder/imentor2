@@ -81,6 +81,20 @@ CASE_HEADINGS: list[dict[str, str]] = [
     {"uz": "Qanday tekshirish", "ru": "Как проверить", "en": "How to check"},
     {"uz": "Qanday yechish", "ru": "Как решить", "en": "How to solve"},
     {"uz": "Xatolikni oldini olish", "ru": "Как не допустить ошибку", "en": "How to prevent the mistake"},
+    # 2026-10-20: keysga aniq topshiriq va fan turiga mos bo'limlar qo'shildi.
+    # Ro'yxat OXIRIGA qo'shiladi — oldingi indekslar (§H<n>§) o'zgarmasin.
+    {"uz": "Topshiriq", "ru": "Задание", "en": "Task"},
+    {"uz": "Obyekt", "ru": "Объект", "en": "Object"},
+    {"uz": "Usul va sharoit", "ru": "Метод и условия", "en": "Method and conditions"},
+    {"uz": "Boshlang'ich holat", "ru": "Исходное состояние", "en": "Baseline"},
+    {"uz": "Qo'shimcha shart", "ru": "Дополнительное условие", "en": "Additional condition"},
+    {"uz": "Kuzatuv natijalari", "ru": "Результаты наблюдения", "en": "Observed findings"},
+    {"uz": "O'lchov natijalari", "ru": "Результаты измерений", "en": "Measurements"},
+    {"uz": "Vaziyat", "ru": "Ситуация", "en": "Situation"},
+    {"uz": "Berilgan material", "ru": "Исходный материал", "en": "Given material"},
+    {"uz": "Shartlar", "ru": "Условия задачи", "en": "Conditions"},
+    {"uz": "Qo'shimcha", "ru": "Дополнительно", "en": "Additional"},
+    {"uz": "Kuzatuv", "ru": "Наблюдение", "en": "Observation"},
 ]
 
 
@@ -106,17 +120,42 @@ _HEADING_LINE = re.compile(r"^(#{1,6}\s*)?\**(.+?)\**\s*$")
 _HEADING_TOKEN = re.compile(r"§H(\d+)§")
 
 
+#: Keys fikrlash yorliqlari (2026-10-20). nano ularni har safar boshqacha o'girardi:
+#: "RAD:" → "X-ray:" / "РЕНТГЕН:" (rad etuvchi dalil tasvir topilmasiga aylanardi),
+#: "QO'LLAB:" → "КЛЮЧ:", "FIKR YO'LI" → "PATHOGENESIS". Sarlavha kabi belgi bilan
+#: almashtiriladi va aniq tarjimasi qo'yiladi. Frontend (`caseQuality.localizeCaseLabels`)
+#: bilan bir xil.
+CASE_LABELS: list[tuple[re.Pattern[str], dict[str, str]]] = [
+    (re.compile(r"(?:FIKR|ФИКР)\s*(?:YO['‘’`ʻʼ]?LI|ЙЎЛИ|ЮЛИ|ЁЛИ)|ХОД\s+РАССУЖДЕНИЯ|\bREASONING(?=\s*:)"),
+     {"uz": "FIKR YO'LI", "ru": "ХОД РАССУЖДЕНИЯ", "en": "REASONING"}),
+    (re.compile(r"CHALG['‘’`ʻʼ]?ITUVCHI|ОТВЛЕКАЮЩИЙ\s+ПРИЗНАК|\bDISTRACTOR(?=\s*:)"),
+     {"uz": "CHALG'ITUVCHI", "ru": "ОТВЛЕКАЮЩИЙ ПРИЗНАК", "en": "DISTRACTOR"}),
+    (re.compile(r"(?:QO['‘’`ʻʼ]?LLAB|(?<![А-Яа-яЁё])ЗА|\bFOR)(?=\s*:)"),
+     {"uz": "QO'LLAB", "ru": "ЗА", "en": "FOR"}),
+    (re.compile(r"(?:\bRAD|(?<![А-Яа-яЁё])ПРОТИВ|\bAGAINST)(?=\s*:)"),
+     {"uz": "RAD", "ru": "ПРОТИВ", "en": "AGAINST"}),
+]
+_LABEL_TOKEN = re.compile(r"§L(\d+)§")
+
+
 def _protect_headings(text: str) -> str:
     out = []
     for line in (text or "").split("\n"):
         m = _HEADING_LINE.match(line)
         idx = _HEADING_INDEX.get(_heading_key(m.group(2))) if m and len(line) < 60 else None
         out.append(f"{m.group(1) or ''}§H{idx}§" if idx is not None else line)
-    return "\n".join(out)
+    joined = "\n".join(out)
+    for i, (pattern, _) in enumerate(CASE_LABELS):
+        joined = pattern.sub(f"§L{i}§", joined)
+    return joined
 
 
 def _restore_headings(text: str, target: str) -> str:
-    return _HEADING_TOKEN.sub(lambda m: (CASE_HEADINGS[int(m.group(1))].get(target, m.group(0)) if int(m.group(1)) < len(CASE_HEADINGS) else m.group(0)), text or "")
+    text = _HEADING_TOKEN.sub(lambda m: (CASE_HEADINGS[int(m.group(1))].get(target, m.group(0)) if int(m.group(1)) < len(CASE_HEADINGS) else m.group(0)), text or "")
+    return _LABEL_TOKEN.sub(
+        lambda m: CASE_LABELS[int(m.group(1))][1].get(target, m.group(0)) if int(m.group(1)) < len(CASE_LABELS) else m.group(0),
+        text,
+    )
 
 
 #: Bitta so'rovdagi matn hajmi. Mijoz xabarni 8000 belgida kesadi; JSON
@@ -375,7 +414,11 @@ def _system_prompt(kind: str, source: str, target: str, strict_note: str = "") -
         f"You translate {what} for a medical institute from {LANG_NAMES.get(source, source)} "
         f"into {LANG_NAMES.get(target, target)}. Translate the MEANING into natural, professional "
         f"{LANG_NAMES.get(target, target).split(' ')[0]} as a native university lecturer would write it. "
-        "Tokens like §H3§ are placeholders — copy them unchanged. "
+        "Tokens like §H3§ and §L1§ are placeholders — copy them unchanged. "
+        # 2026-10-20 sinovi (8 keys, nano): "doimiy bo'lmagan" → "persistent",
+        # "simptomlari yo'q" → ikki karra inkor, bemor ismi "Qodir" → "Aleksei".
+        "Preserve every negation exactly (absent stays absent, not constant stays not constant). "
+        "Keep personal names unchanged (transliterate only the script). "
         "Keep the subject's own terminology accurate (medical terms, drug names, dosages, units, lab values, "
         "Latin terms, formulas, code). Do not add medical content to a non-medical text. "
         "Every array element is ONE independent text (a scenario, an answer option, an explanation) — translate "
@@ -656,7 +699,10 @@ def ensure_translations(
     probe = {**payload, "translations": translations}
     missing = [lang for lang in langs if lang != primary and not _valid_block(probe, lang, kind)]
 
-    model = settings.openai_fast_model
+    # Test — imtihon savoli: xato tarjima kalitni buzadi, shuning uchun kuchliroq model.
+    # Keys ham (2026-10-20): 8 ta keysning nano tarjimasida 16 tadan 14 tasida jiddiy
+    # xato bor edi (inkor teskari, dori vaqti, fikrlash yorliqlari) — test bilan bir xil model.
+    model = oai.test_translate_model() if kind in (KIND_TEST, KIND_CASE) else settings.openai_fast_model
     for lang in missing:
         # Avval hamma savol bitta partiyada (bo'laklab) — keyin faqat yaroqsiz chiqqan savol alohida qayta so'raladi.
         rows: list[dict] = []

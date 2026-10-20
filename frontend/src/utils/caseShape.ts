@@ -14,7 +14,7 @@
  * qo'yiladi. Baribir bo'sh qolsa, chaqiruvchi bir marta qayta so'raydi.
  */
 
-export const CASE_SCENARIO_KEYS = ['patient', 'complaints', 'history', 'lifestyle', 'examination', 'labs'] as const;
+export const CASE_SCENARIO_KEYS = ['patient', 'complaints', 'history', 'lifestyle', 'examination', 'labs', 'task'] as const;
 export const CASE_SOLUTION_KEYS = ['diagnosis', 'differential', 'investigations', 'management', 'recommendations'] as const;
 const KNOWN = new Set<string>([...CASE_SCENARIO_KEYS, ...CASE_SOLUTION_KEYS, 'focus']);
 
@@ -111,7 +111,7 @@ export function caseShapeSummary(input: unknown): string {
 /** Qayta so'rashda modelga aytiladigan izoh. */
 export const CASE_SHAPE_RETRY_NOTE =
   'OLDINGI JAVOB YAROQSIZ: vaziyat yoki yechim maydonlari bo\'sh qolgan yoki boshqa kalitlarga yozilgan. ' +
-  'JSON AYNAN 11 kalitdan iborat bo\'lsin: "patient","complaints","history","lifestyle","examination","labs",' +
+  'JSON AYNAN 12 kalitdan iborat bo\'lsin: "patient","complaints","history","lifestyle","examination","labs","task",' +
   '"diagnosis","differential","investigations","management","recommendations". ' +
   'Har birining qiymati MATN (string), ro\'yxat yoki ichma-ich obyekt EMAS, hech biri bo\'sh EMAS. ' +
   'Fan klinik bo\'lmasa ham kalit nomlari o\'zgarmaydi — mazmuni maydon ta\'rifiga mos yoziladi; ' +
