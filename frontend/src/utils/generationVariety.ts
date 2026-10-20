@@ -35,18 +35,34 @@ export function buildCaseStructurePrompt(topic: string, domain: SubjectDomain = 
       ? `MAVZU BO'LIMLARI: ${themes.map((s, i) => `${i + 1}) ${s}`).join('; ')}. ` +
         'Har keys shu bo\'limlardan BIRIGA chuqur bog\'lansin, mavzudan tashqariga CHIQMASIN.'
       : '';
+  // 2026-10-20: bemorsiz fanlarda fokus — topshiriq turi. Ilgari "profilaktika"
+  // har fanda "xavfsizlik va standartlarga rioya" degan bo'sh matnga aylanardi.
+  if (domain === 'biomedical') {
+    return [
+      `Variatsiya ID: ${generationNonce()}.`,
+      `Mavzu: "${topic}".`,
+      themeBlock,
+      'Aniq 3 ta VAZIYATLI MASALA — preparat, tajriba, namuna yoki tuzilma tahlili, BEMOR KARTASI EMAS:',
+      '1-keys focus="tashxis": talqin — kuzatuv/o\'lchovdan jarayon yoki tuzilmani aniqlash.',
+      '2-keys focus="davolash": bashorat — bitta omil o\'zgarsa natija qanday o\'zgaradi va nega.',
+      '3-keys focus="profilaktika": xatoni topish — usul, texnika yoki hisobdagi xato va to\'g\'ri bajarish.',
+      'Har keys aniq "task" savollari bilan tugaydi; uchala keys boshqa obyekt va ma\'lumot bilan.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
   if (isPatientFree(domain)) {
     return [
       `Variatsiya ID: ${generationNonce()}.`,
       `Mavzu: "${topic}".`,
       themeBlock,
-      'Aniq 3 ta AMALIY VAZIYATLI MASALA — fan/mavzu bo\'yicha, KLINIK BEMOR KARTASI EMAS:',
-      '1-keys focus="profilaktika": xatolik, xavfsizlik yoki standartni buzmaslik qarori.',
-      '2-keys focus="davolash": aniq yechim/usul tanlash (ikki yaqin variant, biri mos emas).',
-      '3-keys focus="tashxis": ildiz sabab / to\'g\'ri model / qaysi tushuncha mos keladi.',
-      'Qaror AYNAN shu fan va mavzuga tegishli. Individual bemor kartasi (yosh + shikoyat + tashxis + dori) YO\'Q.',
-      'TAQIQLANGAN NAMUNA: "68 yoshli erkak, 3 kun qorin og\'rig\'i..." — nazariy, tashkiliy yoki gumanitar mavzuni ' +
-        'sun\'iy ravishda klinik qiladi va mavzuni tekshirmaydi — YARATILMASIN.',
+      'Aniq 3 ta AMALIY MASALA — shu fanning o\'z materiali bilan, KLINIK KEYS EMAS:',
+      '1-keys focus="tashxis": tahlil — berilgan materialdan xulosa yoki qonuniyat.',
+      '2-keys focus="davolash": qo\'llash — qoida/formula/usulni materialga qo\'llab masalani yechish.',
+      '3-keys focus="profilaktika": xatoni topish — berilgan ishdagi aniq xato va to\'g\'ri variant.',
+      'Har keys aniq "task" savollari bilan tugaydi. Individual bemor, kasallik va dori YO\'Q.',
+      'TAQIQLANGAN NAMUNA: "68 yoshli erkak, 3 kun qorin og\'rig\'i..." yoki "mutaxassis standartlarga rioya qilmadi" ' +
+        'degan bo\'sh hikoya — mavzuni tekshirmaydi, YARATILMASIN.',
     ]
       .filter(Boolean)
       .join(' ');
@@ -113,24 +129,17 @@ export const CASE_REASONING_CONTRACT = [
 
 export function buildCaseClinicalRules(domain: SubjectDomain = 'clinical'): string {
   if (isPatientFree(domain)) {
+    // "FIKR YO'LI / QO'LLAB / RAD" — klinik fikrlash shakli; bemorsiz fanda u
+    // lotin tili va tarix keyslariga "differensial" tiqardi (2026-10-20).
     return [
-      'QATTIQ QOIDALAR — oliy ta\'lim AMALIY vaziyat, klinik keys EMAS:',
-      'MAVZUGA BOG\'LIQLIK: muammo, ma\'lumotlar va yechim AYNAN fan va mavzu (va ma\'ruza, bo\'lsa) doirasida.',
-      // Klinik nozologiyani nomma-nom sanash modelni aynan o\'sha tomonga
-      // yetaklaydi. Umumiy belgilar yetarli - kasallik nomi berilmaydi.
-      'BEMOR YO\'Q: yosh+jins+kasallik+dori vignette TAQIQLANADI. HbA1c, qon bosimi, puls, qorin og\'rig\'i YO\'Q.',
-      'Ishtirokchi: mavzuga mos mutaxassis, jamoa yoki muassasa (o\'qituvchi, bosh hamshira, sanitariya shifokori, tadqiqotchi, rahbar, muhandis) — individual bemor emas.',
-      'QIYINLIK: bitta ta\'rif = javob EMAS. Kamida ikkita chalg\'ituvchi, lekin mantiqiy cheklov (me\'yor, qonun, tamoyil, standart, formula, protokol).',
-      'Yechimda aniq qadam, me\'yor, qoida yoki tamoyil; nima uchun muqobil noto\'g\'ri.',
-      'HAJM: vaziyat 520–720 so\'z, yechim 700–920 so\'z. Har maydon 4–8 dens gap.',
-      // Klinik bo'lmagan fanda ham fikrlash yo'li ko'rinishi kerak — faqat
-      // "bemor" o'rnida me'yor, standart va o'lchov turadi.
-      'FIKRLASH SHARTNOMASI (majburiy): "diagnosis" maydoni aynan shunday boshlansin — ' +
-        '"FIKR YO\'LI: <fakt 1> + <fakt 2> + <buzilgan talab> -> <ildiz sabab>." ' +
-        'Faktlar raqam va birligi bilan; "yuqori", "past" kabi sifatli ta\'rif TAQIQLANADI — ' +
-        'qiymat va me\'yor birga ko\'rsatilsin. Bitta HAL QILUVCHI fakt bo\'lsin (olib tashlansa xulosa o\'zgaradi) ' +
-        'va bitta CHALG\'ITUVCHI fakt izohlansin. "differential" da 3 ta muqobil tushuntirish, har biri ' +
-        '"<Muqobil> — QO\'LLAB: <aniq fakt>; RAD: <aniq fakt>." shaklida; qolip iboralar TAQIQLANADI.',
+      'QATTIQ QOIDALAR — oliy ta\'lim AMALIY masala, klinik keys EMAS:',
+      'MAVZUGA BOG\'LIQLIK: material, ma\'lumot va savollar AYNAN fan va mavzu (va ma\'ruza, bo\'lsa) doirasida.',
+      domain === 'academic'
+        ? 'BEMOR VA TIBBIYOT YO\'Q: kasallik, dori, lab, vital belgi TAQIQLANADI.'
+        : 'BEMOR YO\'Q: yosh+jins+shikoyat+tashxis+dori vignette va davolash rejasi TAQIQLANADI.',
+      'YECHILADIGAN MASALA: vaziyatda javob uchun kerakli HAMMA ma\'lumot bor; javob vaziyatda aytilmaydi.',
+      'QIYINLIK: bitta ta\'rifni eslash = javob EMAS — kamida ikki bosqich (ma\'lumotni izohlash, so\'ng xulosa).',
+      'ANIQLIK: atama, qoida, me\'yor va raqam darslikdagidek; ishonchingiz komil bo\'lmaganini yozmang.',
     ].join(' ');
   }
   return [

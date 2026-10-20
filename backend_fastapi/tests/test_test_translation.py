@@ -31,12 +31,12 @@ def _translate_with(kind, payload):
     return set(seen)
 
 
-def test_tests_are_translated_with_test_model_cases_with_fast_model(monkeypatch):
+def test_tests_and_cases_are_translated_with_test_model(monkeypatch):
     monkeypatch.delenv("OPENAI_TEST_TRANSLATE_MODEL", raising=False)
     test_payload = {"primaryLanguage": "uz", "questions": [{"question": "Qaysi biri to'g'ri?", "options": ["a", "b"], "correctOptionIndex": 0}]}
     case_payload = {"primaryLanguage": "uz", "questions": [{"scenario": "Bemor keldi", "answer": "javob"}]}
     assert _translate_with(KIND_TEST, test_payload) == {"gpt-4.1-mini"}
-    assert _translate_with(KIND_CASE, case_payload) == {"gpt-4.1-nano"}
+    assert _translate_with(KIND_CASE, case_payload) == {"gpt-4.1-mini"}
 
 
 def test_first_test_save_waits_for_option_explanations():

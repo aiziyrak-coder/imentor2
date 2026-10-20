@@ -925,6 +925,7 @@ export const AI_KIND_LABEL: Record<string, string> = {
   test_option_explanations: 'Test tahlili va variant izohlari',
   test_translate: 'Test tarjimasi',
   case_generate: 'Vaziyatli masala yaratish',
+  case_review: 'Vaziyatli masala: ekspert tekshiruvi',
   lecture_generate: 'Ma’ruza matni',
   presentation_generate: 'Taqdimot',
   presentation_generate_fallback: 'Taqdimot (zaxira urinish)',

@@ -285,3 +285,25 @@ describe('Xalq tabobati va farmakologiya kafedrasi', () => {
     ).toBe('clinical');
   });
 });
+
+describe('gigiyena mavzusi klinik fan ichida (2026-10-20)', () => {
+  it('kasalxona yoritilganligi bemor keysiga aylanmaydi', () => {
+    expect(
+      resolveSubjectDomain({
+        topic: 'Kasalxona xonalari yoritilganligining ahamiyati. (Aralash yoritilganlik)',
+        subjectName: 'Pediatriya ishi 2024-2025 (Milliy) 4-semestr Gigiena, harbiy gigiena. Tibbiy ekologiya',
+        departmentIsClinical: true,
+      }),
+    ).toBe('biomedical');
+  });
+
+  it('sun’iy o‘pka ventilyatsiyasi klinik mavzu bo‘lib qoladi', () => {
+    expect(
+      resolveSubjectDomain({
+        topic: 'O‘tkir nafas yetishmovchiligi. Sun’iy o‘pka ventilyatsiyasi',
+        subjectName: 'Anesteziologiya va reanimatologiya',
+        departmentIsClinical: true,
+      }),
+    ).toBe('clinical');
+  });
+});

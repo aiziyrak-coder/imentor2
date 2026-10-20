@@ -16,7 +16,9 @@ def test_exam_purposes_route_to_their_models(monkeypatch):
     assert oai.model_for("exam_review") == "gpt-5.4"
     assert oai.model_for("exam_generate") == "gpt-5.4-mini"
     assert oai.model_for("test_repair") == "gpt-5.4-mini"
-    assert oai.model_for("case_generate") == "gpt-4.1-nano"
+    # Keys 2026-10-20 dan test modellarida; boshqa vazifalar arzon modelda.
+    assert oai.model_for("case_generate") == "gpt-5.4-mini"
+    assert oai.model_for("handout_infographic") == "gpt-4.1-nano"
 
 
 def test_exam_review_model_env_is_allowlisted(monkeypatch):

@@ -50,7 +50,7 @@ export function caseWeaknesses(diagnosis: string, differential: string): CaseWea
   if (!dx || !dd) return out;          // bo'sh maydon boshqa joyda ushlanadi
 
   // 1. Fikr yo'li qatori — promptda AYNAN shu so'z talab qilingan.
-  if (!/fikr\s*yo['’`]?li/i.test(dx)) out.push('fikr_yoli_yoq');
+  if (!/(?:fikr|фикр)\s*(?:yo['’`ʻ‘]?li|юли|ёли)|ход\s+рассуждения|\breasoning\b/i.test(dx)) out.push('fikr_yoli_yoq');
 
   // 2. Xulosa raqamga tayanmasa — "yuqori/past" bilan o'tib ketgan.
   const vagueHits = (dx.match(VAGUE) || []).length;
@@ -60,8 +60,8 @@ export function caseWeaknesses(diagnosis: string, differential: string): CaseWea
   if (FILLER.some((re) => re.test(dx) || re.test(dd))) out.push('qolip_ibora');
 
   // 4. Differensial yorliqlari: QO'LLAB/RAD juftligi kamida ikki marta.
-  const pairs = (dd.match(/qo['’`]?llab\s*:/gi) || []).length;
-  const refuted = (dd.match(/\brad\s*:/gi) || []).length;
+  const pairs = (dd.match(/(?:qo['’`ʻ‘]?llab|(?<!\p{L})за|\bfor)\s*:/giu) || []).length;
+  const refuted = (dd.match(/(?:\brad|(?<!\p{L})против|\bagainst)\s*:/giu) || []).length;
   if (pairs < 2 || refuted < 2) out.push('differensial_yuzaki');
 
   return out;
@@ -86,4 +86,152 @@ export function weakCaseRetryNote(found: CaseWeakness[]): string {
     'Butunlay qayta yozing va FIKRLASH SHARTNOMASINING har bandini bajaring. ',
     'Mazmun aynan shu mavzuga oid qolsin.',
   ].join('\n');
+}
+
+/**
+ * Matn nuqsonlari (2026-10-20, prod tahlili: 400 keys, 105 savol qo'lda baholandi).
+ *
+ * gpt-4.1-nano davrida ko'rilgan, lekin `caseWeaknesses` ushlamagan narsalar:
+ *   * to'ldirilmagan shablon: "<Muqobil>", "<Nozologiya>", "<standard value>";
+ *   * JSON kalit nomi matnda: "patient: ...", "labs: ...";
+ *   * takrorlanish halqasi: "qattiq, qattiq, qattiq og'riq" bir maydonda 5–10 marta.
+ * Bunday matn talabaga ko'rsatilmasligi kerak — bir marta qayta so'raladi.
+ */
+export type CaseTextFlaw = 'shablon_qoldi' | 'kalit_nomi' | 'takrorlanish' | 'korsatma_sizdi';
+
+const PLACEHOLDER_RE = /<\s*[\p{L}][\p{L}\s'’ʻ‘`/.-]{1,40}\s*>/u;
+const KEY_LEAK_RE =
+  /(?:^|\n)\s*(?:patient|complaints|history|lifestyle|examination|labs|diagnosis|differential|investigations|management|recommendations|task)\s*:/i;
+
+/** Prompt ko'rsatmasi matnga ko'chgan (2026-10-20: "Ism, yosh va jins mosligi saqlangan holda"). */
+const INSTRUCTION_LEAK_RE =
+  /mosligi\s+saqlangan|BEMOR\s+qator|o['’`ʻ‘]zgartirmang|matnga\s+yozilmaydi|user\s+xabar|JSON\s+(?:maydon|kalit)|focus\s*=/i;
+
+/** Matndagi 6 so'zli bo'laklarning necha ulushi takror (0..1). */
+export function repetitionShare(text: string): number {
+  const ws = (text || '').toLowerCase().match(/[\p{L}\p{N}'’ʻ‘]+/gu) || [];
+  if (ws.length < 40) return 0;
+  const seen = new Map<string, number>();
+  for (let i = 0; i + 6 <= ws.length; i += 1) {
+    const g = ws.slice(i, i + 6).join(' ');
+    seen.set(g, (seen.get(g) || 0) + 1);
+  }
+  let dup = 0;
+  for (const c of seen.values()) if (c > 1) dup += c - 1;
+  return dup / Math.max(1, ws.length - 5);
+}
+
+/** Takror chegarasi: yaxshi keysda ~0–3%, nano halqalarida 15–60%. */
+const REPETITION_LIMIT = 0.1;
+
+export function caseTextFlaws(fields: Array<string | undefined | null>): CaseTextFlaw[] {
+  const parts = fields.map((f) => String(f || ''));
+  const all = parts.join('\n');
+  const out: CaseTextFlaw[] = [];
+  if (PLACEHOLDER_RE.test(all)) out.push('shablon_qoldi');
+  if (parts.some((p) => KEY_LEAK_RE.test(p))) out.push('kalit_nomi');
+  if (INSTRUCTION_LEAK_RE.test(all)) out.push('korsatma_sizdi');
+  if (parts.some((p) => repetitionShare(p) > REPETITION_LIMIT) || repetitionShare(all) > REPETITION_LIMIT) {
+    out.push('takrorlanish');
+  }
+  return out;
+}
+
+export function caseTextRetryNote(found: CaseTextFlaw[]): string {
+  const WHY: Record<CaseTextFlaw, string> = {
+    shablon_qoldi: 'matnda to\'ldirilmagan shablon qolgan (masalan "<Muqobil>", "<Nozologiya>") — o\'rniga aniq nom yozing',
+    kalit_nomi: 'matnda JSON kalit nomi qolgan ("patient:", "labs:") — har maydon oddiy matn bo\'lsin',
+    takrorlanish: 'bir xil gap yoki ibora qayta-qayta takrorlangan — har gap yangi fakt bersin',
+    korsatma_sizdi: 'matnga ko\'rsatma so\'zlari tushgan (masalan "mosligi saqlangan holda") — faqat keys mazmunini yozing',
+  };
+  return [
+    'OLDINGI NATIJA YAROQSIZ:',
+    ...found.map((k) => `- ${WHY[k]}`),
+    'Butunlay qayta yozing, mazmun shu mavzuda qolsin.',
+  ].join('\n');
+}
+
+/** HTML qoldiqlari (`<br>`) — mazmun emas, olib tashlanadi. */
+export function stripCaseHtml(text: string): string {
+  return (text || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/?(?:b|i|strong|em|p|div|span)>/gi, '');
+}
+
+/**
+ * Fikrlash yorliqlari promptda o'zbekcha ("FIKR YO'LI", "QO'LLAB", "RAD") —
+ * tekshiruv shunga tayanadi. Ruscha/inglizcha keysda ular talabaga chiqish
+ * tilida ko'rsatiladi (prodda "ФИКР YO'LI" kabi aralash yozuv uchragan).
+ */
+const LABELS: Record<'ru' | 'en', Array<[RegExp, string]>> = {
+  ru: [
+    [/(?:FIKR|ФИКР)\s*(?:YO['’`ʻ‘]?LI|ЙЎЛИ|ЮЛИ|ЁЛИ)/g, 'ХОД РАССУЖДЕНИЯ'],
+    [/CHALG['’`ʻ‘]?ITUVCHI/g, 'ОТВЛЕКАЮЩИЙ ПРИЗНАК'],
+    [/QO['’`ʻ‘]?LLAB\s*:/g, 'ЗА:'],
+    [/\bRAD\s*:/g, 'ПРОТИВ:'],
+  ],
+  en: [
+    [/(?:FIKR|ФИКР)\s*(?:YO['’`ʻ‘]?LI|ЙЎЛИ|ЮЛИ|ЁЛИ)/g, 'REASONING'],
+    [/CHALG['’`ʻ‘]?ITUVCHI/g, 'DISTRACTOR'],
+    [/QO['’`ʻ‘]?LLAB\s*:/g, 'FOR:'],
+    [/\bRAD\s*:/g, 'AGAINST:'],
+  ],
+};
+
+export function localizeCaseLabels(text: string, language: string): string {
+  if (language !== 'ru' && language !== 'en') return text;
+  return LABELS[language].reduce((acc, [re, to]) => acc.replace(re, to), text || '');
+}
+
+/**
+ * Vaziyatdagi TALQIN gaplarini olib tashlaydi (2026-10-20, harness v2).
+ *
+ * Promptdagi "vaziyat faqat fakt" qoidasi bajarilmadi: v2 da bitta vaziyatda
+ * ~8 ta "bu ... bekor qilmaydi", "bu oddiy bronxospazmga xos emas" kabi gap
+ * bor edi — talaba yechishi kerak bo'lgan xulosa oldindan aytilardi. Bunday
+ * gaplar deyarli doim talqin, shuning uchun kod ularni o'chiradi. Fakt
+ * yo'qolmasin deb: maydon gaplarining yarmidan ko'pi tushsa, maydon o'zgarmaydi.
+ */
+const INTERPRETIVE_RE = new RegExp(
+  [
+    "ko['’`ʻ‘]rsatadi", 'foydasiga', 'mos\\s+keladi', 'xos\\s+emas', "xos\\s+bo['’`ʻ‘]?l", 'ehtimol(?:ini|li)',
+    'bekor\\s+qilmaydi', 'farqlash\\s+uchun', 'tasdiqlaydi', 'istisno\\s+qil', 'inkor\\s+etmaydi', 'shubha\\s+uyg',
+    'zaiflashtiradi', 'kuchaytiradi', 'ishora\\s+qiladi', 'dalolat\\s+beradi', 'gumon\\s+qilish', 'muhim\\s+ahamiyat',
+    'указывает', 'свидетельствует', 'в\\s+пользу', 'характерн', 'исключает', 'подтверждает', 'соответствует',
+    'suggests?', 'consistent\\s+with', 'in\\s+favou?r\\s+of', 'rules?\\s+out', 'indicates?', 'confirms?', 'typical\\s+of',
+  ].join('|'),
+  'iu',
+);
+
+/** Talqin bo'lagi boshlanadigan joy: ", bu ...", " — bu ...", "... bo'lib, ...". */
+const CLAUSE_CUT_RE =
+  /(?:,|\s[—–-])\s*(?:lekin\s+|ammo\s+|biroq\s+|va\s+)?(?:bu|bular|shu|что|это|which|this)(?=\s)|\s+bo['’`ʻ‘]?lib,/giu;
+
+export function stripScenarioInterpretation(text: string): string {
+  const src = (text || '').trim();
+  if (!src) return src;
+  const lines = src.split('\n');
+  let total = 0;
+  let dropped = 0;
+  const out = lines.map((line) => {
+    const sentences = line.split(/(?<=[.!?])\s+(?=[\p{Lu}\d(«"*])/u);
+    const kept = sentences.flatMap((s) => {
+      if (!s.trim()) return [s];
+      total += 1;
+      const hit = INTERPRETIVE_RE.exec(s);
+      if (!hit) return [s];
+      // Avval faqat talqin qismini kesamiz: "Hb 116 g/L bo'lib, ... mos keladi" —
+      // qiymat qoladi. Kesish nuqtasi talqin so'zidan OLDIN bo'lishi kerak.
+      const cuts = Array.from(s.matchAll(CLAUSE_CUT_RE)).filter((m) => (m.index ?? 0) < hit.index && (m.index ?? 0) > 8);
+      if (cuts.length) {
+        dropped += 1;
+        return [`${s.slice(0, cuts[cuts.length - 1].index).replace(/[\s,;:—-]+$/, '')}.`];
+      }
+      // Kesib bo'lmasa va gapda fakt bo'lsa (raqam, qalin belgi, "yo'q") — qoladi.
+      if (/\d|\*\*|yo['’`ʻ‘]q|нет|absent|\bno\b/i.test(s)) return [s];
+      dropped += 1;
+      return [];
+    });
+    return kept.join(' ');
+  });
+  if (!dropped || dropped * 2 > total) return src;
+  return out.join('\n').replace(/[ \t]+\n/g, '\n').trim();
 }
