@@ -337,13 +337,102 @@ function sourceWords(language: AppLanguage) {
 
 function textReferencesRule(hasBookContext: boolean, language: AppLanguage = 'uz'): string {
   const w = sourceWords(language);
-  const base = hasBookContext ? NO_EXTERNAL_REFS_TEXT_RULE_BOOK : NO_EXTERNAL_REFS_TEXT_RULE_NOBOOK;
+  // Darsliksiz holatda sarlavha nomini aytmaymiz: "## Manbalar ni yozmang" bilan
+  // birga "sarlavha aynan ## Manbalar bo'lsin" deyilsa, model bo'sh yoki
+  // o'ylab topilgan manba bo'limini qo'shib qo'yardi (2026-10-20 sinovi, 6/6).
+  if (!hasBookContext) return NO_EXTERNAL_REFS_TEXT_RULE_NOBOOK;
+  const base = NO_EXTERNAL_REFS_TEXT_RULE_BOOK;
   return (
     `${base} Manba sarlavhasi va yorlig'i CHIQISH tilida yozilsin: bo'lim sarlavhasi ` +
     `aynan "## ${w.heading}", matn ichidagi yorliq esa aynan "(${w.label}: ...)". ` +
     'Bu so\'zlarni boshqa tilga transliteratsiya QILMANG.'
   );
 }
+
+/** Darsliksiz ma'ruzada model baribir "## Manbalar" qo'shsa (bo'sh yoki
+ * "Zamonaviy tibbiy adabiyotlar" kabi o'ylab topilgan), o'sha bo'lim
+ * oxirigacha olib tashlanadi — manba ko'rsatilmagani ma'qul. */
+function stripSourcesSection(text: string): string {
+  const lines = text.split('\n');
+  const idx = lines.findIndex((l) => SOURCE_HEADING_RE.test(l.trim()));
+  if (idx < 0) return text;
+  const rest = lines.slice(idx + 1);
+  const next = rest.findIndex((l) => /^#{1,2}\s/.test(l.trim()));
+  const kept = next < 0 ? [] : rest.slice(next);
+  return [...lines.slice(0, idx), ...kept].join('\n').trimEnd();
+}
+
+/** Ma'ruza tuzilmasi — domenga qarab: sarlavha uch tilda + bo'lim mazmuni (inglizcha
+ * izoh). Ilgari faqat "7-9 ta asosiy bo'lim" so'ralardi: nano bir mexanizmni
+ * 3 bo'limda takrorlar, eklampsiya ma'ruzasida magniy sulfat umuman tilga
+ * olinmasdi (2026-10-20 sinovi). Sarlavha CHIQISH tilida beriladi: faqat
+ * o'zbekcha berilganda ruscha ma'ruzada "## Кириш", "## Хулоса" chiqdi. */
+type LecturePlanItem = { uz: string; ru: string; en: string; hint: string };
+const plan = (uz: string, ru: string, en: string, hint = ''): LecturePlanItem => ({ uz, ru, en, hint });
+const PLAN_INTRO_END = [
+  plan('Xulosa', 'Заключение', 'Conclusion', '5-7 key take-away points'),
+  plan('Nazorat savollari', 'Контрольные вопросы', 'Review questions', '5-7 questions'),
+];
+const LECTURE_PLAN: Record<SubjectDomain, LecturePlanItem[]> = {
+  clinical: [
+    plan('Kirish', 'Введение', 'Introduction', 'relevance, epidemiology figures, lecture outline'),
+    plan('Ta\'rif va tasnif', 'Определение и классификация', 'Definition and classification', 'current international classification, named'),
+    plan('Etiologiya va xavf omillari', 'Этиология и факторы риска', 'Etiology and risk factors'),
+    plan('Patogenez', 'Патогенез', 'Pathogenesis', 'step-by-step mechanism'),
+    plan('Klinik manzara', 'Клиническая картина', 'Clinical picture', 'forms, stages, severity grades'),
+    plan('Diagnostika', 'Диагностика', 'Diagnosis', 'criteria, cut-off values, laboratory and instrumental methods'),
+    plan('Differensial diagnostika', 'Дифференциальная диагностика', 'Differential diagnosis', 'distinguishing features for each similar condition'),
+    plan('Davolash', 'Лечение', 'Treatment', 'principles, first-line drugs with doses, emergency care, surgical indications'),
+    plan('Asoratlar, prognoz va profilaktika', 'Осложнения, прогноз и профилактика', 'Complications, prognosis and prevention'),
+    ...PLAN_INTRO_END,
+  ],
+  biomedical: [
+    plan('Kirish', 'Введение', 'Introduction', 'place of the topic in the subject and in medicine, lecture outline'),
+    plan('Asosiy tushunchalar va tasnif', 'Основные понятия и классификация', 'Key concepts and classification'),
+    plan('Tuzilma va asoslar', 'Строение и основы', 'Structure and foundations', 'morphological, physical or chemical basis'),
+    plan('Mexanizmlar va jarayonlar', 'Механизмы и процессы', 'Mechanisms and processes', 'step by step, naming enzymes/receptors/mediators'),
+    plan('Boshqarilishi va me\'yoriy ko\'rsatkichlar', 'Регуляция и нормальные показатели', 'Regulation and normal values', 'reference values with units'),
+    plan('Buzilishlar va ularning tibbiy ahamiyati', 'Нарушения и их медицинское значение', 'Disorders and their medical significance'),
+    plan('Tekshirish usullari', 'Методы исследования', 'Investigation methods', 'laboratory, imaging or experimental methods and their interpretation'),
+    ...PLAN_INTRO_END,
+  ],
+  academic: [
+    plan('Kirish', 'Введение', 'Introduction', 'place of the topic in the subject, lecture outline'),
+    plan('Asosiy tushunchalar va ta\'riflar', 'Основные понятия и определения', 'Key concepts and definitions'),
+    plan('Nazariy asoslar', 'Теоретические основы', 'Theoretical foundations', 'laws, formulas, their derivation or justification'),
+    plan('Turlari va tasnifi', 'Виды и классификация', 'Types and classification'),
+    plan('Ishlangan misollar', 'Разобранные примеры', 'Worked examples', 'at least 2, with step-by-step solution or analysis'),
+    plan('Amaliy qo\'llanilishi', 'Практическое применение', 'Practical applications', 'within this field'),
+    ...PLAN_INTRO_END,
+  ],
+};
+
+function lecturePlanText(domain: SubjectDomain, language: AppLanguage): string {
+  return (LECTURE_PLAN[domain] ?? LECTURE_PLAN.clinical)
+    .map((item) => `## ${item[language] ?? item.uz}${item.hint ? `  [content: ${item.hint}]` : ''}`)
+    .join('\n');
+}
+
+/** Model ba'zan reja izohini sarlavhaga ko'chirib yozadi
+ * ("## Kirish [content: ...]" yoki qavs ichida) — izoh olib tashlanadi. */
+function stripPlanHintsFromHeadings(text: string, domain: SubjectDomain, language: AppLanguage): string {
+  const items = LECTURE_PLAN[domain] ?? LECTURE_PLAN.clinical;
+  return text
+    .split('\n')
+    .map((line) => {
+      const m = /^##\s+(.+)$/.exec(line);
+      if (!m) return line;
+      for (const item of items) {
+        const title = item[language] ?? item.uz;
+        if (!m[1].startsWith(title)) continue;
+        const tail = m[1].slice(title.length).trim();
+        if (/^[([]/.test(tail) && /[)\]]$/.test(tail)) return `## ${title}`;
+      }
+      return line;
+    })
+    .join('\n');
+}
+
 
 /**
  * Bir xil boshlang'ich qismli parallel so'rovlarda birinchisi shuncha oldin
@@ -3130,61 +3219,64 @@ export const aiService = {
       assertOpenAiApiKey();
       const outLang = languageName(language);
       const bookContext: BookContext | undefined = subjectCode ? { subjectCode, topicQuery: topic } : undefined;
-      const applyBlock =
-        domain === 'academic'
-          ? '## Amaliy qo\'llash'
-          : domain === 'biomedical'
-            ? '## Amaliy va klinik ahamiyati'
-            : '## Klinik / amaliy qo\'llash';
       const domainGuard =
         domain === 'academic'
-          ? 'DOMEN: klinik BO\'LMAGAN fan (informatika, matematika, elektronika, til, ijtimoiy fan va h.k.). ' +
+          ? 'DOMEN: klinik BO\'LMAGAN fan (informatika, matematika, fizika, elektronika, til, ijtimoiy fan va h.k.). ' +
             'BEMOR, kasallik, tashxis, dori-darmon, KROK/USMLE uslubidagi klinik misollar TAQIQLANADI — ' +
             'faqat shu fanga xos amaliy misol va qo\'llanmalar keltiring. '
           : domain === 'biomedical'
-            ? 'DOMEN: tibbiy-nazariy fan (anatomiya, fiziologiya, biokimyo, mikrobiologiya, farmakologiya, gigiyena). ' +
-              'Mexanizm, tuzilma, me\'yor va laboratoriya ko\'rsatkichi o\'rinli; klinik ahamiyati qisqa eslatib ' +
-              'o\'tiladi, lekin INDIVIDUAL BEMOR kartasi va tashxis-davolash vignette YOZILMAYDI. '
+            ? 'DOMEN: tibbiy-nazariy fan (anatomiya, fiziologiya, biokimyo, mikrobiologiya, farmakologiya, gigiyena, ' +
+              'nurli tashxis). Mexanizm, tuzilma, me\'yor va laboratoriya ko\'rsatkichi o\'rinli; klinik ahamiyati ' +
+              'eslatib o\'tiladi, lekin INDIVIDUAL BEMOR kartasi va tashxis-davolash vignette YOZILMAYDI. '
             : '';
+      const lecturePlan = lecturePlanText(domain, language);
       const requestLecture = () => openaiTextStream({
         model: OPENAI_CHAT,
-        system: `${sysRole(domain)} DARAJA: bu OLIY TA'LIM (universitet, 3-6 kurs yoki rezidentura) ma\'ruzasi — ` +
-          'maktab yoki 1-kurs kirish darsi EMAS. O\'quvchi allaqachon asosiy fanlarni bilishini hisobga oling: ' +
-          'soddalashtirilgan ta\'riflar bilan boshlamang, darhol chuqur ilmiy-nazariy tahlilga o\'ting. ' +
+        system: `${sysRole(domain)} Siz oliy ta'lim (universitet, 3-6 kurs yoki rezidentura) uchun ma'ruza ` +
+          'matni yozasiz. O\'quvchi asosiy fanlarni biladi: maktab darajasidagi soddalashtirilgan ta\'riflar ' +
+          'bilan vaqt yo\'qotmang. ' +
           domainGuard +
-          'Ma\'ruza faqat Markdown. HAJM: qisqa konspekt EMAS — real 60-90 daqiqalik ' +
-          'universitet ma\'ruzasi (taxminan 3500-6000 so\'z yoki undan ko\'p). ' +
-          'Tuzilma majburiy: # sarlavha; ## Kirish (ahamiyat, maqsad, reja — kamida 3-4 paragraf); ' +
-          'kamida 7-9 ta ## asosiy bo\'lim (har birida kamida 4-6 to\'liq paragraf + kerak bo\'lsa ### ' +
-          `va ro\'yxatlar; ta\'rif, mexanizm, tasnif, misol); ${applyBlock} (kamida 3-4 ` +
-          'paragraf); ## Xulosa (asosiy xulosalar). ' +
-          'CHUQURLIK MAJBURIY (bu eng muhim talab): har bir tushuncha uchun NIMA emas, NEGA va QANDAY ' +
-          'ekanini tushuntiring — molekulyar/hujayraviy/fiziologik mexanizmlarni bosqichma-bosqich ' +
-          'yoritilsin (masalan reseptor→signal yo\'li→hujayra javobi, yoki sabab→patofiziologik ' +
-          'zanjir→klinik natija), aniq raqamlar/qiymatlar/tasniflar (masalan ICD, WHO, standart ' +
-          'shkalalar) keltiring, o\'xshash holatlarni bir-biridan farqlang (differensial jihatlar), ' +
-          'ziddiyatli/munozarali qarashlar bo\'lsa ularni ham ko\'rsating. HAR BIR paragrafda kamida ' +
-          'bitta aniq dalil, mexanizm, raqam yoki misol bo\'lsin — umumiy ta\'riflarni qayta ' +
-          'ifodalovchi "suvli" jumlalar taqiqlanadi. Sayoz umumiy gaplar bilan cheklanmang — chuqur ' +
-          'tushuntiring, ta\'rif va misollarni ochib yozing. ' +
+          'FORMAT: faqat Markdown. # sarlavha (mavzu nomi), keyin quyidagi ## bo\'limlar AYNAN shu tartibda. ' +
+          'Kvadrat qavsdagi [content: ...] — faqat siz uchun izoh, uni sarlavhaga YOZMANG; sarlavhalarni ' +
+          'AYNAN shu ko\'rinishda (shu tilda) yozing, birorta bo\'limni ' +
+          `tashlab ketmang:\n${lecturePlan}\n` +
+          'HAJM: 2500-4000 so\'z (60-80 daqiqalik ma\'ruza). Uzunlik suv bilan emas, FAKTLAR bilan ' +
+          'to\'ldiriladi.\n' +
+          'MAZMUN TALABLARI (eng muhim):\n' +
+          '1. Mavzuning asosiy faktlari ALBATTA bo\'lsin: amaldagi xalqaro tasnif (nomi bilan: ' +
+          'WHO, ESC, ACOG, ISSHP, GOLD, Fleischner, ICD-11 va h.k. — qaysi biri shu mavzuga tegishli bo\'lsa), ' +
+          'diagnostik mezonlar va chegara qiymatlar (raqam + birlik), birinchi tanlov davosi yoki asosiy ' +
+          'usul (dori nomi, doza, yo\'li), asosiy formula yoki qonun. Ma\'ruzani o\'qigan talaba shu ' +
+          'mavzudagi imtihon savollariga javob bera olishi kerak.\n' +
+          '2. Mexanizmlar bosqichma-bosqich: sabab → oraliq bo\'g\'inlar (molekula, hujayra, a\'zo) → natija. ' +
+          'Umumiy so\'zlar ("buziladi", "muhim rol o\'ynaydi", "ta\'sir qiladi") o\'rniga AYNAN qaysi modda, ' +
+          'qaysi retseptor, qaysi ko\'rsatkich qanday o\'zgarishini yozing.\n' +
+          '3. TAKRORLASH TAQIQLANADI: har bir fakt va mexanizm faqat BIR marta, o\'z bo\'limida yoritiladi. ' +
+          'Ikki bo\'limda bir xil gapni boshqa so\'zlar bilan yozish — xato. Kirish va Xulosa asosiy ' +
+          'qismni qayta hikoya qilmaydi.\n' +
+          '4. FORMAT CHEKLOVI: ekran jadval va LaTeX ni ko\'rsatmaydi. Markdown jadval (| ... |) YOZMANG — ' +
+          'tasnif va taqqoslashni ### kichik sarlavha + ro\'yxat bilan bering. Formulalar oddiy matnda, ' +
+          'Unicode belgilar bilan: v = v₀ + a·t, s = v₀·t + a·t²/2 (\\frac, \\vec, $...$ TAQIQLANADI).\n' +
+          '5. ANIQLIK: shubhali raqam, doza yoki tasnifni o\'ylab topmang — bilmagan narsani yozmagan ' +
+          'ma\'qul. Eskirgan yoki bekor qilingan yondashuvni hozirgi standart sifatida bermang.\n' +
+          '6. Atamalar o\'zbek tibbiy/ilmiy adabiyotida qabul qilingan shaklda; inglizcha so\'zni so\'zma-so\'z ' +
+          'tarjima qilmang (masalan foam cells = "ko\'pikli hujayralar"). Lotin/xalqaro atama kerak bo\'lsa ' +
+          'qavs ichida bir marta beriladi.\n' +
+          '7. Bu ko\'rsatmalarning so\'zlarini ("NIMA", "NEGA", "imtihon", "asosiy faktlar", "content") ' +
+          'matnga yorliq qilib yozmang.\n' +
           (bookContext
-            ? 'Berilgan darslik parchalaridagi BARCHA tegishli tafsilotlardan to\'liq foydalaning — ' +
-              'qisqartirmasdan, kengaytirib tushuntiring. Har bir parcha "[Manba: kitob nomi, N-bet]" ' +
-              'sarlavhasi bilan keladi — nom va sahifa sizda bor. HAR BIR ## bo\'limda kamida bitta ' +
-              '"(Manba: kitob nomi, N-bet)" yozing va u yerga o\'sha sarlavhadagi AYNAN o\'sha nom ' +
-              'bilan raqamni ko\'chiring. Manbasiz bo\'lim qoldirmang.'
-            : 'Tashqi havola yoki o\'ylab topilgan manba qo\'shmang.'
-          ) + ` ${textReferencesRule(Boolean(bookContext), language)} Til: ${outLang}. ${strictLanguageDirective(language)}`,
+            ? 'Berilgan darslik parchalari asosiy manba: ulardagi tegishli tafsilotlardan to\'liq foydalaning. ' +
+              'Har bir parcha "[Manba: kitob nomi, N-bet]" sarlavhasi bilan keladi. Parchadan olingan fakt ' +
+              'yonida "(Manba: kitob nomi, N-bet)" yozing — nom va raqamni AYNAN sarlavhadan ko\'chiring. '
+            : ''
+          ) + `${textReferencesRule(Boolean(bookContext), language)} Til: ${outLang}. ${strictLanguageDirective(language)}`,
         user:
           `Mavzu: "${topic}". Qo'shimcha: ${description || '—'}. ` +
-          'UZUN va BATAFSIL, OLIY TA\'LIM darajasidagi ma\'ruza matni yozing — qisqa xulosa, ' +
-          'tezislar yoki maktab darsligidagi soddalashtirilgan bayon emas. Universitet talabasi ' +
-          'darsdan keyin mustaqil o\'qib, mexanizmni to\'liq tushunib olishi kerak bo\'lgan darajada ' +
-          'yozing. Kamida 7 ta asosiy bo\'lim, har biri bir necha to\'liq paragraf, har bir paragrafda ' +
-          'aniq mexanizm/raqam/misol. ' +
+          'Shu mavzu bo\'yicha yuqoridagi tuzilma va talablarga to\'liq mos ma\'ruza matnini yozing. ' +
+          'Yozishdan oldin ichingizda mavzuning eng muhim 10-15 faktini (tasnif, mezon, raqam, asosiy ' +
+          'dori/usul/formula) aniqlab oling va ularning har biri matnda bo\'lishini ta\'minlang. ' +
           (bookContext
-            ? `Darslik manbalarini matn ichida (${sourceWords(language).label}: ...) ko'rsating va ` +
-              `oxirida "## ${sourceWords(language).heading}" bo'limini qo'shing.`
+            ? `Oxirida "## ${sourceWords(language).heading}" bo'limida faqat ishlatilgan darsliklarni sanang.`
             : '') +
           // Til ko'rsatmasi oxirida ham: noto'g'ri tilda chiqqan ma'ruza
           // 16 000 tokengacha qayta yoziladi.
@@ -3211,7 +3303,12 @@ export const aiService = {
 
       return {
         topic: topic,
-        content: normalizeSourceHeading(stripPlaceholderManba(content || ''), language)
+        content: normalizeSourceHeading(
+          stripPlaceholderManba(
+            stripPlanHintsFromHeadings(bookContext ? content || '' : stripSourcesSection(content || ''), domain, language),
+          ),
+          language,
+        ),
       };
     } catch (error) {
       console.error("Lecture Note generation failed:", error);

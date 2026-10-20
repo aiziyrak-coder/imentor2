@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
+import threading
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -215,6 +217,51 @@ def education_ai_image_safety(
     return EducationAiImageSafetyResponse(results=results)
 
 
+#: Oqimda shu soniyadan ko'p jimlik bo'lsa mijozga SSE izoh (": ping")
+#: yuboriladi. Host nginx 300 s jim ulanishni uzadi; OpenAI'ga qayta urinish
+#: (ulanish + kutish + pauza) shu oraliqda ko'rinmas o'tishi kerak.
+STREAM_KEEPALIVE_SECONDS = 15
+
+
+def _with_keepalive(make_stream):
+    """Oqimni fon oqimida o'qiydi: ("text", bo'lak), jimlikda ("ping", None),
+    xatoda ("error", xabar) qaytaradi."""
+    q: queue.Queue = queue.Queue()
+    stop = threading.Event()
+
+    def worker():
+        try:
+            stream = make_stream()
+            for delta in stream:
+                if stop.is_set():
+                    # Mijoz ketdi — OpenAI oqimi yopiladi, token behuda sarflanmaydi.
+                    stream.close()
+                    return
+                q.put(("text", delta))
+            q.put(("done", None))
+        except oai.OpenAiClientError as e:
+            q.put(("error", str(e)))
+        except Exception as e:  # noqa: BLE001 — oqim osilib qolmasin
+            logger.warning("AI stream worker xatosi", exc_info=True)
+            q.put(("error", str(e) or "AI stream failed. Please retry."))
+
+    threading.Thread(target=worker, daemon=True).start()
+    try:
+        while True:
+            try:
+                kind, value = q.get(timeout=STREAM_KEEPALIVE_SECONDS)
+            except queue.Empty:
+                yield "ping", None
+                continue
+            if kind == "done":
+                return
+            yield kind, value
+            if kind == "error":
+                return
+    finally:
+        stop.set()
+
+
 @router.post("/education-ai/completion/stream/")
 def education_ai_completion_stream(
     payload: EducationAiCompletionRequest,
@@ -257,32 +304,39 @@ def education_ai_completion_stream(
     # kechikadi — ulanishni shu yerda qo'lda qaytaramiz.
     _release_db(db)
 
-    model = payload.model.strip() or settings.openai_chat_model
+    # Model vazifadan tanlanadi (oddiy completion bilan bir xil). Ilgari bu yerda
+    # brauzer yuborgan nom ishlatilardi — ma'ruza doim nano'da qolardi.
+    model = _economy_model(payload.model, settings, payload.purpose)
 
     stream_key = _cache_key(auth, payload, messages, stream=True)
+    # Generatsiya keshlanmaydi: aks holda "Qayta yaratish" 14 kun davomida
+    # o'sha ma'ruzani qaytarardi (o'qituvchi yomon matnni almashtira olmasdi).
+    use_cache = not (payload.purpose or "").endswith("_generate")
 
     def _gen():
-        cached = _cache_get(stream_key)
+        cached = _cache_get(stream_key) if use_cache else None
         if cached and cached.get("content"):
             yield f"data: {json.dumps({'delta': cached['content']})}\n\n"
             yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
             return
         parts = []
-        try:
-            for delta in oai.stream_openai_chat(
-                api_key,
-                messages=messages,
-                model=model,
-                max_tokens=payload.max_tokens,
-                temperature=payload.temperature,
-                timeout_sec=280,
-            ):
-                parts.append(delta)
-                yield f"data: {json.dumps({'delta': delta})}\n\n"
-        except oai.OpenAiClientError as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            return
-        if parts:
+        for kind, value in _with_keepalive(lambda: oai.stream_openai_chat(
+            api_key,
+            messages=messages,
+            model=model,
+            max_tokens=payload.max_tokens,
+            temperature=payload.temperature,
+            usage_kind=payload.purpose or "chat_stream",
+        )):
+            if kind == "ping":
+                yield ": ping\n\n"
+            elif kind == "error":
+                yield f"data: {json.dumps({'error': value})}\n\n"
+                return
+            else:
+                parts.append(value)
+                yield f"data: {json.dumps({'delta': value})}\n\n"
+        if parts and use_cache:
             _cache_set(stream_key, {"content": "".join(parts)})
         yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
 

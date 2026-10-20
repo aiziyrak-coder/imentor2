@@ -145,3 +145,28 @@ def test_wrong_case_heading_makes_translation_invalid():
     bad = {"scenario": "### Participation of Kim\nOlimjon teaches philosophy at the university and works with the students.", "answer": "", "focus": ""}
     assert i18n._translation_ok(src, good, "en", i18n.KIND_CASE)
     assert not i18n._translation_ok(src, bad, "en", i18n.KIND_CASE)
+
+
+def test_lecture_in_latin_transliterated_russian_is_rejected():
+    from app.services import content_i18n
+
+    translit = (
+        "## Lechenie\n\nOsnovnaya tsel' lecheniya — predotvratit' oslozhneniya u materi i "
+        "obespechit' bezopasnyye rody. Obshchie printsipy: gospitalizatsiya, kontrol' davleniya, "
+        "kontrol' diureza, otsenka nevrologicheskogo statusa i monitoring ploda."
+    ) * 2
+    assert i18n.detect_language(translit) == "?"
+    assert not content_i18n._language_ok(translit, "ru")
+    # Qisqa, aniqlab bo'lmaydigan matn (formula, dori nomi) avvalgidek o'tadi.
+    assert content_i18n._language_ok("TNF-α, IL-1β, IL-6", "ru")
+
+
+def test_lecture_chunks_keep_blank_lines_between_them():
+    from app.services import content_i18n
+
+    pieces = ["Matn birinchi bo'lak.\n\n", "### Ikkinchi\nMatn."]
+    with patch.object(content_i18n, "_translate_many", return_value=["Текст первый.", "### Второй\nТекст."]), \
+         patch.object(content_i18n.ci, "_split_long", return_value=pieces), \
+         patch.object(content_i18n.ci, "_translate_strings", return_value=["Тема"]):
+        block = content_i18n._translate_lecture("k", "m", {"topic": "Mavzu", "content": "".join(pieces)}, "uz", "ru")
+    assert block["content"] == "Текст первый.\n\n### Второй\nТекст."

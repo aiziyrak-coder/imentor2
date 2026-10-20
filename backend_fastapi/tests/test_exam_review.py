@@ -72,3 +72,11 @@ def test_review_chunks_map_back_to_the_right_questions():
         out = exam_review.review_exam_questions("k", qs, subject="s", department="d", lang_name="o'zbek")
     assert call.call_count == 2
     assert [q["text"] for q in out] == ["q1", "q3", "q4", "q5", "q6"]
+
+
+def test_lecture_uses_test_generate_model(monkeypatch):
+    monkeypatch.delenv("OPENAI_TEST_GENERATE_MODEL", raising=False)
+    assert oai.model_for("lecture_generate") == "gpt-5.4-mini"
+    assert oai.model_for("lecture_translate") == "gpt-4.1-nano"
+    monkeypatch.setenv("OPENAI_TEST_GENERATE_MODEL", "gpt-4.1-mini")
+    assert oai.model_for("lecture_generate") == "gpt-4.1-mini"

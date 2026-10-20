@@ -66,9 +66,15 @@ PRESENTATION_PURPOSES = frozenset({
 #: ekspert tekshiruv OPENAI_TEST_REVIEW_MODEL.
 CASE_GENERATE_PURPOSES = frozenset({"case_generate"})
 CASE_REVIEW_PURPOSES = frozenset({"case_review"})
+#: Ma'ruza matni (2026-10-20): nano'da 1000-1400 so'z chiqar, tibbiy xatolar
+#: bo'lardi (eklampsiyada magniy sulfat yo'q, rentgenda infiltrat "qorong'u").
+#: Lokal sinov (6 mavzu): gpt-5.4-mini ~2000 so'z, tasnif, mezon va dozalar
+#: to'g'ri. Test bilan bir xil model — OPENAI_TEST_GENERATE_MODEL.
+#: Hajmi kichik: haftasiga ~30-50 ta ma'ruza, bittasi ~$0.03.
+LECTURE_PURPOSES = frozenset({"lecture_generate"})
 QUALITY_PURPOSES = (
     GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
-    | CASE_GENERATE_PURPOSES | CASE_REVIEW_PURPOSES
+    | CASE_GENERATE_PURPOSES | CASE_REVIEW_PURPOSES | LECTURE_PURPOSES
 )
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
 #: o'tib ketmasin (masalan "gpt-5.5-pro").
@@ -113,9 +119,9 @@ QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 
 
 def model_for(purpose: str | None) -> str:
-    """Vazifaga qarab model: test, keys, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
+    """Vazifaga qarab model: test, keys, ma'ruza, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
     p = purpose or ""
-    if p in GENERATE_PURPOSES or p in CASE_GENERATE_PURPOSES:
+    if p in GENERATE_PURPOSES or p in CASE_GENERATE_PURPOSES or p in LECTURE_PURPOSES:
         return test_generate_model()
     if p in REVIEW_PURPOSES or p in CASE_REVIEW_PURPOSES:
         return test_review_model()
@@ -343,6 +349,17 @@ def generate_openai_chat(
     return _complete_cached(api_key, body, timeout_sec, usage_kind)
 
 
+#: Oqim (ma'ruza) uchun: birinchi bo'lakkacha bo'lgan vaqtinchalik xatoda
+#: necha marta urinish va oraliqlar. Ulanish uchun alohida qisqa timeout.
+STREAM_ATTEMPTS = 3
+STREAM_RETRY_DELAYS = (2.0, 5.0)
+STREAM_CONNECT_TIMEOUT = 15
+
+
+class _TransientOpenAiError(OpenAiClientError):
+    """Qayta urinsa o'tishi mumkin bo'lgan xato: uzilish, timeout, 429, 5xx."""
+
+
 def stream_openai_chat(
     api_key: str,
     *,
@@ -350,13 +367,19 @@ def stream_openai_chat(
     model: str = "gpt-4.1-nano",
     max_tokens: int = 4096,
     temperature: float = 0.35,
-    timeout_sec: int = 280,
+    timeout_sec: int = 120,
     usage_kind: str = "chat_stream",
+    attempts: int = STREAM_ATTEMPTS,
 ) -> Iterator[str]:
     """OpenAI chat completion'ni SSE orqali oqim (stream) sifatida o'qib,
     har bir matn bo'lagini (`delta.content`) navbat bilan qaytaradi.
     Foydalanuvchi generatsiya jarayonida darhol matnni ko'rib turishi uchun —
-    umumiy vaqt bir xil, lekin sezilgan tezlik ancha yaxshilanadi."""
+    umumiy vaqt bir xil, lekin sezilgan tezlik ancha yaxshilanadi.
+
+    Birinchi matn bo'lagi kelguncha vaqtinchalik xato (uzilish, timeout, 429,
+    5xx) bo'lsa `attempts` martagacha qayta uriniladi. Matn yuborila boshlangach
+    qayta urinilmaydi — mijoz yarim matnni olgan bo'ladi, uni frontend
+    butunlay qaytadan so'raydi. `timeout_sec` — ikki bo'lak orasidagi kutish."""
     body = {
         "model": _economy_model_name(model),
         "messages": _clip_messages_for_cost(messages),
@@ -367,16 +390,35 @@ def stream_openai_chat(
         "stream_options": {"include_usage": True},
     }
     body = _adapt_body_for_model(body)
+    for attempt in range(1, max(1, attempts) + 1):
+        started = False
+        try:
+            for text in _stream_once(api_key, body, timeout_sec, usage_kind):
+                started = True
+                yield text
+            return
+        except _TransientOpenAiError as exc:
+            if started or attempt >= attempts:
+                raise
+            delay = STREAM_RETRY_DELAYS[min(attempt - 1, len(STREAM_RETRY_DELAYS) - 1)]
+            logging.getLogger(__name__).warning(
+                "OPENAI_STREAM_RETRY kind=%s urinish=%s/%s %.0fs dan keyin: %s",
+                usage_kind, attempt, attempts, delay, str(exc)[:160],
+            )
+            time.sleep(delay)
+
+
+def _stream_once(api_key: str, body: dict, timeout_sec: int, usage_kind: str) -> Iterator[str]:
     try:
         resp = requests.post(
             OPENAI_CHAT_URL,
             json=body,
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout_sec,
+            timeout=(STREAM_CONNECT_TIMEOUT, timeout_sec),
             stream=True,
         )
     except requests.RequestException as e:
-        raise OpenAiClientError(str(e)) from e
+        raise _TransientOpenAiError(str(e)) from e
 
     completed = False
     try:
@@ -387,7 +429,8 @@ def stream_openai_chat(
                 msg = resp.text
             if _is_quota_exhausted(msg):
                 raise OpenAiClientError(QUOTA_EXHAUSTED_MESSAGE)
-            raise OpenAiClientError(f"HTTP {resp.status_code}: {msg}")
+            err = _TransientOpenAiError if resp.status_code == 429 or resp.status_code >= 500 else OpenAiClientError
+            raise err(f"HTTP {resp.status_code}: {msg}")
         for raw_line in resp.iter_lines(decode_unicode=True):
             if not raw_line or not raw_line.startswith("data:"):
                 continue
@@ -412,9 +455,9 @@ def stream_openai_chat(
             if text:
                 yield text
         if not completed:
-            raise OpenAiClientError("AI stream ended before completion. Please retry.")
+            raise _TransientOpenAiError("AI stream ended before completion. Please retry.")
     except requests.RequestException as exc:
-        raise OpenAiClientError(str(exc)) from exc
+        raise _TransientOpenAiError(str(exc)) from exc
     finally:
         resp.close()
 
