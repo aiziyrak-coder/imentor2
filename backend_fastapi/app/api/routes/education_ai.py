@@ -257,12 +257,17 @@ def education_ai_completion_stream(
     # kechikadi — ulanishni shu yerda qo'lda qaytaramiz.
     _release_db(db)
 
-    model = payload.model.strip() or settings.openai_chat_model
+    # Model vazifadan tanlanadi (oddiy completion bilan bir xil). Ilgari bu yerda
+    # brauzer yuborgan nom ishlatilardi — ma'ruza doim nano'da qolardi.
+    model = _economy_model(payload.model, settings, payload.purpose)
 
     stream_key = _cache_key(auth, payload, messages, stream=True)
+    # Generatsiya keshlanmaydi: aks holda "Qayta yaratish" 14 kun davomida
+    # o'sha ma'ruzani qaytarardi (o'qituvchi yomon matnni almashtira olmasdi).
+    use_cache = not (payload.purpose or "").endswith("_generate")
 
     def _gen():
-        cached = _cache_get(stream_key)
+        cached = _cache_get(stream_key) if use_cache else None
         if cached and cached.get("content"):
             yield f"data: {json.dumps({'delta': cached['content']})}\n\n"
             yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
@@ -276,13 +281,14 @@ def education_ai_completion_stream(
                 max_tokens=payload.max_tokens,
                 temperature=payload.temperature,
                 timeout_sec=280,
+                usage_kind=payload.purpose or "chat_stream",
             ):
                 parts.append(delta)
                 yield f"data: {json.dumps({'delta': delta})}\n\n"
         except oai.OpenAiClientError as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
-        if parts:
+        if parts and use_cache:
             _cache_set(stream_key, {"content": "".join(parts)})
         yield f"data: {json.dumps({'done': True, 'book_references': book_references})}\n\n"
 

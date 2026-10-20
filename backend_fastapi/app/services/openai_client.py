@@ -59,7 +59,15 @@ PRESENTATION_MODEL = "gpt-4.1-mini"
 PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
 })
-QUALITY_PURPOSES = GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+#: Ma'ruza matni (2026-10-20): nano'da 1000-1400 so'z chiqar, tibbiy xatolar
+#: bo'lardi (eklampsiyada magniy sulfat yo'q, rentgenda infiltrat "qorong'u").
+#: Lokal sinov (6 mavzu): gpt-5.4-mini ~2000 so'z, tasnif, mezon va dozalar
+#: to'g'ri. Test bilan bir xil model — OPENAI_TEST_GENERATE_MODEL.
+#: Hajmi kichik: haftasiga ~30-50 ta ma'ruza, bittasi ~$0.03.
+LECTURE_PURPOSES = frozenset({"lecture_generate"})
+QUALITY_PURPOSES = (
+    GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES | LECTURE_PURPOSES
+)
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
 #: o'tib ketmasin (masalan "gpt-5.5-pro").
 ALLOWED_QUALITY_MODELS = frozenset({"gpt-4.1-mini", "gpt-4.1", "gpt-5.4-mini", "gpt-5.4", "gpt-5-mini"})
@@ -89,9 +97,9 @@ QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 
 
 def model_for(purpose: str | None) -> str:
-    """Vazifaga qarab model: test, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
+    """Vazifaga qarab model: test, ma'ruza, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
     p = purpose or ""
-    if p in GENERATE_PURPOSES:
+    if p in GENERATE_PURPOSES or p in LECTURE_PURPOSES:
         return test_generate_model()
     if p in REVIEW_PURPOSES:
         return test_review_model()
