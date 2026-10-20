@@ -374,13 +374,17 @@ def build_entries(
              "sanasi_oraliqdan_tashqari": 0, "parasi_yoq": 0, "oqituvchisi_boglanmadi": 0, "yozuv": 0}
     seen: set[str] = set()
     out: list[MonitorScheduleEntry] = []
+    bound = ms.group_monitors()
     for lesson in lessons:
         stats["jami"] += 1
-        candidates = rooms.get((lesson.get("auditorium") or {}).get("code")) or []
-        if not candidates:
-            stats["monitorsiz_xona"] += 1
-            continue
-        mon = pick_monitor(candidates, _name(lesson.get("department")))
+        # Kafedra so'rovi bilan xonaga biriktirilgan guruh — HEMIS'dagi xonadan ustun.
+        mon = ms.monitor_for_group(bound, _name(lesson.get("department")), _name(lesson.get("group")))
+        if mon is None:
+            candidates = rooms.get((lesson.get("auditorium") or {}).get("code")) or []
+            if not candidates:
+                stats["monitorsiz_xona"] += 1
+                continue
+            mon = pick_monitor(candidates, _name(lesson.get("department")))
         if mon is None:
             stats["xonasi_ikki_kafedrada"] += 1
             continue
@@ -492,6 +496,7 @@ def sync_lessons(db: Session, *, start: dt.date, end: dt.date, education_year: i
              "ism_boyicha_boglandi": link_stats.get("ism_boyicha_boglandi", 0),
              "faol_hisobga_otkazildi": link_stats.get("faol_hisobga_otkazildi", 0)}
     seen: set[str] = set()
+    bound = ms.group_monitors()
 
     for lesson in lessons:
         stats["hemisda"] += 1
@@ -505,8 +510,9 @@ def sync_lessons(db: Session, *, start: dt.date, end: dt.date, education_year: i
         login = teachers.get((lesson.get("employee") or {}).get("id"), "")
         if not login:
             stats["oqituvchisi_boglanmadi"] += 1
-        monitor = pick_monitor(rooms.get((lesson.get("auditorium") or {}).get("code")) or [],
-                               _name(lesson.get("department")))
+        monitor = ms.monitor_for_group(bound, _name(lesson.get("department")), _name(lesson.get("group"))) \
+            or pick_monitor(rooms.get((lesson.get("auditorium") or {}).get("code")) or [],
+                            _name(lesson.get("department")))
         if monitor:
             stats["monitorli"] += 1
         data = _lesson_row(lesson, login, day, monitor)

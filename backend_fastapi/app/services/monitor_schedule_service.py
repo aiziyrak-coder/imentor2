@@ -126,6 +126,49 @@ def monitors() -> list[dict]:
     return out
 
 
+def _group_key(value: Any) -> str:
+    return re.sub(r"\s+", "", _clean(value).casefold())
+
+
+def group_monitors() -> dict[tuple[str, str], dict]:
+    """Inventardagi `group_rooms`: (kafedra kaliti, guruh) → monitor.
+
+    HEMIS ba'zi guruhlar darsini boshqa xonaga yozadi, dars esa amalda kafedraning
+    interaktiv monitorli xonasida o'tadi — hisobotda bunday dars "monitorsiz"
+    bo'lib, o'qituvchi aybsiz ayblanardi. Kafedra so'rovi bilan guruh xonaga
+    shu yerda biriktiriladi:
+
+        "group_rooms": [{"room": "<rooms[] dagi xona matni>", "groups": ["824", ...]}]
+    """
+    by_room = {(m["department_keys"][0], _norm(m["room_full"])): m for m in monitors()}
+    out: dict[tuple[str, str], dict] = {}
+    for dep in inventory().get("departments", []):
+        department = _clean(dep.get("department"))
+        dep_keys = [_norm(department), *[_norm(a) for a in dep.get("aliases", []) or [] if _clean(a)]]
+        for item in dep.get("group_rooms", []) or []:
+            mon = by_room.get((dep_keys[0], _norm(item.get("room"))))
+            if mon is None:
+                continue
+            for group in item.get("groups", []) or []:
+                gk = _group_key(group)
+                if gk:
+                    for dk in dep_keys:
+                        out[(dk, gk)] = mon
+    return out
+
+
+def monitor_for_group(bindings: dict[tuple[str, str], dict], department: Any, group: Any) -> dict | None:
+    """Darsning kafedrasi va guruhi bo'yicha biriktirilgan monitor (bo'lmasa None)."""
+    gk = _group_key(group)
+    wanted = _norm(department)
+    if not gk or not wanted:
+        return None
+    for (dk, g), mon in bindings.items():
+        if g == gk and dk and (dk in wanted or wanted in dk):
+            return mon
+    return None
+
+
 def _parse_date(raw: str | None, fallback: dt.date) -> dt.date:
     if not raw:
         return fallback

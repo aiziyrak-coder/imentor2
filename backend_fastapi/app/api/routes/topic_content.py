@@ -98,15 +98,14 @@ def _only_own(stmt, column, auth: AuthContext):
     return stmt.where(column == auth.user.username)
 
 
-def _can_delete(owner_key: str, auth: AuthContext, owns_subject: bool = False) -> bool:
-    """Yuklagan o'qituvchi, admin yoki FAN EGASI (Excel'dan o'zi yuklagan fan)."""
-    if owner_key == auth.user.username:
-        return True
-    return auth.role == "admin" or owns_subject
+def _can_delete(owner_key: str, auth: AuthContext) -> bool:
+    """Faqat yuklagan o'qituvchi yoki admin.
 
-
-def _owns_subject_of(db: Session, topic_norm: str, auth: AuthContext) -> bool:
-    return access.is_subject_owner(db, access.syllabus_id_from_norm(topic_norm), auth.user.username)
+    2026-10-07: fan egasi (fanni Excel'dan yuklagan o'qituvchi) endi boshqalarning
+    materialini o'chira olmaydi — bitta fanni o'zbek va rus guruhlarida o'tadigan
+    o'qituvchilar bir-birining tarqatma/taqdimot/videosini o'chirib yuborardi.
+    """
+    return owner_key == auth.user.username or auth.role == "admin"
 
 
 def _check_topic(db: Session, topic_norms, auth: AuthContext) -> None:
@@ -114,15 +113,15 @@ def _check_topic(db: Session, topic_norms, auth: AuthContext) -> None:
     access.require_topic_access(db, topic_norms, auth.user.username, auth.role)
 
 
-def _check_delete(db: Session, owner_key: str, topic_norm: str, auth: AuthContext) -> None:
-    if not _can_delete(owner_key, auth, _owns_subject_of(db, topic_norm, auth)):
+def _check_delete(owner_key: str, auth: AuthContext) -> None:
+    if not _can_delete(owner_key, auth):
         raise HTTPException(
             status_code=403,
-            detail="Faqat yuklagan o'qituvchi, fan egasi yoki admin o'chira oladi.",
+            detail="Faqat yuklagan o'qituvchi yoki admin o'chira oladi.",
         )
 
 
-def _handout_out(h: TopicHandout, auth: AuthContext, owns_subject: bool = False) -> TopicHandoutOut:
+def _handout_out(h: TopicHandout, auth: AuthContext) -> TopicHandoutOut:
     created = h.created_at or dt.datetime.now(dt.timezone.utc)
     if getattr(created, "tzinfo", None) is None:
         created = created.replace(tzinfo=dt.timezone.utc)
@@ -131,27 +130,27 @@ def _handout_out(h: TopicHandout, auth: AuthContext, owns_subject: bool = False)
         title=h.title or "", kind=h.kind or "image",
         file_name=h.file_name or "", file_size=int(h.file_size or 0), author_name=h.author_name or "",
         created_at=created, file_url=f"/api/v1/handouts/{h.id}/file/",
-        can_delete=_can_delete(h.owner_key, auth, owns_subject), sort_order=int(h.sort_order or 0),
+        can_delete=_can_delete(h.owner_key, auth), sort_order=int(h.sort_order or 0),
         language=_handout_lang(getattr(h, "language", None)),
     )
 
 
-def _presentation_out(p: TopicPresentation, auth: AuthContext, owns_subject: bool = False) -> TopicPresentationOut:
+def _presentation_out(p: TopicPresentation, auth: AuthContext) -> TopicPresentationOut:
     return TopicPresentationOut(
         id=p.id, owner_key=p.owner_key, topic=p.topic, topic_norm=p.topic_norm, title=p.title, kind=p.kind,
         file_name=p.file_name, file_size=p.file_size, author_name=p.author_name,
         created_at=p.created_at, file_url=f"/api/v1/presentations/{p.id}/file/",
-        can_delete=_can_delete(p.owner_key, auth, owns_subject), sort_order=p.sort_order,
+        can_delete=_can_delete(p.owner_key, auth), sort_order=p.sort_order,
     )
 
 
-def _video_out(v: TopicVideo, auth: AuthContext, owns_subject: bool = False) -> TopicVideoOut:
+def _video_out(v: TopicVideo, auth: AuthContext) -> TopicVideoOut:
     return TopicVideoOut(
         id=v.id, topic=v.topic, topic_norm=v.topic_norm, title=v.title,
         youtube_id=v.youtube_id, youtube_url=v.youtube_url,
         embed_url=f"https://www.youtube.com/embed/{v.youtube_id}",
         author_name=v.author_name, created_at=v.created_at,
-        can_delete=_can_delete(v.owner_key, auth, owns_subject),
+        can_delete=_can_delete(v.owner_key, auth),
     )
 
 
@@ -198,7 +197,7 @@ def list_handouts(
     if language.strip():
         stmt = stmt.where(TopicHandout.language == _handout_lang(language))
     rows = db.execute(stmt.distinct()).scalars().all()
-    return [_handout_out(h, auth, _owns_subject_of(db, h.topic_norm, auth)) for h in rows]
+    return [_handout_out(h, auth) for h in rows]
 
 
 @router.post("/handouts/", response_model=TopicHandoutOut, status_code=201)
@@ -312,7 +311,7 @@ def delete_handout(
     if obj is None:
         raise HTTPException(status_code=404, detail="Topilmadi.")
     _check_topic(db, obj.topic_norm, auth)
-    _check_delete(db, obj.owner_key, obj.topic_norm, auth)
+    _check_delete(obj.owner_key, auth)
     storage.delete_file(obj.file)
     db.delete(obj)
     db.commit()
@@ -400,7 +399,7 @@ def list_presentations(
     rows = db.execute(
         stmt.order_by(TopicPresentation.created_at.desc())
     ).scalars().all()
-    return [_presentation_out(p, auth, _owns_subject_of(db, p.topic_norm, auth)) for p in rows]
+    return [_presentation_out(p, auth) for p in rows]
 
 
 @router.post("/presentations/", response_model=TopicPresentationOut, status_code=201)
@@ -521,7 +520,7 @@ def delete_presentation(
     if obj is None:
         raise HTTPException(status_code=404, detail="Topilmadi.")
     _check_topic(db, obj.topic_norm, auth)
-    _check_delete(db, obj.owner_key, obj.topic_norm, auth)
+    _check_delete(obj.owner_key, auth)
     storage.delete_file(obj.file)
     db.delete(obj)
     db.commit()
@@ -547,7 +546,7 @@ def list_topic_videos(
     rows = db.execute(
         _only_own(select(TopicVideo).where(cond), TopicVideo.owner_key, auth).distinct()
     ).scalars().all()
-    return [_video_out(v, auth, _owns_subject_of(db, v.topic_norm, auth)) for v in rows]
+    return [_video_out(v, auth) for v in rows]
 
 
 @router.post("/topic-videos/", response_model=TopicVideoOut, status_code=201)
@@ -602,7 +601,7 @@ def delete_topic_video(
     if obj is None:
         raise HTTPException(status_code=404, detail="Topilmadi.")
     _check_topic(db, obj.topic_norm, auth)
-    _check_delete(db, obj.owner_key, obj.topic_norm, auth)
+    _check_delete(obj.owner_key, auth)
     db.delete(obj)
     db.commit()
 
