@@ -84,3 +84,12 @@ data/*.xlsx
 data/*.xls
 data/*.docx
 data/*.csv
+
+# Worktree'larda node_modules symlink bo'lib turadi — `node_modules/` uni ushlamaydi.
+node_modules
+# AI sifat o'lchovi (harness): lokal skriptlar va natijalar, OpenAI kaliti bilan
+# ishga tushiriladi; ilova ularni ishlatmaydi va serverga kerak emas.
+frontend/scripts/harness-out/
+frontend/scripts/harness-stubs/
+frontend/scripts/*harness*.ts
+frontend/scripts/*.vite.config.ts
