@@ -45,7 +45,8 @@ def test_message_points_to_the_single_active_twin():
     user = SimpleNamespace(id=361, first_name="Mukadas ", last_name="Ashurova", username="3442012031")
     db = MagicMock()
     db.execute.return_value.scalars.return_value.all.return_value = ["998939838000"]
-    msg = auth_routes._disabled_account_message(db, user)
+    with patch.object(auth_routes.staff_merge, "merged_into", return_value=None):
+        msg = auth_routes._disabled_account_message(db, user)
     assert "+998 93 ••• •• 00" in msg and "998939838000" not in msg
 
 
@@ -53,5 +54,6 @@ def test_message_stays_generic_when_twin_is_ambiguous():
     user = SimpleNamespace(id=1, first_name="Ali", last_name="Valiyev", username="3442000001")
     db = MagicMock()
     db.execute.return_value.scalars.return_value.all.return_value = ["998900000001", "998900000002"]
-    msg = auth_routes._disabled_account_message(db, user)
+    with patch.object(auth_routes.staff_merge, "merged_into", return_value=None):
+        msg = auth_routes._disabled_account_message(db, user)
     assert "•••" not in msg and "o'chirilgan" in msg

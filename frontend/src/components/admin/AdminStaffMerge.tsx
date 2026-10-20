@@ -135,7 +135,10 @@ function GroupCard({
                   onChange={() => {
                     setPrimary(a.username);
                     setCopyPassword(
-                      a.password_is_initial && group.accounts.some((o) => o.username !== a.username && !o.password_is_initial && o.last_login != null),
+                      (a.password_is_initial || !a.has_password) &&
+                        group.accounts.some(
+                          (o) => o.username !== a.username && o.has_password && !o.password_is_initial && o.last_login != null,
+                        ),
                     );
                   }}
                   className="mt-1"
@@ -174,7 +177,7 @@ function GroupCard({
             <input type="checkbox" checked={copyPassword} onChange={(e) => setCopyPassword(e.target.checked)} />
             Qo'shilgan hisobning parolini qoladigan hisobga ko'chirish
             {group.suggest_copy_password && primary === group.primary ? (
-              <span className="text-[11px] text-indigo-700 font-semibold">(tavsiya: qoladigan hisobga hali kirilmagan)</span>
+              <span className="text-[11px] text-indigo-700 font-semibold">(tavsiya: qoladigan hisobda o'zi qo'ygan parol yo'q)</span>
             ) : null}
           </label>
           <button

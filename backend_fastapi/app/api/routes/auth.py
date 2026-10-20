@@ -16,7 +16,6 @@ from app.core.staff_login import normalize_listener_login
 from app.core.throttling import throttle_login_account
 from app.models.online_edu import MalakaListener
 from app.models.face_template import FaceTemplate
-from app.models.staff_merge_log import StaffMergeLog
 from app.models.person_identity import STAFF
 from app.models.staff_location import StaffProfile
 from app.models.student_contingent import StudentContingent
@@ -36,6 +35,7 @@ from app.services import staff_department as staff_dept
 from app.services import online_test_client as otc
 from app.services import person_identity as pid
 from app.services import cam_students
+from app.services import staff_merge
 from app.services import staff_pinfl
 from app.services import staff_profile as sp
 from app.services.analytics_service import record_activity_event
@@ -105,13 +105,7 @@ def _disabled_account_message(db: Session, user: User) -> str:
     keyingina (shu funksiya shundan so'ng chaqiriladi) ishlaydigan loginning yashirilgan
     ko'rinishi aytiladi."""
     # Admin birlashtirgan hisob: qayerga ko'chgani tarixda aniq yozilgan (ismi qanday yozilganidan qat'i nazar).
-    merged_into = db.execute(
-        select(User.username)
-        .join(StaffMergeLog, StaffMergeLog.primary_key == User.username)
-        .where(StaffMergeLog.merged_key == user.username, User.is_active.is_(True))
-        .order_by(StaffMergeLog.merged_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    merged_into = staff_merge.merged_into(db, user.username)
     if merged_into:
         return (
             "Bu hisob boshqa hisob bilan birlashtirilgan. Endi shu login bilan kiring: "

@@ -23,6 +23,7 @@ from app.models.staff_pinfl import StaffPinfl
 from app.models.user import User
 from app.services import auth_service
 from app.services import staff_department as staff_dept
+from app.services import staff_merge
 from app.services import staff_pinfl
 
 CAM_LOGIN_ROLE = "hodim"
@@ -51,7 +52,13 @@ def _existing_account(db: Session, pinfl: str, hemis_id: str) -> User | None:
         if user is not None:
             return user
     if hemis_id:
-        return auth_service.get_user_by_username(db, hemis_id)
+        user = auth_service.get_user_by_username(db, hemis_id)
+        if user is not None and not user.is_active:
+            # Admin bu Xodim ID hisobini boshqasiga birlashtirgan bo'lsa — odam o'sha hisobga kiradi.
+            heir = staff_merge.merged_into(db, user.username)
+            if heir:
+                return auth_service.get_user_by_username(db, heir)
+        return user
     return None
 
 
@@ -86,6 +93,18 @@ def _link_pinfl(db: Session, pinfl: str, username: str, full_name: str) -> None:
         db.add(rec)
     elif rec.link_source == "admin" and rec.owner_key and rec.owner_key != username:
         return  # admin qo'lda bog'lagan — tegilmaydi (1-qadamda o'sha hisob tanlangan bo'lardi)
+    # Bir hisobga bitta JSHSHIR (`uq_core_staffpinfl_owner_key`): hisobning boshqa JSHSHIRi bo'lsa,
+    # admin qo'lda bog'lagani tegilmaydi (kirish baribir ishlaydi), qolgani bo'shatiladi.
+    others = db.execute(
+        select(StaffPinfl).where(
+            StaffPinfl.owner_key == username, StaffPinfl.pinfl != pinfl, StaffPinfl.is_active.is_(True)
+        )
+    ).scalars().all()
+    if any(o.link_source == "admin" for o in others):
+        return
+    for other in others:
+        other.owner_key, other.link_source = "", ""
+    db.flush()
     rec.owner_key = username
     rec.link_source = "cam"
     rec.full_name = (full_name or rec.full_name or "")[:255]

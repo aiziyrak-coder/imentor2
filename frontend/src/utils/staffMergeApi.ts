@@ -16,6 +16,8 @@ export type MergeAccount = {
   activity: number;
   login_kind: 'phone' | 'staff_id';
   password_is_initial: boolean;
+  /** Mahalliy paroli bor (JSHSHIR/yuz bilan ochilgan hisobda yo'q). */
+  has_password: boolean;
 };
 
 export type MergeGroup = {

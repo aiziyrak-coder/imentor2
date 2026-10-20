@@ -41,6 +41,7 @@ def _account_out(a: staff_merge.AccountSummary) -> dict:
         "activity": a.activity,
         "login_kind": "phone" if a.is_phone_login else "staff_id",
         "password_is_initial": a.password_is_initial,
+        "has_password": a.has_password,
     }
 
 

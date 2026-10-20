@@ -263,3 +263,50 @@ def test_hourly_sync_can_move_an_account_between_jshshirs(db):
     assert db.get(StaffPinfl, "30000000000002").owner_key == "3442000010"
     assert db.get(StaffPinfl, "30000000000001").owner_key == ""
     assert result.changed_links[0][1:] == ("3442000010", "") or any(c[2] == "3442000010" for c in result.changed_links)
+
+
+def test_password_copy_is_suggested_for_passwordless_primary(db):
+    """JSHSHIR bilan ochilgan hisob parolsiz: odam telefon hisobi paroli bilan kirib yurgan bo'lsa,
+    birlashgach parol ko'chmasa u login/parol bilan kira olmay qoladi."""
+    a = make_teacher(db, "3442000101", "Zilolaxon", "Karimova", logged_in=False)
+    a.password = ""
+    make_teacher(db, "998900000101", "Zilola", "Karimova")
+    from app.models.staff_pinfl import StaffPinfl
+
+    db.add(StaffPinfl(pinfl="30000000000099", owner_key=a.username, link_source="cam"))  # shu hisob asosiy bo'ladi
+    db.commit()
+    assert sm.find_groups(db)[0].suggest_copy_password
+
+
+def test_merge_keeps_cam_link_source_and_jshshir_login_follows_the_heir(db):
+    """cam.fermi.uz tasdiqlagan bog'lanish ("cam") ko'chganda manbasi saqlanadi; Xodim ID hisobi
+    nofaol bo'lib qolsa ham JSHSHIR bilan kirish birlashgan (faol) hisobga yo'naltiriladi."""
+    from app.models.staff_pinfl import StaffPinfl
+    from app.services import cam_login
+
+    heir = make_teacher(db, "998900000101", "Zilola", "Karimova")
+    old = make_teacher(db, "3442000101", "Zilolaxon", "Karimova")
+    db.add(StaffPinfl(pinfl="30000000000099", owner_key=old.username, link_source="cam"))
+    db.commit()
+    sm.merge(db, heir.username, [old.username], actor="admin")
+    db.commit()
+    assert db.get(StaffPinfl, "30000000000099").owner_key == heir.username
+    assert db.get(StaffPinfl, "30000000000099").link_source == "cam"
+    person = {"hemis_employee_id": "3442000101", "full_name": "Karimova Zilolaxon"}
+    user, role, created = cam_login.account_for(db, "30000000000099", person)
+    assert user.username == heir.username and not created
+
+
+def test_cam_login_never_breaks_the_one_jshshir_per_account_rule(db):
+    from app.models.staff_pinfl import StaffPinfl
+    from app.services import cam_login
+
+    make_teacher(db, "3442000101", "Zilolaxon", "Karimova")
+    db.add(StaffPinfl(pinfl="30000000000001", owner_key="3442000101", link_source="face"))
+    db.commit()
+    # cam.fermi.uz shu Xodim ID uchun boshqa JSHSHIR qaytardi: eskisi bo'shatiladi, xato chiqmaydi.
+    person = {"hemis_employee_id": "3442000101", "full_name": "Karimova Zilolaxon"}
+    cam_login.account_for(db, "30000000000002", person)
+    db.commit()
+    assert db.get(StaffPinfl, "30000000000002").owner_key == "3442000101"
+    assert db.get(StaffPinfl, "30000000000001").owner_key == ""

@@ -32,6 +32,7 @@ from app.models.user import User
 from app.services import auth_service
 from app.services import face_login as fl
 from app.services import password_policy_service as pwd_policy
+from app.services import staff_pinfl
 
 #: Ism-familiya o'xshashligi chegarasi (1.0 = aynan bir xil).
 NAME_SIMILARITY = 0.90
@@ -126,6 +127,8 @@ class AccountSummary:
     activity: int
     is_phone_login: bool
     password_is_initial: bool
+    #: Mahalliy paroli bor (JSHSHIR/yuz bilan ochilgan hisoblarda parol bo'sh).
+    has_password: bool = True
 
 
 @dataclass
@@ -166,6 +169,7 @@ def _summaries(db: Session, users: list[User]) -> dict[str, AccountSummary]:
             activity=int(info.get(u.username, {}).get("activity", 0)),
             is_phone_login=fl._is_phone_login(u.username),
             password_is_initial=(u.last_login is None and bool(u.password) and not u.password.startswith("!")),
+            has_password=bool(u.password) and not u.password.startswith("!"),
         )
     return out
 
@@ -235,10 +239,11 @@ def find_groups(db: Session, threshold: float = NAME_SIMILARITY) -> list[MergeGr
             group.blocked = "Hisoblarga turli JSHSHIR bog'langan — bu turli odamlar, birlashtirib bo'lmaydi."
         prim = next(a for a in accounts if a.username == primary)
         others = [a for a in accounts if a.username != primary]
-        # Asosiy hisob hali hech kirilmagan (boshlang'ich parol), ikkinchisini odam o'zi
-        # ishlatgan — asosiy hisobga o'sha paroli ko'chirilmasa, odam kira olmay qoladi.
-        group.suggest_copy_password = prim.password_is_initial and any(
-            a.last_login is not None and not a.password_is_initial for a in others
+        # Asosiy hisobda foydalanuvchi o'zi qo'ygan parol yo'q (boshlang'ich parol yoki JSHSHIR
+        # orqali ochilgan parolsiz hisob), ikkinchisini odam o'zi ishlatgan — parol ko'chirilmasa,
+        # odam login/parol bilan kira olmay qoladi.
+        group.suggest_copy_password = (prim.password_is_initial or not prim.has_password) and any(
+            a.has_password and a.last_login is not None and not a.password_is_initial for a in others
         )
         groups.append(group)
     groups.sort(key=lambda g: (bool(g.blocked), -g.similarity, g.accounts[0].last_name))
@@ -342,9 +347,15 @@ def _move_special(db: Session, src: str, dst: str, moved: dict[str, int]) -> int
             moved["online_teacher_course.teacher_id"] = n
 
     # --- JSHSHIR bog'lanishi
-    n = db.execute(
-        update(StaffPinfl).where(StaffPinfl.owner_key == src).values(owner_key=dst, link_source="admin")
-    ).rowcount or 0
+    # Sinxronlash tegmaydigan manba ("admin", "cam") saqlanadi; qolganlari "admin" bo'ladi, aks holda
+    # soatlik sinxron ko'chirilgan bog'lanishni ism bo'yicha topa olmay bo'shatib yuborishi mumkin.
+    n = 0
+    for rec in db.execute(select(StaffPinfl).where(StaffPinfl.owner_key == src)).scalars().all():
+        rec.owner_key = dst
+        if rec.link_source not in staff_pinfl.KEPT_SOURCES:
+            rec.link_source = "admin"
+        n += 1
+    db.flush()
     if n:
         moved["core_staffpinfl.owner_key"] = n
 
@@ -460,6 +471,17 @@ def merge(
     db.flush()
     fl.invalidate_cache()
     return results
+
+
+def merged_into(db: Session, username: str) -> str | None:
+    """Birlashtirish tarixiga ko'ra, nofaol `username` hisobining faol vorisi (yo'q bo'lsa None)."""
+    return db.execute(
+        select(User.username)
+        .join(StaffMergeLog, StaffMergeLog.primary_key == User.username)
+        .where(StaffMergeLog.merged_key == username, User.is_active.is_(True))
+        .order_by(StaffMergeLog.merged_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def merged_usernames(db: Session) -> set[str]:
