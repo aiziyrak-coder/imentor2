@@ -48,6 +48,7 @@ class OpenAiClientError(Exception):
 DEFAULT_TEST_GENERATE_MODEL = "gpt-5.4-mini"
 DEFAULT_TEST_REVIEW_MODEL = "gpt-5.4-mini"
 DEFAULT_EXAM_REVIEW_MODEL = "gpt-5.4"
+DEFAULT_PRESENTATION_MODEL = "gpt-5.4"
 #: Reasoning modellar uchun fikrlash darajasi: "low" sifat va tezlik o'rtasi.
 QUALITY_REASONING_EFFORT = "low"
 GENERATE_PURPOSES = frozenset({"test_generate", "test_generate_brief", "exam_generate"})
@@ -59,10 +60,16 @@ EXAM_REVIEW_PURPOSES = frozenset({"exam_review"})
 #: 2026-10-20 (kech): test bilan bir xil model — `gpt-5.4-mini`. 4.1-mini
 #: dagi 400 ta prod taqdimotda: punktlarning 98% i 12 so'zdan qisqa (prompt
 #: 15–30 so'z so'raydi), 67% i 20 slayddan kam, ma'ruzadagi fan xatosi
-#: (masalan "Brucella gram-musbat") slaydga ko'chadi. Harness (3 ta prod
-#: ma'ruzasi): 5.4-mini xatoni tuzatdi, mavzudagi ikkinchi kasallikni yoritdi,
-#: 27–34 s (4.1-mini 39–123 s), ~$0.04/taqdimot (~$40 haftasiga, 4.1-mini
-#: ~$0.01). `.env`: OPENAI_PRESENTATION_MODEL.
+#: (masalan "Brucella gram-musbat") slaydga ko'chadi.
+#:
+#: Harness (3 ta prod ma'ruzasi, ma'ruza matni bilan):
+#:  - 4.1-mini: xatoni 3 marta ko'chirdi, "Bezgak" qismi yo'q, ~$0.01, 39–123 s;
+#:  - 5.4-mini: gram xatosini tuzatdi, lekin ma'ruzadagi uydirma "проба Роттера"
+#:    (igna bilan) ni ko'chirdi, ~$0.04, 27–34 s;
+#:  - gpt-5.4: ikkalasini ham tuzatdi (Rotter — C vitamini sinamasi, Shiller–Pisarev
+#:    — yod/glikogen), darslik darajasi (selektin/integrin, gipnozoit, G6FD),
+#:    ~$0.16 (~$175 haftasiga), 119–157 s (backend chegarasi 280 s).
+#: `.env`: OPENAI_PRESENTATION_MODEL=gpt-5.4-mini — arzonroq va tezroq zaxira.
 #: Til tuzatish ham shu modelda — nano tarjimasi yana tekshiruvdan o'tmay
 #: butun taqdimotni xato bilan yiqitardi.
 PRESENTATION_PURPOSES = frozenset({
@@ -95,7 +102,7 @@ def exam_review_model() -> str:
 
 
 def presentation_model() -> str:
-    return _env_model("OPENAI_PRESENTATION_MODEL", DEFAULT_TEST_GENERATE_MODEL)
+    return _env_model("OPENAI_PRESENTATION_MODEL", DEFAULT_PRESENTATION_MODEL)
 
 
 #: Eski nom: tashqi MCQ (OnlineTest) shu bilan yaratadi.
