@@ -215,8 +215,11 @@ export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain
   }
   if (level === 'hard') {
     return (
-      'HAR savol 3 zich jumla (55–95 so\'z): yosh+shikoyat; komorbidlik/dori/anamnez; 2 topilma (raqam+birlik, biri trap); ' +
-      'oxirida qaror savoli (keyingi qadam / kontrendikatsiya / qaysi topilma kesadi). 5 ta yaqin variant. ' +
+      'HAR savol USMLE Step 2 CK uslubidagi klinik vignette, 4–6 jumla, 60–110 so\'z: ' +
+      'yosh, jins va qayerga murojaat qilgani; shikoyat va uning VAQTI; komorbidlik, qabul qilayotgan dori (nomi+doza); ' +
+      'ko\'rik — vital belgilar (AB, puls, nafas, harorat, SpO2); KAMIDA 3 ta lab/instrumental topilma raqam+birlik va ' +
+      'me\'yori bilan (biri chalg\'ituvchi). Oxirida BITTA qaror savoli (keyingi eng to\'g\'ri qadam / eng ehtimoliy ' +
+      'tashxis / mexanizm / kontrendikatsiya). 5 ta bir xil turdagi, yaqin uzunlikdagi variant. ' +
       'Klassik ABG=tashxis va 1–2 qatorlik oson savol YARATILMASIN.'
     );
   }

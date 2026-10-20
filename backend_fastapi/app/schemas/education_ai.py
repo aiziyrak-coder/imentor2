@@ -23,6 +23,18 @@ class EducationAiCompletionResponse(BaseModel):
     book_references: list[dict] = []
 
 
+class EducationAiImageSafetyRequest(BaseModel):
+    # data:image/...;base64 — brauzer 512px gacha kichraytirib yuboradi.
+    images: list[str] = Field(min_length=1, max_length=8)
+    # Qaysi slayd uchun (faqat jurnal uchun).
+    context: str = Field(default="", max_length=200)
+
+
+class EducationAiImageSafetyResponse(BaseModel):
+    # Har rasm uchun {safe, sexual}; tartib so'rovdagidek.
+    results: list[dict]
+
+
 class EducationAiBookReferencesRequest(BaseModel):
     subject_code: str = Field(min_length=1, max_length=200)
     queries: list[str] = Field(min_length=1, max_length=40)

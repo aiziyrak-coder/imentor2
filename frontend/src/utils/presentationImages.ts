@@ -1,8 +1,9 @@
 import type { ContentSlide, PresentationContent, SlideType } from './presentationContentSchema';
+import { isImageSafe } from './imageSafety';
 
 /**
- * Slayd rasmlari — bir nechta OCHIQ manbadan (Wikipedia maqola rasmlari,
- * Wikimedia Commons, Openverse). Qoidalar:
+ * Slayd rasmlari — OCHIQ manbadan (Wikipedia maqola rasmlari, Wikimedia
+ * Commons). Qoidalar:
  *  1. HAR slaydda O'Z rasmi — bir rasm ikki slaydda TAKRORLANMAYDI (global dedupe).
  *  2. "Default"/umumiy zaxira rasm YO'Q — slaydning o'z mavzusiga mos rasm
  *     topilmasa, slayd rasmsiz (to'liq matnli) chiqadi. Avval bu yerda
@@ -10,10 +11,58 @@ import type { ContentSlide, PresentationContent, SlideType } from './presentatio
  *     taqdimot bitta rasmga to'lib ketardi.
  *  3. Rasm PPTX ga kichraytirib (max 1100px, JPEG) qo'yiladi — 5 MB lik fayl
  *     o'rniga ~0.5 MB.
+ *  4. ODOB (2026-10-20, taqdimotda odobsiz rasm chiqdi). Uch qatlam:
+ *     - nom/kategoriya/tavsifda yalang'ochlik, jinsiy mazmun bo'lsa — rasm olinmaydi;
+ *     - intim a'zolar va jinsiy salomatlik mavzusida — faqat CHIZMA (sxema,
+ *       diagramma, mikroskop/UZI), hech qachon foto. Klinik foto (masalan
+ *       jinsiy a'zodagi yara) moderatsiyadan 0.02 bilan o'tib ketadi;
+ *     - har rasm slaydga qo'yilishidan OLDIN serverda ko'rib tekshiriladi
+ *       (`imageSafety`). Tekshirib bo'lmasa — rasm qo'yilmaydi.
+ *     Openverse olib tashlandi: u Flickr va boshqa saytlardan hech qanday
+ *     tavsifsiz rasm qaytarardi.
  */
 
 const IRRELEVANT_IMAGE_HINTS =
-  /portrait|photographer|painting|artwork|album cover|logo|flag of|coat of arms|stamp|banknote|coin\b|signature|map of|book cover/i;
+  /portrait|photographer|painting|artwork|sculpture|statue|album cover|logo|flag of|coat of arms|stamp|banknote|coin\b|signature|map of|book cover/i;
+
+/** Hech qachon slaydga tushmaydi (chizma bo'lsa ham). */
+const EXPLICIT_HINTS =
+  /\b(?:porn\w*|erotic\w*|nud(?:e|es|ity|ism|ist|ists)\b|naked\w*|topless\w*|bottomless|semi-?nude|undress\w*|sexual(?:ly)? (?:explicit|intercourse|act|activity|activities|position\w*|arousal)|sex (?:act|toy|toys|work|worker|workers|scene|position\w*)|intercourse|coitus|copulat\w*|masturbat\w*|orgasm\w*|ejaculat\w*|fetish\w*|bdsm|bondage|strip(?:tease|per|pers)|prostitut\w*|hentai|xxx|nsfw|lingerie|bikini\w*|swimsuit\w*|underwear|playboy|dildo\w*|kama ?sutra|upskirt|voyeur\w*|pin-?up)\b|порн|эрот|обнаж|голая|голый|секс|yalang'och|jinsiy aloqa/i;
+
+/** Intim a'zolar — foto MUMKIN EMAS, faqat chizma. */
+const INTIMATE_HINTS =
+  /\b(?:penis\w*|penile|phall\w*|glans|foreskin|prepuce|scrot\w*|testic\w*|testes|vulva\w*|vagin\w*|labia\w*|labium|clitor\w*|hymen\w*|genital\w*|pubic|pubis|perine\w*|anus|anal|buttock\w*|breast\w*|nipple\w*|areola\w*|mammar\w*|circumcis\w*|crowning|condom\w*|sexual\w*)\b/i;
+
+/**
+ * Mavzu sezgir (jinsiy salomatlik, akusherlik, urologiya, venerologiya) —
+ * butun slayd uchun faqat chizma qidiriladi va olinadi.
+ */
+const SENSITIVE_TOPIC =
+  /\b(?:reproductive|obstetric\w*|gyn(?:a)?ecolog\w*|urolog\w*|androlog\w*|venere\w*|sexually transmitted|stis?|stds?|syphili\w*|chancre|gonorrh\w*|chlamydi\w*|trichomon\w*|hpv|condylom\w*|genital herpes|contracept\w*|childbirth|delivery|labou?r|postpartum|episiotom\w*|caesarean|cesarean|prostat\w*|erectile|infertil\w*|menstrua\w*|menopaus\w*|lactation|breastfeed\w*|mastectom\w*|puberty)\b/i;
+
+/** Chizma yoki tibbiy tasvir (mikroskop, UZI, rentgen) — tana fotosi emas. */
+const DRAWING_HINTS =
+  /\b(?:diagram\w*|schematic\w*|schema|scheme|illustration\w*|drawing\w*|drawn|vector|infographic\w*|flow ?chart\w*|chart|cross[- ]section\w*|label(?:l)?ed|micrograph\w*|histolog\w*|microscop\w*|ultraso\w*|sonogra\w*|radiograph\w*|x-ray\w*|mammogra\w*|mri|ct scan\w*|electron micro\w*)\b/i;
+
+function isDrawing(c: Pick<ImageCandidate, 'vector' | 'hint'>): boolean {
+  return c.vector || DRAWING_HINTS.test(c.hint);
+}
+
+/** Slayd mavzusi sezgirmi — so'rov va sarlavhaga qarab. */
+export function isSensitiveSlide(slide: Pick<ContentSlide, 'image_query' | 'title'>): boolean {
+  const text = `${slide.image_query || ''} ${slide.title || ''}`;
+  return SENSITIVE_TOPIC.test(text) || INTIMATE_HINTS.test(text);
+}
+
+/** Rasm slaydga yaraydimi — faqat metadata bo'yicha (rasmni ko'rmasdan). */
+export function candidateAllowed(
+  c: Pick<ImageCandidate, 'vector' | 'hint'>,
+  sensitive: boolean,
+): boolean {
+  if (EXPLICIT_HINTS.test(c.hint)) return false;
+  if ((sensitive || INTIMATE_HINTS.test(c.hint)) && !isDrawing(c)) return false;
+  return true;
+}
 
 /**
  * Muzey/arxiv skanlari: eski atlas sahifasi, gravyura, qo'lyozma. Mavzuga
@@ -34,7 +83,16 @@ function imageKey(url: string): string {
   return decodeURIComponent(file).replace(/^\d+px-/, '').toLowerCase();
 }
 
-export type ImageCandidate = { url: string; credit: string; key: string; hint: string };
+export type ImageCandidate = {
+  url: string;
+  credit: string;
+  key: string;
+  hint: string;
+  /** SVG chizma (PNG ko'rinishida olinadi). */
+  vector: boolean;
+  /** Mavzu maqolasidagi rasm — qidiruv natijasidan ishonchliroq. */
+  fromArticle?: boolean;
+};
 
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'of', 'and', 'or', 'in', 'on', 'for', 'with', 'to', 'diagram',
@@ -60,7 +118,7 @@ async function commonsImageInfo(fileTitles: string[]): Promise<ImageCandidate[]>
   const url =
     'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
     `&titles=${encodeURIComponent(fileTitles.slice(0, 10).join('|'))}` +
-    '&prop=imageinfo&iiprop=url|extmetadata|mime&iiurlwidth=1200';
+    '&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=1200';
   const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) return [];
   const data = (await res.json()) as {
@@ -71,12 +129,14 @@ async function commonsImageInfo(fileTitles: string[]): Promise<ImageCandidate[]>
     .filter((c): c is ImageCandidate => Boolean(c));
 }
 
-type WikiPage = {
+export type WikiPage = {
   title?: string;
   imageinfo?: {
     thumburl?: string;
     url?: string;
     mime?: string;
+    width?: number;
+    height?: number;
     extmetadata?: {
       Artist?: { value?: string };
       LicenseShortName?: { value?: string };
@@ -87,17 +147,26 @@ type WikiPage = {
   }[];
 };
 
-function pageToCandidate(page: WikiPage): ImageCandidate | null {
+export function pageToCandidate(page: WikiPage): ImageCandidate | null {
   const info = page.imageinfo?.[0];
   if (!info) return null;
-  if (!isUsableMime(info.mime || '')) return null;
+  const mime = info.mime || '';
+  // SVG chizmalar (anatomik sxema, mexanizm) — eng yaxshi dars rasmi; Commons
+  // ularni PNG ko'rinishida beradi (thumburl).
+  const vector = mime.includes('svg');
+  if (!isUsableMime(mime) && !(vector && info.thumburl)) return null;
   const imgUrl = info.thumburl || info.url;
   if (!imgUrl) return null;
+  // Belgi/ikonka va ingichka banner — slaydga yaramaydi.
+  const w = info.width || 0;
+  const h = info.height || 0;
+  if (!vector && w && h && (Math.max(w, h) < 300 || Math.max(w, h) / Math.min(w, h) > 3.5)) return null;
   const meta = info.extmetadata || {};
   const hint = `${page.title || ''} ${meta.ObjectName?.value || ''} ${meta.Categories?.value || ''} ${
     meta.ImageDescription?.value || ''
   }`.replace(/<[^>]+>/g, ' ');
   if (IRRELEVANT_IMAGE_HINTS.test(hint) || ARCHIVE_SCAN_HINTS.test(hint)) return null;
+  if (EXPLICIT_HINTS.test(hint)) return null;
   const license = meta.LicenseShortName?.value || 'Wikimedia Commons';
   const artist = (meta.Artist?.value || '').replace(/<[^>]+>/g, '').trim().slice(0, 60);
   return {
@@ -105,6 +174,7 @@ function pageToCandidate(page: WikiPage): ImageCandidate | null {
     credit: artist ? `${artist} · ${license} (Wikimedia Commons)` : `${license} (Wikimedia Commons)`,
     key: imageKey(imgUrl),
     hint,
+    vector,
   };
 }
 
@@ -122,7 +192,9 @@ async function searchWikipediaArticleImages(query: string): Promise<ImageCandida
     const res = await fetch(searchUrl, { signal: AbortSignal.timeout(9000) });
     if (!res.ok) return [];
     const data = (await res.json()) as { query?: { search?: { title?: string }[] } };
-    const titles = (data.query?.search || []).map((s) => s.title).filter(Boolean) as string[];
+    const titles = ((data.query?.search || []).map((s) => s.title).filter(Boolean) as string[])
+      // "Nudity", "Pornography" kabi maqolalar — rasmlari ham shunday.
+      .filter((title) => !EXPLICIT_HINTS.test(title));
     const out: ImageCandidate[] = [];
     for (const title of titles) {
       const mediaRes = await fetch(
@@ -137,7 +209,7 @@ async function searchWikipediaArticleImages(query: string): Promise<ImageCandida
         .filter((i) => i.type === 'image' && i.title?.startsWith('File:'))
         .map((i) => i.title as string)
         .slice(0, 8);
-      out.push(...(await commonsImageInfo(files)));
+      out.push(...(await commonsImageInfo(files)).map((c) => ({ ...c, fromArticle: true })));
       if (out.length >= 6) break;
     }
     return out;
@@ -146,6 +218,12 @@ async function searchWikipediaArticleImages(query: string): Promise<ImageCandida
   }
 }
 
+/**
+ * Commons qidiruvida bu so'zlar bor fayllar umuman qaytmasin (CirrusSearch
+ * `-so'z`). Metadata filtri baribir ishlaydi — bu birinchi to'siq.
+ */
+const SEARCH_EXCLUDE = ' -nude -naked -nudity -erotic -porn -sex -topless -lingerie';
+
 /** 2-manba: Wikimedia Commons to'g'ridan-to'g'ri qidiruvi. */
 async function searchCommons(query: string): Promise<ImageCandidate[]> {
   const q = query.replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -153,12 +231,14 @@ async function searchCommons(query: string): Promise<ImageCandidate[]> {
   try {
     const searchUrl =
       'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
-      `&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrnamespace=6&gsrlimit=8` +
-      '&prop=imageinfo&iiprop=url|extmetadata|mime&iiurlwidth=1200';
+      `&generator=search&gsrsearch=${encodeURIComponent(q + SEARCH_EXCLUDE)}&gsrnamespace=6&gsrlimit=10` +
+      '&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=1200';
     const res = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return [];
-    const data = (await res.json()) as { query?: { pages?: Record<string, WikiPage> } };
+    const data = (await res.json()) as { query?: { pages?: Record<string, WikiPage & { index?: number }> } };
     return Object.values(data.query?.pages || {})
+      // Qidiruv tartibi (eng mosi birinchi) — `pages` obyektida u yo'qoladi.
+      .sort((a, b) => (a.index ?? 99) - (b.index ?? 99))
       .map(pageToCandidate)
       .filter((c): c is ImageCandidate => Boolean(c));
   } catch {
@@ -166,62 +246,56 @@ async function searchCommons(query: string): Promise<ImageCandidate[]> {
   }
 }
 
-/** 3-manba: Openverse (Flickr, muzeylar va b. ochiq litsenziyali agregator). */
-async function searchOpenverse(query: string): Promise<ImageCandidate[]> {
-  const q = query.replace(/\s+/g, ' ').trim().slice(0, 120);
-  if (!q) return [];
-  try {
-    const res = await fetch(
-      `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=8&mature=false`,
-      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) },
-    );
-    if (!res.ok) return [];
-    const data = (await res.json()) as {
-      results?: {
-        id?: string;
-        title?: string;
-        url?: string;
-        thumbnail?: string;
-        creator?: string;
-        license?: string;
-        source?: string;
-        tags?: { name?: string }[];
-      }[];
-    };
-    return (data.results || [])
-      .map((r) => {
-        const url = r.thumbnail || r.url;
-        if (!url) return null;
-        const hint = `${r.title || ''} ${r.source || ''} ${(r.tags || []).map((t) => t.name).join(' ')}`;
-        if (IRRELEVANT_IMAGE_HINTS.test(hint) || ARCHIVE_SCAN_HINTS.test(hint)) return null;
-        const raw = (r.license || '').toUpperCase();
-        const license = raw && !raw.startsWith('CC') && raw !== 'PDM' ? `CC ${raw}` : raw || 'Open';
-        const creator = (r.creator || '').slice(0, 60);
-        const source = r.source || 'Openverse';
-        return {
-          url,
-          credit: creator ? `${creator} · ${license} (${source})` : `${license} (${source})`,
-          key: imageKey(url),
-          hint,
-        };
-      })
-      .filter((c): c is ImageCandidate => Boolean(c));
-  } catch {
-    return [];
-  }
-}
+const DRAWING_WORDS = /\b(?:diagram|schematic|illustration|drawing|scheme)\b/i;
 
 /**
  * Slaydning O'Z mazmunidan so'rovlar. Fanga/mavzuga qattiq yozilgan zaxira
  * so'rovlar YO'Q — aks holda hamma slayd bitta rasmga tushib qoladi.
+ * Sezgir mavzuda so'rovga "diagram" qo'shiladi — foto emas, sxema qidiriladi.
  */
-function queriesForSlide(slide: ContentSlide): string[] {
+export function queriesForSlide(slide: ContentSlide): string[] {
+  const sensitive = isSensitiveSlide(slide);
   const primary = (slide.image_query || '').replace(/\s+/g, ' ').trim();
   const title = (slide.title || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   return [primary, coreTerm(primary), title]
     .map((q) => q.trim())
+    .map((q) => (sensitive && q && !DRAWING_WORDS.test(q) ? `${q} diagram` : q))
     .filter((q, i, arr) => q.length >= 3 && arr.indexOf(q) === i)
     .slice(0, 3);
+}
+
+/** So'rovning mazmunli so'zlari (o'zak — "lesions" ham "lesion" ga mos). */
+function queryStems(queries: string[]): string[] {
+  const words = queries
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !DRAWING_WORDS.test(w));
+  return [...new Set(words.map((w) => w.slice(0, Math.max(4, w.length - 2))))];
+}
+
+/**
+ * Nomzodlarni saralash: avval odob, keyin moslik. Qidiruv natijasida so'rov
+ * so'zlaridan birortasi ham bo'lmasa — u tasodifiy rasm, olinmaydi.
+ */
+export function rankCandidates(
+  candidates: ImageCandidate[],
+  queries: string[],
+  sensitive: boolean,
+): ImageCandidate[] {
+  const stems = queryStems(queries);
+  return candidates
+    .filter((c) => candidateAllowed(c, sensitive))
+    .map((c, order) => {
+      const hint = c.hint.toLowerCase();
+      const hits = stems.filter((s) => hint.includes(s)).length;
+      const score = hits + (c.fromArticle ? 1 : 0) + (c.vector || DRAWING_HINTS.test(c.hint) ? 0.5 : 0);
+      return { c, hits, score, order };
+    })
+    .filter(({ c, hits }) => c.fromArticle || hits > 0 || !stems.length)
+    .sort((a, b) => b.score - a.score || a.order - b.order)
+    .map(({ c }) => c);
 }
 
 /** Bir slayd uchun nomzodlar (yuklab olinmaydi — faqat ro'yxat). */
@@ -236,19 +310,16 @@ async function collectCandidatesUncached(slide: ContentSlide): Promise<ImageCand
     }
   };
   const queries = queriesForSlide(slide);
+  const sensitive = isSensitiveSlide(slide);
   for (const [i, query] of queries.entries()) {
     const sources = i === 0
       ? [searchWikipediaArticleImages(query), searchCommons(query)]
       : [searchCommons(query)];
     const results = await Promise.all(sources.map((p) => p.catch(() => [] as ImageCandidate[])));
     results.forEach(push);
-    if (out.length >= 6) break;
+    if (rankCandidates(out, queries, sensitive).length >= 6) break;
   }
-  // Wikimedia hech narsa bermasa — uchinchi manba (rate-limit tufayli oxirida).
-  if (!out.length && queries[0]) {
-    push(await searchOpenverse(queries[0]).catch(() => []));
-  }
-  return out;
+  return rankCandidates(out, queries, sensitive);
 }
 
 const candidateCache = new Map<string, Promise<ImageCandidate[]>>();
@@ -340,6 +411,75 @@ export function demoteSlidesWithoutImages(content: PresentationContent): Present
 
 const SEARCH_CONCURRENCY = 4;
 const DOWNLOAD_CONCURRENCY = 4;
+/** Bir slayd uchun nechta nomzod yuklab, tekshirib ko'riladi. */
+const TRIES_PER_SLIDE = 4;
+
+/** Server bergan hukm — bir rasm bir sessiyada bir marta tekshiriladi. */
+const verdictCache = new Map<string, Promise<boolean>>();
+
+function verdictKey(sourceUrl: string, dataUrl: string): string {
+  return sourceUrl ? sourceUrl.split('?')[0] : `data:${dataUrl.length}:${dataUrl.slice(-160)}`;
+}
+
+function checkedSafe(sourceUrl: string, dataUrl: string, context: string): Promise<boolean> {
+  const key = verdictKey(sourceUrl, dataUrl);
+  let verdict = verdictCache.get(key);
+  if (!verdict) {
+    if (verdictCache.size >= 600) verdictCache.delete(verdictCache.keys().next().value!);
+    verdict = isImageSafe(dataUrl, context).then((safe) => {
+      // Tarmoq yiqilgan bo'lishi mumkin — "xavfli" hukmini eslab qolmaymiz,
+      // keyingi safar yana tekshiriladi (rasm baribir qo'yilmaydi).
+      if (!safe) verdictCache.delete(key);
+      return safe;
+    });
+    verdictCache.set(key, verdict);
+  }
+  return verdict;
+}
+
+/** Saqlangan havola nomidagi belgilar — rasmni ko'rmasdan ham rad etiladi. */
+function sourceUrlAllowed(sourceUrl: string, slide: Pick<ContentSlide, 'image_query' | 'title'>): boolean {
+  if (!sourceUrl) return true;
+  let name = sourceUrl.split('?')[0];
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    /* noto'g'ri kodlangan havola — o'zicha */
+  }
+  const vector = /\.svg\b/i.test(name);
+  return candidateAllowed({ hint: name.replace(/[_\-./]+/g, ' '), vector }, isSensitiveSlide(slide));
+}
+
+/**
+ * PPTX yig'ishdan oldin: HAR rasmli slayd tekshiriladi — saqlangan taqdimot
+ * (rasm havoladan qayta tortiladi), eski qoralama (data:URL bilan) ham.
+ * O'tmagan rasm olib tashlanadi, `image_focus` slayd matnliga aylanadi.
+ */
+export async function ensureSafeSlideImages(content: PresentationContent): Promise<PresentationContent> {
+  const items = content.slides
+    .map((slide, index) => ({ slide, index }))
+    .filter(({ slide }) => slide.imageUrl?.startsWith('data:') || slide.imageSourceUrl);
+  if (!items.length) return content;
+  const checked = await inBatches(items, DOWNLOAD_CONCURRENCY, async ({ slide, index }) => {
+    const src = slide.imageSourceUrl || '';
+    if (!sourceUrlAllowed(src, slide)) return { index, dataUrl: null };
+    const dataUrl = slide.imageUrl?.startsWith('data:') ? slide.imageUrl : await fetchImageAsDataUrl(src);
+    if (!dataUrl) return { index, dataUrl: null };
+    const safe = await checkedSafe(src, dataUrl, slide.image_query || slide.title || '');
+    return { index, dataUrl: safe ? dataUrl : null };
+  });
+  const byIndex = new Map(checked.map((c) => [c.index, c.dataUrl]));
+  const slides = content.slides.map((slide, index) => {
+    if (!byIndex.has(index)) return slide;
+    const dataUrl = byIndex.get(index);
+    if (dataUrl) return { ...slide, imageUrl: dataUrl };
+    const { imageUrl: _img, imageCredit: _credit, imageSourceUrl: _src, ...rest } = slide;
+    return rest as ContentSlide;
+  });
+  const dropped = checked.filter((c) => !c.dataUrl).length;
+  if (dropped) console.warn(`[presentationImages] ${dropped} ta rasm tekshiruvdan o'tmadi yoki yuklanmadi — olib tashlandi`);
+  return demoteSlidesWithoutImages({ ...content, slides });
+}
 
 async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = [];
@@ -375,19 +515,25 @@ export async function resolvePresentationImages(
     return { ...target, chosen, queue };
   });
 
-  // 3-bosqich: tanlanganlarni yuklab olamiz; yiqilsa — navbatdagi band bo'lmagani.
+  // 3-bosqich: tanlanganlarni yuklab, ODOB bo'yicha tekshiramiz; yiqilsa yoki
+  // rad etilsa — navbatdagi band bo'lmagani.
+  let rejected = 0;
   const resolved = await inBatches(plan, DOWNLOAD_CONCURRENCY, async (item) => {
-    for (const candidate of item.queue.slice(0, 3)) {
+    for (const candidate of item.queue.slice(0, TRIES_PER_SLIDE)) {
       if (candidate.key !== item.chosen?.key && taken.has(candidate.key)) continue;
       taken.add(candidate.key); // reserve before awaiting: parallel fallbacks cannot choose the same file
       const dataUrl = await fetchImageAsDataUrl(candidate.url);
-      if (dataUrl) {
-        taken.add(candidate.key);
-        return { index: item.index, dataUrl, credit: candidate.credit, src: candidate.url };
+      if (!dataUrl) continue;
+      const context = item.slide.image_query || item.slide.title || '';
+      if (!(await checkedSafe(candidate.url, dataUrl, context))) {
+        rejected += 1;
+        continue;
       }
+      return { index: item.index, dataUrl, credit: candidate.credit, src: candidate.url };
     }
     return { index: item.index, dataUrl: null, credit: '', src: '' };
   });
+  if (rejected) console.warn(`[presentationImages] ${rejected} ta rasm odob tekshiruvidan o'tmadi`);
 
   const byIndex = new Map(resolved.filter((r) => r.dataUrl).map((r) => [r.index, r]));
   const slides = content.slides.map((slide, index) => {

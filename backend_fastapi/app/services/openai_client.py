@@ -18,8 +18,31 @@ class OpenAiClientError(Exception):
     """Model javobi yoki HTTP xatosi."""
 
 
+#: Sifat muhim bo'lgan YAGONA vazifa — test savollari (2026-10-16).
+#:
+#: Hamma narsa `gpt-4.1-nano` da yurardi (tejash qarori, 2026-09-16). Test
+#: uchun bu yetmadi: 15–16 oktabrda yaratilgan 1437 savolning 35% ida bitta
+#: savol ichida bir nechta savol bor edi, savol matni o'rtacha 26 so'z —
+#: USMLE vignette emas. Faqat test yaratish va tuzatish `gpt-4.1-mini` da;
+#: tarjima, izoh, keys, ma'ruza — avvalgidek eng arzon modelda. Narxi:
+#: haftasiga taxminan $7 o'rniga $27 (2026-10-16 o'lchovi).
+QUALITY_MODEL = "gpt-4.1-mini"
+QUALITY_PURPOSES = frozenset({
+    "test_generate", "test_generate_brief", "test_repair",
+    # Taqdimot mazmuni (2026-10-20, "kuchliroq taqdimot"): ~1200 ta/hafta,
+    # nano'da ~$2.7, mini'da ~$11 haftasiga. Tarjima va til tuzatish — nano.
+    "presentation_generate", "presentation_generate_fallback", "presentation_continue",
+})
+
+
+def model_for(purpose: str | None) -> str:
+    """Vazifaga qarab model: test — `QUALITY_MODEL`, qolgani — eng arzoni."""
+    return QUALITY_MODEL if (purpose or "") in QUALITY_PURPOSES else "gpt-4.1-nano"
+
+
 def _economy_model_name(model: str) -> str:
-    return "gpt-4.1-nano"
+    # Faqat sifat modeli o'tkaziladi; qolgan har qanday so'rov eng arzoniga.
+    return QUALITY_MODEL if model == QUALITY_MODEL else "gpt-4.1-nano"
 
 
 # Arzon model qoladi, lekin javob uzunligi so'ralganicha beriladi. Ilgari 1200

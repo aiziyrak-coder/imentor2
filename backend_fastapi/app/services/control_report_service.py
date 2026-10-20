@@ -501,7 +501,8 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
 
     # --- Kafedralar
     dep_agg: dict[str, dict] = defaultdict(
-        lambda: {"monitor": 0, "used": 0, "teachers": set(), "active": set(), "other": 0})
+        lambda: {"monitor": 0, "used": 0, "touched": 0, "teachers": set(), "active": set(),
+                 "touching": set(), "other": 0, "other_used": 0})
     # Kafedra kesimi RASMIY nom bo'yicha: aks holda bitta kafedra bir necha
     # qator bo'lib ketardi ("Normal anatomiya" va "Yu. Nishonov nomidagi
     # Normal anatomiya" alohida chiqardi, 2026-10-12).
@@ -517,19 +518,37 @@ def _build_overview(db: Session, start_day: dt.date, end_day: dt.date, *, depart
                 d["used"] += 1
                 if lesson.teacher_username:
                     d["active"].add(lesson.teacher_username)
+            if lesson.id in touched_ids:
+                d["touched"] += 1
+                if lesson.teacher_username:
+                    d["touching"].add(lesson.teacher_username)
         else:
             d["other"] += 1
+            # Monitorsiz xonadagi darsda ham ishlatgani ko'rinsin (2026-10-19):
+            # Epidemiologiya darslarining 234/249 tasi monitorsiz xonada, va
+            # kafedra qatori "0" bo'lib, ishlatganlar ko'rinmay qolardi.
+            if lesson.id in used:
+                d["other_used"] += 1
     departments = [{
         "department": name,
         "monitor_lessons": v["monitor"],
         "monitor_used": v["used"],
         "percent": _pct(v["used"], v["monitor"]),
         "band": _band(_pct(v["used"], v["monitor"])) if v["monitor"] else "none",
+        # "Ishlatilgan" — asosiy foiz bilan bir xil o'lchov (to'liq + qisqa).
+        # Ilgari kafedra faqat TO'LIQ o'tilganlar bilan ko'rsatilardi: 19-oktabr
+        # shikoyati — "Tibbiy va biologik kimyo" 44% bo'lib "ishlatilmagan"dek
+        # ko'rinardi, aslida darslarining 75% ida iMentor ishlatilgan edi.
+        "monitor_touched": v["touched"],
+        "touched_percent": _pct(v["touched"], v["monitor"]),
+        "touched_band": _band(_pct(v["touched"], v["monitor"])) if v["monitor"] else "none",
         "teachers": len(v["teachers"]),
         "active_teachers": len(v["active"]),
+        "touching_teachers": len(v["touching"]),
         "other_lessons": v["other"],
+        "other_used": v["other_used"],
     } for name, v in dep_agg.items() if v["monitor"] or v["other"]]
-    departments.sort(key=lambda r: (r["percent"], -r["monitor_lessons"]))
+    departments.sort(key=lambda r: (r["touched_percent"], r["percent"], -r["monitor_lessons"]))
 
     rows.sort(key=lambda r: (r["monitor_percent"] if r["monitor_percent"] is not None else 999,
                              -r["monitor_lessons"]))

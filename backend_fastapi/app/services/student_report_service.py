@@ -616,13 +616,18 @@ def _group_lessons(db: Session, start_day: dt.date, end_day: dt.date) -> dict[st
     """Davrda har guruhning HEMIS jadvalidagi darslari soni."""
     from app.models.hemis_lesson import HemisLesson
 
+    from app.services.lesson_report_service import counts_lesson_type
+
     rows = db.execute(
-        select(HemisLesson.group_name, func.count())
+        select(HemisLesson.group_name, HemisLesson.lesson_type, func.count())
         .where(HemisLesson.lesson_date >= start_day, HemisLesson.lesson_date <= end_day)
-        .group_by(HemisLesson.group_name)
+        .group_by(HemisLesson.group_name, HemisLesson.lesson_type)
     ).all()
     out: dict[str, int] = defaultdict(int)
-    for name, count in rows:
+    for name, kind, count in rows:
+        # Faqat amaliy mashg'ulotlar — o'qituvchilar hisoboti bilan bir xil.
+        if not counts_lesson_type(kind):
+            continue
         for part in (name or "").split(","):
             if part.strip():
                 out[part.strip()] += int(count or 0)

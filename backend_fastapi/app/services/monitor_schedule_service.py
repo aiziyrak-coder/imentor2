@@ -528,7 +528,13 @@ def _load_schedule(db: Session) -> list:
     from app.models.monitor_schedule import MonitorScheduleEntry
     from app.services import report_exclusion
 
-    rows = db.execute(select(MonitorScheduleEntry)).scalars().all()
+    from app.services.lesson_report_service import counts_lesson_type
+
+    # Faqat amaliy mashg'ulotlar (2026-10-19): monitor xonalari, o'qituvchi
+    # profili va AI tahlil shu jadvaldan o'qiydi — ma'ruza va laboratoriya
+    # bu yerda ham "ishlatilmagan dars" bo'lib chiqmasin.
+    rows = [e for e in db.execute(select(MonitorScheduleEntry)).scalars().all()
+            if counts_lesson_type(getattr(e, "lesson_type", ""))]
     excluded = report_exclusion.load(db)
     if not excluded.subject_names:
         return rows

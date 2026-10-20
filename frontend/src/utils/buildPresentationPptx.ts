@@ -10,7 +10,7 @@ import {
   slidePreviewBullets,
 } from './presentationContentSchema';
 import { autofitFontSize } from './presentationQa';
-import { fetchImageAsDataUrl } from './presentationImages';
+import { ensureSafeSlideImages } from './presentationImages';
 import { THEME, buildLabels, type PresentationBuildMeta } from './presentationTheme';
 
 export type { PresentationContent, ContentSlide };
@@ -1227,7 +1227,7 @@ export async function buildPresentationPptxFile(
   deck: PresentationContent | { title?: string; slides?: unknown[] },
   options?: BuildPresentationOptions,
 ): Promise<File> {
-  const content =
+  const parsed =
     deck && typeof deck === 'object' && 'presentation_title' in deck
       ? (deck as PresentationContent)
       : coercePresentationContent(deck, {
@@ -1236,25 +1236,15 @@ export async function buildPresentationPptxFile(
         });
 
   const meta: PresentationBuildMeta = options?.meta || {
-    subjectName: content.subject_area || 'Fan',
+    subjectName: parsed.subject_area || 'Fan',
     topicId: 'T',
   };
 
-  // Saqlangan taqdimotda data:URL rasm bo\'lmaydi (bazani shishirmaslik uchun
-  // olib tashlanadi), faqat asl havola qoladi. Yuklab olishdan oldin
-  // rasmlarni o\'sha havoladan qayta tortamiz — aks holda deck rasmsiz chiqadi.
-  const needImages = content.slides.filter(
-    (sl) => !sl.imageUrl?.startsWith('data:') && sl.imageSourceUrl,
-  );
-  if (needImages.length > 0) {
-    const fetched = await Promise.all(
-      needImages.map((sl) => fetchImageAsDataUrl(sl.imageSourceUrl as string).catch(() => null)),
-    );
-    needImages.forEach((sl, i) => {
-      const data = fetched[i];
-      if (data) sl.imageUrl = data;
-    });
-  }
+  // Saqlangan taqdimotda data:URL rasm bo'lmaydi (bazani shishirmaslik uchun
+  // olib tashlanadi), faqat asl havola qoladi — rasm o'sha havoladan qayta
+  // tortiladi. 2026-10-20 dan HAR rasm (eski saqlanganlari ham) odob bo'yicha
+  // tekshiriladi; o'tmagani slayddan olib tashlanadi.
+  const content = await ensureSafeSlideImages(parsed);
 
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();

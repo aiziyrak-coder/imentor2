@@ -133,6 +133,7 @@ def throttle_login(request: Request) -> None:
 # 20/minut butun binoni bloklardi — guruh bir vaqtda kirganda hamma "Juda ko'p
 # so'rov" olardi. Parol tanlashni hisob+IP cheklaydi; IP uchun keng umumiy chegara.
 LOGIN_IP_WIDE_RATE = "300/minute"
+IMAGE_SAFETY_RATE = "1500/hour"
 
 
 def throttle_login_account(request: Request, account: str) -> None:
@@ -151,6 +152,11 @@ def throttle_staff_ping(auth: AuthContext = Depends(get_current_auth)) -> None:
 
 def throttle_education_ai(auth: AuthContext = Depends(get_current_auth)) -> None:
     enforce(f"throttle:education_ai:{auth.user.id}", get_settings().django_ai_education_rate)
+
+
+def throttle_image_safety(auth: AuthContext = Depends(get_current_auth)) -> None:
+    """Slayd rasmlari tekshiruvi — bitta taqdimot 20–40 rasm, AI limitini yemasin."""
+    enforce(f"throttle:image_safety:{auth.user.id}", IMAGE_SAFETY_RATE)
 
 
 def throttle_translate(auth: AuthContext = Depends(get_current_auth)) -> None:

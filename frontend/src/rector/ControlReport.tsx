@@ -508,6 +508,7 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
           <span className="block text-[14.5px] font-bold text-slate-900">Monitorsiz joyda dars o‘tadiganlar</span>
           <span className="block text-[12px] text-slate-500 rx-num">
             {o.count} o‘qituvchi · {o.lessons} dars
+            {typeof o.used === 'number' && <> · <b className="text-teal-700">{o.used}</b> tasi iMentor’da o‘tilgan</>}
           </span>
         </span>
         <ChevronRight
@@ -559,7 +560,12 @@ function Offsite({ data, onOpen }: { data: Report; onOpen: (p: Person) => void }
                   <span className="hidden min-w-0 flex-1 truncate text-[12px] text-slate-400 sm:block">
                     {r.department}
                   </span>
-                  <span className="shrink-0 text-[11.5px] text-slate-500 rx-num">{r.other_lessons} dars</span>
+                  <span
+                    className={`shrink-0 text-[11.5px] font-semibold rx-num ${r.other_used ? 'text-teal-700' : 'text-rose-600'}`}
+                    title="iMentor’da o‘tilgan / jami monitorsiz darslar"
+                  >
+                    {r.other_used}/{r.other_lessons} dars
+                  </span>
                   <span className="w-[86px] shrink-0 text-right text-[11.5px] text-slate-400 rx-num">
                     {minutesText(r.minutes)}
                   </span>
@@ -883,7 +889,7 @@ function Departments({ data }: { data: Report }) {
       icon={Building2}
       tone="violet"
       title="Kafedralar — eng past ko‘rsatkichdan"
-      hint="Bosilsa kafedra o‘qituvchilari ro‘yxati ochiladi"
+      hint="Foiz — iMentor ishlatilgan amaliy darslar ulushi (yuqoridagi asosiy foiz bilan bir xil). Bosilsa kafedra o‘qituvchilari ochiladi"
     >
       <ul className="divide-y divide-slate-100">
         {data.departments.map((d, i) => (
@@ -907,15 +913,36 @@ function Departments({ data }: { data: Report }) {
                   {d.department}
                 </span>
                 <span className="flex flex-wrap items-center gap-x-3 text-[11.5px] text-slate-400 rx-num">
-                  <span className="inline-flex items-center gap-1"><Users size={11} />{d.active_teachers}/{d.teachers} o‘qituvchi</span>
-                  <span className="inline-flex items-center gap-1"><CalendarCheck size={11} />{d.monitor_used}/{d.monitor_lessons} dars</span>
+                  <span className="inline-flex items-center gap-1">
+                    <Users size={11} />
+                    {d.touching_teachers ?? d.active_teachers}/{d.teachers} o‘qituvchi ishlatgan
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <CalendarCheck size={11} />
+                    {d.monitor_touched ?? d.monitor_used}/{d.monitor_lessons} dars · {d.monitor_used} to‘liq
+                  </span>
+                  {d.other_lessons > 0 && (
+                    <span className="inline-flex items-center gap-1 text-teal-600">
+                      <MapPin size={11} />
+                      monitorsiz xonada {d.other_used ?? 0}/{d.other_lessons} dars o‘tilgan
+                    </span>
+                  )}
                 </span>
               </span>
               <span className="w-full shrink-0 sm:w-[200px]">
                 {d.monitor_lessons ? (
-                  <Meter value={d.percent} tone={BAND_TONE[d.band] || 'slate'} height={10} delay={i * 30} label={`${d.percent}%`} />
+                  // Asosiy foiz bilan bir xil o'lchov — "ishlatilgan" (2026-10-19).
+                  <Meter
+                    value={d.touched_percent ?? d.percent}
+                    tone={BAND_TONE[d.touched_band ?? d.band] || 'slate'}
+                    height={10}
+                    delay={i * 30}
+                    label={`${d.touched_percent ?? d.percent}%`}
+                  />
                 ) : (
-                  <span className="block text-right text-[12px] text-slate-400">monitorsiz</span>
+                  <span className="block text-right text-[12px] text-slate-400">
+                    monitorli xona yo‘q
+                  </span>
                 )}
               </span>
             </Stat>
@@ -1052,17 +1079,18 @@ export function teacherInsights(data: Report, trend: ControlTrend | null, drill:
     }
   }
   const ranked = data.departments.filter((d) => d.monitor_lessons >= 10);
+  const used = (d: Report['departments'][number]) => d.touched_percent ?? d.percent;
   if (ranked.length > 1) {
-    const worst = ranked.reduce((a, c) => (c.percent < a.percent ? c : a));
-    const best = ranked.reduce((a, c) => (c.percent > a.percent ? c : a));
+    const worst = ranked.reduce((a, c) => (used(c) < used(a) ? c : a));
+    const best = ranked.reduce((a, c) => (used(c) > used(a) ? c : a));
     out.push({
       key: 'worst', tone: 'rose', icon: Building2, action: 'O‘qituvchilar',
-      text: <>Eng past kafedra: <b>{worst.department}</b> — <b className="rx-num">{worst.percent}%</b></>,
+      text: <>Eng past kafedra: <b>{worst.department}</b> — <b className="rx-num">{used(worst)}%</b> darsda ishlatilgan</>,
       onClick: () => drill({ metric: `department:${worst.department}`, label: `${worst.department} — o‘qituvchilari` }),
     });
     out.push({
       key: 'best', tone: 'emerald', icon: Trophy, action: 'O‘qituvchilar',
-      text: <>Eng yaxshi kafedra: <b>{best.department}</b> — <b className="rx-num">{best.percent}%</b></>,
+      text: <>Eng yaxshi kafedra: <b>{best.department}</b> — <b className="rx-num">{used(best)}%</b> darsda ishlatilgan</>,
       onClick: () => drill({ metric: `department:${best.department}`, label: `${best.department} — o‘qituvchilari` }),
     });
   }

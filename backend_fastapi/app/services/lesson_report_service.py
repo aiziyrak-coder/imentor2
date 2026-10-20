@@ -194,10 +194,20 @@ def is_over(lesson: HemisLesson, now: dt.datetime) -> bool:
 #: pasaytirib, o'qituvchini bekordan ayblardi. Dars jadvali bo'limida
 #: ular o'z o'rnida turadi — chiqariladigani faqat BAHO.
 #:
-#: `IMENTOR_SKIP_LESSON_TYPES` bilan o'zgartiriladi (vergul bilan).
-SKIP_LESSON_TYPES = tuple(
-    x.strip() for x in (os.environ.get("IMENTOR_SKIP_LESSON_TYPES")
-                        or "ma'ruza, laboratoriya").split(",") if x.strip()
+#: Hisobotda FAQAT amaliy mashg'ulotlar baholanadi (rektor, 2026-10-19):
+#: "laboratoriya va ma'ruzalarni hisobga olmang, faqat amaliy mashg'ulotlarni
+#: (seminarlarni) inobatga olishimiz kerak". Klinik mashg'ulot — klinik
+#: kafedradagi amaliy dars, u ham qoladi.
+#:
+#: Ilgari bu TESKARI ro'yxat edi (ma'ruza va laboratoriya chiqarilardi) va
+#: faqat HEMIS darslariga qo'llanardi: monitor xonalari, o'qituvchi profili
+#: va AI tahlil boshqa jadvaldan (`MonitorScheduleEntry`) o'qib, ma'ruza va
+#: laboratoriyani "ishlatilmagan dars" deb sanardi; "Mustaqil ta'lim" ham
+#: sanalardi. Endi ruxsat etilganlar ro'yxati va hamma joyda bitta qaror —
+#: `counts_lesson_type`. `IMENTOR_COUNTED_LESSON_TYPES` bilan o'zgartiriladi.
+COUNTED_LESSON_TYPES = tuple(
+    x.strip() for x in (os.environ.get("IMENTOR_COUNTED_LESSON_TYPES")
+                        or "amaliy, seminar, klinik mashg'ulot").split(",") if x.strip()
 )
 
 
@@ -210,12 +220,25 @@ def _type_key(value: str) -> str:
 
 
 #: Tayyorlangan kalitlar — har darsda qayta hisoblanmasin.
-_SKIP_KEYS = frozenset(_type_key(x) for x in SKIP_LESSON_TYPES)
+_COUNTED_KEYS = frozenset(_type_key(x) for x in COUNTED_LESSON_TYPES)
+
+
+def counts_lesson_type(value: str | None) -> bool:
+    """Shu turdagi dars hisobotda baholanadimi.
+
+    Turi yozilmagan qator (eski Excel jadvali) chiqarib yuborilmaydi —
+    aks holda jadval yuklagan kafedra hisobotdan jimgina yo'qolardi.
+    "Amaliy mashg'ulot" kabi kengroq yozuvlar ham taniladi.
+    """
+    key = _type_key(value or "")
+    if not key:
+        return True
+    return any(k in key for k in _COUNTED_KEYS)
 
 
 def is_counted(lesson: HemisLesson) -> bool:
-    """Bu dars hisobotda baholanadimi (ma'ruza va laboratoriya — yo'q)."""
-    return _type_key(getattr(lesson, "lesson_type", "")) not in _SKIP_KEYS
+    """Bu dars hisobotda baholanadimi — faqat amaliy mashg'ulotlar."""
+    return counts_lesson_type(getattr(lesson, "lesson_type", ""))
 
 
 #: Dars qatorining maydonlari — bir marta hisoblanadi.

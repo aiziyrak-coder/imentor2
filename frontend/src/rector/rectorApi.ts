@@ -1048,9 +1048,16 @@ export type ControlReport = {
     monitor_used: number;
     percent: number;
     band: 'good' | 'warn' | 'bad' | 'none';
+    /** "Ishlatilgan" (to'liq + qisqa) — asosiy foiz bilan bir xil (2026-10-19). */
+    monitor_touched?: number;
+    touched_percent?: number;
+    touched_band?: 'good' | 'warn' | 'bad' | 'none';
+    touching_teachers?: number;
     teachers: number;
     active_teachers: number;
     other_lessons: number;
+    /** Monitorsiz xonadagi darslardan iMentor'da o'tilganlari (2026-10-19). */
+    other_used?: number;
   }>;
   /** FAQAT monitorli xonada darsi borlar. */
   teachers: ControlTeacher[];

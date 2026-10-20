@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import AuthContext, require_roles
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.throttling import throttle_education_ai, _redis
+from app.core.throttling import throttle_education_ai, throttle_image_safety, _redis
 from app.schemas.education_ai import (
     EducationAiBookReferencesRequest,
     EducationAiBookReferencesResponse,
@@ -19,8 +19,11 @@ from app.schemas.education_ai import (
     EducationAiCaseContextResponse,
     EducationAiCompletionRequest,
     EducationAiCompletionResponse,
+    EducationAiImageSafetyRequest,
+    EducationAiImageSafetyResponse,
 )
 from app.services import book_retrieval as rag
+from app.services import image_safety
 from app.services import protocol_library as protocols
 from app.services import external_literature as extlit
 from app.services import openai_client as oai
@@ -36,9 +39,15 @@ AI_STREAM_MAX_OUTPUT_TOKENS = oai.ECONOMY_MAX_OUTPUT_TOKENS
 STAFF_ROLES = ("admin", "klinika_admin", "hodim")
 
 
-def _economy_model(requested: str, settings) -> str:
-    """iMentor ommaviy ishlatiladi: oddiy AI generatsiyalar eng arzon modelda yuradi."""
-    return "gpt-4.1-nano"
+def _economy_model(requested: str, settings, purpose: str | None = None) -> str:
+    """iMentor ommaviy ishlatiladi: AI generatsiyalar eng arzon modelda yuradi.
+
+    Istisno — test savollari (`openai_client.model_for`): model so'rovdan
+    emas, VAZIFADAN tanlanadi, ya'ni brauzer qimmatroq model so'ray olmaydi.
+    """
+    from app.services.openai_client import model_for
+
+    return model_for(purpose)
 
 
 def _clamped_tokens(value: int, *, stream: bool = False) -> int:
@@ -51,7 +60,7 @@ def _cache_key(auth: AuthContext, payload: EducationAiCompletionRequest, message
         "stream": stream,
         "version": 2,
         "owner": auth.user.username,
-        "model": "gpt-4.1-nano",
+        "model": _economy_model(payload.model, None, payload.purpose),
         "purpose": payload.purpose,
         "messages": messages,
         "subject_code": payload.subject_code.strip(),
@@ -161,7 +170,7 @@ def education_ai_completion(
 
     _release_db(db)
 
-    model = _economy_model(payload.model, settings)
+    model = _economy_model(payload.model, settings, payload.purpose)
     try:
         content = oai.generate_openai_chat(
             api_key,
@@ -177,6 +186,33 @@ def education_ai_completion(
         raise HTTPException(status_code=502, detail=str(e))
 
     return EducationAiCompletionResponse(content=content, book_references=book_references)
+
+
+IMAGE_SAFETY_MAX_CHARS = 1_500_000
+
+
+@router.post("/education-ai/image-safety/", response_model=EducationAiImageSafetyResponse)
+def education_ai_image_safety(
+    payload: EducationAiImageSafetyRequest,
+    auth: AuthContext = Depends(require_roles(*STAFF_ROLES)),
+    _: None = Depends(throttle_image_safety),
+) -> EducationAiImageSafetyResponse:
+    """Slayd rasmini odob bo'yicha tekshirish (`image_safety`). Brauzer har
+    rasmni slaydga qo'yishdan OLDIN shu yerdan o'tkazadi."""
+    for image in payload.images:
+        if not image.startswith("data:image/") or len(image) > IMAGE_SAFETY_MAX_CHARS:
+            raise HTTPException(status_code=400, detail="Rasm data:image/... ko'rinishida va 1.5 MB dan kichik bo'lsin.")
+    api_key = get_settings().openai_api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API kaliti serverda sozlanmagan.")
+    results = image_safety.check_images(api_key, payload.images)
+    for r in results:
+        if not r.get("safe"):
+            logger.warning(
+                "image_safety: rasm rad etildi user=%s sexual=%s context=%r",
+                auth.user.username, r.get("sexual"), payload.context[:120],
+            )
+    return EducationAiImageSafetyResponse(results=results)
 
 
 @router.post("/education-ai/completion/stream/")
