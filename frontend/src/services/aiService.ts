@@ -60,12 +60,12 @@ import {
 import { listPreparedForTopicSynced, loadPreparedByIdSynced } from '../utils/preparedContentStore';
 import { caseWeaknesses, weakCaseRetryNote } from '../utils/caseQuality';
 import { CASE_SHAPE_RETRY_NOTE, caseShapeSummary, repairCaseShape } from '../utils/caseShape';
-import { UNGRADABLE, flawRetryNote, questionFlaws, type QuestionFlaw } from '../utils/testQuality';
+import { UNGRADABLE, dropDuplicateQuestions, flawRetryNote, overusedOptionQuestions, questionFlaws, usedAnswers, type QuestionFlaw } from '../utils/testQuality';
 import { depthFlaws, depthRetryNote, type DepthFlaw } from '../utils/testDepth';
 import { normalizeCaseFocus } from '../utils/caseFocusLabels';
 import { type MedicalReference } from '../utils/medicalReferences';
 import { stripUnfilledSourceTemplate } from '../utils/sourceTemplate';
-import { remapOptionLetters, stripOptionLabels } from '../utils/testOptionText';
+import { remapOptionLetters, stripOptionLabels, stripOptionLetterPrefix } from '../utils/testOptionText';
 import {
   DEFAULT_TEST_DIFFICULTY,
   buildTestDifficultyPrompt,
@@ -116,6 +116,88 @@ const ACADEMIC_CLINICAL_RETRY_BAN =
 /** O'zbekcha anatomik nom ↔ lotincha (Nomina Anatomica) adashuvi: model
  *  "chakka suyagi"ni os zygomaticum deb yozib yuborgan. Tibbiy domenlarda
  *  har bir lotincha atama o'zbekcha nom bilan aynan mos bo'lishi shart. */
+/**
+ * Nurli tashxis (radiologiya) testlari uchun (2026-10-19).
+ *
+ * Radiologiya bemorsiz fan deb olinardi va "o'lchov + birlik" talabi
+ * modelni uydirma raqam yozishga majburlardi: oddiy rentgenda "zichlik 15%
+ * oshgan", rentgenogrammada HU. Lokal o'lchovda radiologiya testlarining
+ * 0/20 savoli imtihonga yaroqli chiqdi. Radiologiyada qaror raqamdan emas,
+ * NOMLANGAN belgidan va usul tanlashdan chiqadi.
+ */
+const IMAGING_SCOPE_RE = /radiolog|rentgen|nurli\s*tashxis|nur\s*diagnost|vizualizats|kompyuter\s*tomograf|\bkt\b|\bmrt\b|ultratovush|\butt\b|sonograf|mammograf|angiograf|скопи|рентген|лучев/i;
+
+export function isImagingScope(...parts: Array<string | undefined>): boolean {
+  return IMAGING_SCOPE_RE.test(parts.filter(Boolean).join(' '));
+}
+
+/**
+ * Morfologik fanlar (gistologiya, anatomiya, patanatomiya) — 2026-10-19.
+ * Biomedical qoidadagi "o'lchov + birlik" talabi bu fanlarda uydirma raqam
+ * chiqarardi; lokal o'lchovda gistologiya savollarining 6/10 i shu sabab
+ * yaroqsiz bo'ldi. Bu fanlarda qaror preparat tasviridan chiqadi.
+ */
+const MORPHOLOGY_SCOPE_RE = /gistolog|sitolog|embriolog|anatom|morfolog|patologik\s*anatom|patanatom|гистолог|цитолог|эмбриолог|анатом/i;
+
+export function isMorphologyScope(...parts: Array<string | undefined>): boolean {
+  return MORPHOLOGY_SCOPE_RE.test(parts.filter(Boolean).join(' '));
+}
+
+const MORPHOLOGY_TEST_RULE =
+  'MORFOLOGIYA QOIDASI (majburiy): savol preparat yoki tuzilma TASVIRIGA tayansin — bo\'yash usuli (gematoksilin-eozin, ' +
+  'PAS, impregnatsiya), mikroskop turi (yorug\'lik / elektron), joylashuv (a\'zo, qavat), hujayra shakli, yadro holati, ' +
+  'maxsus organellalar, qo\'shni tuzilmalar. UYDIRMA SON TAQIQLANADI: "1 mm² dagi hujayra soni", "N soniyada ajraladi", ' +
+  '"qalinligi 1,2 µm" kabi darslikda yo\'q raqamlar yozilmasin. Raqam faqat darslikdagi mashhur, barqaror qiymat bo\'lsa ' +
+  '(masalan eritrotsit diametri ~7,5 µm). Savol turlari aralash: tasvir → tuzilma/to\'qima; tuzilma → vazifa; ' +
+  'joylashuv → epiteliy turi; o\'zgarish → jarayon (metaplaziya, regeneratsiya); embrional manba. ' +
+  'Bir xil "aniqlang" qolipi takrorlanmasin. ';
+
+/**
+ * Stomatologiya (2026-10-19). Umumiy klinik qoida ("stemda kamida ikki
+ * vital/lab qiymat") stomatologik savolga tishga aloqasiz qon bosimi, puls
+ * va glyukoza qo'shtirardi; 8 stomatologik fanning o'rtachasi 6/10 edi.
+ */
+const DENTAL_SCOPE_RE = /stomatolog|tish|endodont|periodont|parodont|ortodont|ortoped(ik)?\s*stom|og'?iz\s*bo'?shlig|yuz[-\s]?jag|kariyes|karies|pulpit|стомат|зуб/i;
+
+export function isDentalScope(...parts: Array<string | undefined>): boolean {
+  return DENTAL_SCOPE_RE.test(parts.filter(Boolean).join(' '));
+}
+
+const DENTAL_TEST_RULE =
+  'STOMATOLOGIYA QOIDASI (majburiy, yuqoridagi "vital/lab qiymat" talabidan USTUN): stem STOMATOLOGIK topilmaga tayansin — tish raqami (FDI, a\'zo turi bilan mos: ' +
+  '11–13 kesuvchi/qoziq, 14–15 premolyar, 16–18 molyar), sovuq/EOD testi, perkussiya, zondlash chuqurligi, mobilitet, ' +
+  'gigiyenik indeks, rentgen topilmasi, okklyuziya. Tishga ALOQASIZ qon bosimi, puls, SpO2, glyukoza, statin YOZILMASIN — ' +
+  'faqat qarorni o\'zgartirsa (antikoagulyant + ekstraksiya, bisfosfonat + jarrohlik, diabet + infeksiya). ' +
+  'Har savolning 5 varianti O\'ZIGA XOS bo\'lsin: bir xil variant iboralari ("ko\'prik oralig\'ini qayta hisoblash") ' +
+  'testda boshqa savollarda takrorlanmasin. Ikki mahsulot/usul orasidan tanlash so\'ralsa, stemda farqlovchi fakt bo\'lsin. ';
+
+const IMAGING_TEST_RULE =
+  'NURLI TASHXIS QOIDASI (majburiy): savol real radiologik amaliyotga tayansin — ' +
+  'usul (rentgenografiya, KT, MRT, UTT, angiografiya, mammografiya) va proyeksiya aniq aytilsin; ' +
+  'topilma shu MAVZUDAGI a\'zo va usulga xos, darsliklarda nomlangan radiologik belgi bilan tasvirlansin ' +
+  '(boshqa a\'zo yoki boshqa usulning belgisini ko\'chirmang; belgi qaysi kasallikka xosligini aniq bilmasangiz — ishlatmang). ' +
+  'UYDIRMA KO\'RSATKICH TAQIQLANADI: oddiy rentgenda foizli "zichlik oshishi", rentgenogrammada HU, ' +
+  'millimetrgacha "o\'sish tezligi". HU faqat KT da, signal intensivligi (T1/T2) faqat MRT da, exogenlik faqat UTT da. ' +
+  'Savol turlari aralash bo\'lsin: belgi → tashxis; klinik vaziyat → eng to\'g\'ri birinchi usul; ' +
+  'kontrast/nurlanish kontrendikatsiyasi (homiladorlik, buyrak yetishmovchiligi, yodga allergiya, kardiostimulyator va MRT); ' +
+  'ikki yaqin tashxisni ajratadigan belgi. Javob o\'lchamning o\'sdi/kichraydi degan yolg\'iz raqamidan chiqmasin. ' +
+  'Klinik vaziyat (yosh, shikoyat, anamnez) qisqa bo\'lishi mumkin — radiologik belgi asosiy bo\'lsin. ';
+
+/**
+ * Har savolning to'g'ri javobi oldindan rejalanadi (2026-10-19). Ilgari 10
+ * savolning 4 tasida bir xil javob ("o'pka abssesi") va bir xil qolip
+ * chiqardi; reja modelni javoblarni avvaldan farqlashga majburlaydi.
+ */
+const TEST_PLAN_RULE =
+  'AVVAL `plan` massivini yozing: har savol uchun {answer, angle} — answer to\'g\'ri javobning qisqa nomi, ' +
+  'angle savol turi. HAMMA answer har xil bo\'lsin (bitta kasallik/dori/belgi/usul ikki marta EMAS), ' +
+  'angle lar kamida 4 xil bo\'lsin. Keyin questions AYNAN shu plan tartibida yoziladi. ' +
+  'Har savol boshqa tuzilishda: bir xil jumla qolipi ("N sm o\'choq... N hafta...") takrorlanmasin. ' +
+  // 2026-10-19: bir testda bir xil 5 distraktor deyarli har savolda turardi
+  // ("Aspirinni to\'xtatish", "Nimodipin", "Mannitol").
+  'Distraktorlar HAR savolning o\'ziga xos bo\'lsin: bitta distraktor butun testda 2 martadan ko\'p ishlatilmasin. ' +
+  'Stemda javobni ochiq tasvirlamang: topilma tasvirlansa, savol uning NOMINI emas, undan keyingi xulosani so\'rasin. ';
+
 const MEDICAL_TERMINOLOGY_RULE =
   'TERMINOLOGIYA ANIQLIGI (MAJBURIY): har bir o\'zbekcha anatomik/tibbiy atamaga qavsda beriladigan ' +
   'lotincha nom xalqaro Terminologia Anatomica bo\'yicha AYNAN o\'sha tuzilmaga tegishli bo\'lsin. ' +
@@ -1561,7 +1643,12 @@ const ANSWER_KEY_RULE =
   'correctAnswer — to\'g\'ri variant matnining AYNAN nusxasi (harfsiz). ' +
   'options ichida "A)", "B." kabi harf belgisi yozilmasin. ' +
   'explanation va boshqa izohlarda variantga HARF yoki RAQAM bilan ishora qilmang ("A javob", "2-variant") — ' +
-  'variant matnini keltiring: variantlar keyin aralashtiriladi.';
+  'variant matnini keltiring: variantlar keyin aralashtiriladi. ' +
+  // Lokal o'lchovda (2026-10-19) xatolarning eng kattasi: "keyingi qadam"
+  // savolida ikki variant ham yo'riqnomaga mos edi (KT ham, jarrohlik ham).
+  'YAGONA ENG TO\'G\'RI JAVOB: har distraktor USHBU stemdagi aniq fakt tufayli xato bo\'lsin. ' +
+  'Agar ikkinchi variant ham yo\'riqnoma bo\'yicha himoya qilinsa — stemga uni rad etuvchi faktni qo\'shing ' +
+  'yoki variantni almashtiring. Bahsli, eskirgan yoki manbalar bir-biriga zid bo\'lgan qarorlarni so\'ramang.';
 
 /** Tahlil yoziladigan paytda ham variant harfi ishlatilmaydi (yuqoridagi sabab). */
 const NO_OPTION_LETTER_RULE =
@@ -2210,6 +2297,9 @@ export const aiService = {
     ]);
 
     const contextBlock = buildOwnMaterialsBlock(extraContext);
+    const imaging = isImagingScope(topic, scope.subjectName, scope.departmentName);
+    const morphology = !imaging && isMorphologyScope(topic, scope.subjectName, scope.departmentName);
+    const dental = isDentalScope(topic, scope.subjectName, scope.departmentName);
 
     // Shundan kam toza savol qolsa — shakli buzuq (lekin bitta savolli)
     // savollar ham olinadi; aks holda test umuman chiqmay qolardi.
@@ -2237,15 +2327,21 @@ export const aiService = {
               : 'Oliy tibbiy ta\'lim testlari (KROK / USMLE Step 2 CK), maktab/kollej emas. ') +
           `${GENERATION_UNIQUENESS_RULE} ${DEPTH_RULE} ${TOPIC_FIT_RULE} ${OPTION_LENGTH_RULE} ${jsonReferencesRule(Boolean(bookContext))} ` +
           `${requestedCount} ta test JSON: ` +
-          `{topic, references:[], questions:[{question, options[5], correctOptionIndex, correctAnswer, explanation, references:[]}]}. ` +
+          `{topic, references:[], plan:[{answer, angle}], questions:[{question, options[5], correctOptionIndex, correctAnswer, explanation, references:[]}]}. ` +
+          `${TEST_PLAN_RULE}${imaging ? IMAGING_TEST_RULE : ''}${morphology ? MORPHOLOGY_TEST_RULE : ''}${dental ? DENTAL_TEST_RULE : ''}` +
           `${ANSWER_KEY_RULE} ` +
           `${briefExplanation ? 'explanation — 1-2 qisqa gap: to‘g‘ri javob va hal qiluvchi belgi (batafsil tahlil keyin alohida yoziladi).' : testExplanationInstruction(difficulty, domain)} ` +
           (domain === 'academic'
             ? 'Uydirma foiz, PMID, maqola yoki havola YOZILMASIN. Bemor+kasallik+dori vignette TAQIQLANADI. '
             : domain === 'biomedical'
-              ? 'Stemda aniq shart bo\'lsin: preparat, namuna, o\'lchov yoki me\'yordan chetlanish (birlik bilan). ' +
+              ? 'Stemda aniq shart bo\'lsin: preparat, namuna, tuzilma, mexanizm yoki o\'lchov. Raqam FAQAT real o\'lchanadigan ' +
+                'ko\'rsatkich uchun; hisob-kitob bo\'lsa, raqamlar fiziologik jihatdan mos va javob to\'g\'ri hisoblangan bo\'lsin ' +
+                '(yozishdan oldin o\'zingiz hisoblab tekshiring). ' +
                 'Uydirma foiz, PMID, maqola yoki havola YOZILMASIN. "N yoshli bemor murojaat qildi" shakli TAQIQLANADI. '
-              : 'Stemda kamida IKKITA realistik vital/lab qiymat (birlik bilan) bo\'lsin. Uydirma foiz, PMID, ' +
+              : (dental
+                  ? 'Stemda stomatologik topilmalar bo\'lsin; umumiy vital/lab FAQAT qarorni o\'zgartirsa. Uydirma foiz, PMID, '
+                  : 'Stemda kamida IKKITA realistik vital/lab qiymat (birlik bilan) bo\'lsin — har biri qarorga ta\'sir qiladigan ' +
+                    '(tashxisni yoki taktikani o\'zgartiradigan) bo\'lsin, bezak uchun raqam YOZILMASIN. Uydirma foiz, PMID, ') +
                 'maqola yoki havola YOZILMASIN. Oliy tibbiy ta\'lim saviyasi: klassik bitta ABG/lab = tashxis TAQIQLANADI. ') +
           `${levelBlock} ` +
           'optionExplanations YOZMANG. ' +
@@ -2264,6 +2360,8 @@ export const aiService = {
               (briefExplanation
                 ? 'explanation — 1-2 qisqa gap. Faqat valid JSON.'
                 : 'explanation — 5-7 gaplik klinik tahlil. Faqat valid JSON.')) +
+          // Fan qoidasi oxirida ham — umumiy klinik vital talabini bosib o'tsin.
+          (dental ? ` ${DENTAL_TEST_RULE}` : '') +
           // Til ko'rsatmasi oxirida ham: noto'g'ri tilda chiqqan test butunlay
           // qayta generatsiya qilinadi, bu esa eng qimmat qayta urinish.
           ` ${strictLanguageDirective(language)}`,
@@ -2297,6 +2395,105 @@ export const aiService = {
       );
 
     /**
+     * Ekspert tekshiruvi (2026-10-19): har savol alohida qayta ko'rib chiqiladi
+     * va xatosi tuzatiladi yoki savol tashlanadi.
+     *
+     * Regex nazorati (`testQuality`, `testDepth`) faqat SHAKLNI ko'radi.
+     * Lokal o'lchovda shakli toza savollarning 22% ida mazmun xatosi qoldi:
+     * ikki variant ham yo'riqnomaga mos, kalit noto'g'ri, uydirma
+     * ko'rsatkich. Bunday savolni faqat mazmunni tushunadigan tekshiruv
+     * ushlaydi. Xato bo'lsa, savollar o'zgarishsiz qaytadi — tekshiruv testni
+     * hech qachon to'xtatmaydi.
+     */
+    const review = async (questions: TestSession['questions']): Promise<TestSession['questions']> => {
+      if (!questions?.length) return questions;
+      const listed = questions
+        .map(
+          (q, i) =>
+            `${i + 1}. ${q.question}\n${q.options.map((o, k) => `${'ABCDE'[k]}) ${o}`).join('\n')}\n` +
+            `Kalit: ${q.options[q.correctOptionIndex] ?? ''}\nIzoh: ${q.explanation || ''}`,
+        )
+        .join('\n\n');
+      try {
+        const parsed = await openaiJson<{ reviews?: Array<Record<string, unknown>> }>({
+          model: OPENAI_CHAT,
+          system:
+            `${sysRole(domain)} Siz test savollarini imtihondan oldin tekshiruvchi QATTIQ ekspertsiz. ` +
+            'Har savolni alohida tekshiring: (1) kalit tibbiy/ilmiy jihatdan aniq to\'g\'rimi va zamonaviy yo\'riqnomaga mosmi; ' +
+            '(2) boshqa biror variant ham himoya qilinadimi; (3) variantlar mazmunan farqlimi (bir ro\'yxatning boshqa tartibi emas); ' +
+            '(4) stem BITTA narsani so\'raydimi; (5) raqam, belgi va atamalar real amaliyotda mavjudmi (uydirma ko\'rsatkich yo\'qmi); ' +
+            '(6) savol mavzuga tegishlimi; (7) 5 variant BIR XIL TURDAMI — hammasi tashxis YOKI hammasi dori YOKI hammasi ' +
+            'tekshiruv/usul; tashxis va davolash aralash bo\'lsa — "fix"; (8) stemdagi bemor allaqachon kalitdagi dorini/muolajani ' +
+            'olayotgan bo\'lsa yoki kalit stemda bajarilgan bo\'lsa — "fix". ' +
+            (imaging ? IMAGING_TEST_RULE : '') +
+            (dental ? DENTAL_TEST_RULE : '') +
+            'HAR savol uchun AVVAL `reason` yozing: kalit nega to\'g\'ri (qaysi stem fakti), so\'ng HAR distraktor uchun ' +
+            'stemdagi qaysi fakt uni rad etadi. Biror distraktorni stem fakti bilan rad eta olmasangiz — u ham himoya qilinadi, ' +
+            'demak savol "fix" yoki "drop". Atama/belgi boshqa a\'zo yoki kasallikka tegishli bo\'lsa — "fix". ' +
+            'Teng darajada tavsiya etilgan ikki dori sinfi (masalan GLP-1 va SGLT2) orasidan tanlash, stemda farqlovchi fakt ' +
+            '(yurak yetishmovchiligi, eGFR, vazn maqsadi) bo\'lmasa — "fix". ' +
+            'verdict: "ok" — hammasi joyida; "fix" — tuzatsa bo\'ladi: TO\'LIQ tuzatilgan question, options[5], correctAnswer ' +
+            '(options dagi matnning AYNAN nusxasi) va explanation yozing; "drop" — tuzatib bo\'lmaydi. ' +
+            'Shubha bo\'lsa "ok" demang. ' +
+            `${ANSWER_KEY_RULE} ` +
+            (briefExplanation ? 'explanation — 1-2 qisqa gap. ' : `${testExplanationInstruction(difficulty, domain)} `) +
+            'JSON: {"reviews":[{"i":1,"reason":"","verdict":"ok|fix|drop","question":"","options":[],"correctAnswer":"","explanation":""}]}. ' +
+            '"ok" bo\'lsa question/options/explanation ni BO\'SH qoldiring. ' +
+            `Til: ${outLang}. ${strictLanguageDirective(language)}`,
+          user: `${scopeBlock}\nMavzu: "${topic}".\n\n${listed}`,
+          purpose: 'test_repair',
+          maxTokens: Math.min(16000, questions.length * 900 + 400),
+          temperature: 0,
+          responseFormat: { type: 'json_object' },
+          parse: (t) => parseJSONSafe<{ reviews?: Array<Record<string, unknown>> }>(t),
+        });
+        const byIndex = new Map<number, Record<string, unknown>>();
+        for (const r of parsed?.reviews || []) {
+          const i = Number(r?.i);
+          if (Number.isInteger(i) && i >= 1 && i <= questions.length) byIndex.set(i - 1, r);
+        }
+        const out: TestSession['questions'] = [];
+        let fixed = 0;
+        let dropped = 0;
+        questions.forEach((q, i) => {
+          const r = byIndex.get(i);
+          const verdict = String(r?.verdict || 'ok').toLowerCase();
+          if (verdict === 'drop') {
+            dropped += 1;
+            return;
+          }
+          if (verdict === 'fix' && r) {
+            const options = Array.isArray(r.options) ? stripOptionLabels(r.options.map((o) => String(o ?? ''))) : [];
+            const answer = stripOptionLetterPrefix(String(r.correctAnswer || ''));
+            const idx = options.findIndex((o) => o.toLowerCase() === answer.toLowerCase());
+            const question = String(r.question || '').trim();
+            // Tuzatish yaroqsiz bo'lsa — savol tashlanadi: xato deb topilgan
+            // asl savolni qaytarish kalitni buzuqligicha qoldiradi.
+            if (!question || options.length !== 5 || idx < 0) {
+              dropped += 1;
+              return;
+            }
+            fixed += 1;
+            out.push({
+              ...q,
+              question,
+              options,
+              correctOptionIndex: idx,
+              explanation: String(r.explanation || q.explanation || '').trim(),
+            });
+            return;
+          }
+          out.push(q);
+        });
+        if (fixed || dropped) console.warn(`Test ekspert tekshiruvi: ${fixed} ta tuzatildi, ${dropped} ta tashlandi`);
+        return out;
+      } catch (err) {
+        console.warn('Test ekspert tekshiruvi bajarilmadi:', err);
+        return questions;
+      }
+    };
+
+    /**
      * Test kamida `safeCount` (odatda 10) savoldan iborat bo'lishi kerak.
      * Model ba'zan kamroq qaytaradi, yaroqsiz savollar esa tashlanadi —
      * yetishmagani alohida so'rov bilan to'ldiriladi (mavjudlari takrorlanmaydi).
@@ -2315,7 +2512,10 @@ export const aiService = {
             missing + 3,
             (lastFlawNote ? `${lastFlawNote}\n\n` : '') +
               (existing
-                ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n`
+                ? `Quyidagi savollar ALLAQACHON bor — ularni takrorlamang, mavzuning boshqa jihatlarini so'rang:\n${existing}\n\n` +
+                  // To'g'ri javob ham takrorlanmasin: model boshqa bemor bilan
+                  // aynan shu tushunchani qaytarardi (2026-10-19).
+                  `Bu TO'G'RI JAVOBLAR band — yangi savolda to'g'ri javob ULARDAN BOSHQA bo'lsin: ${usedAnswers(have).join('; ')}.\n\n`
                 : ''),
           );
           const seen = new Set(have.map((q) => q.question.trim().toLowerCase()));
@@ -2323,9 +2523,12 @@ export const aiService = {
           const fresh = (more.questions || []).filter(
             (q) => !seen.has(q.question.trim().toLowerCase()) && !questionFlaws(q).some((f) => UNGRADABLE.has(f)),
           );
+          const reviewed = await review(fresh);
+          // Mavjudlariga takror bo'lganlari qo'shilmaydi.
+          const merged = dropDuplicateQuestions([...have, ...reviewed]).kept;
           out = {
             ...out,
-            questions: [...have, ...fresh].slice(0, safeCount),
+            questions: merged.slice(0, safeCount),
             references: out.references?.length ? out.references : more.references,
           };
         } catch (err) {
@@ -2426,7 +2629,7 @@ export const aiService = {
             rough.push(q);
             continue;
           }
-          const depthFound = depthFlaws(q, { domain, difficulty });
+          const depthFound = depthFlaws(q, { domain, difficulty, imaging });
           if (depthFound.length) {
             depth.push(...depthFound);
             weak.push(q);
@@ -2458,7 +2661,21 @@ export const aiService = {
 
       // Birinchi tekshiruv: sifatsizlar chiqariladi va `topUp` ularning
       // o'rniga yangisini so'raydi — modelga nimasi noto'g'ri bo'lgani aytiladi.
+      data = { ...data, questions: dropDuplicateQuestions(await review(data.questions || [])).kept };
       const checked = judge(data.questions || []);
+      let overuseNote = '';
+      // Variantlari boshqa savollardan ko'chirilgan savollar zaxiraga o'tadi
+      // va o'rniga yangisi so'raladi (2026-10-19).
+      {
+        const overused = overusedOptionQuestions(checked.good);
+        if (overused.size) {
+          checked.good = checked.good.filter((q) => !overused.has(q));
+          checked.weak.push(...overused);
+          overuseNote =
+            'Oldingi savollarda bir xil variant iboralari ko\'p savolda takrorlangan — har savolning 5 varianti O\'ZIGA XOS bo\'lsin, ' +
+            'boshqa savollardagi variantlarni ishlatmang.';
+        }
+      }
       if (checked.form.length || checked.depth.length) {
         console.warn(
           `Test sifati: shakli buzuq ${checked.form.length ? 'bor' : 'yo\'q'}, ` +
@@ -2472,6 +2689,7 @@ export const aiService = {
           .filter(Boolean)
           .join('\n\n');
       }
+      if (overuseNote) lastFlawNote = [lastFlawNote, overuseNote].filter(Boolean).join('\n\n');
       // `topUp` ga faqat TOZALARI beriladi, shuning uchun yetishmagani
       // qaytadan so'raladi; kuchsizlari esa oxirida, kerak bo'lsa, qo'shiladi.
       data = { ...data, questions: checked.good };
@@ -2504,6 +2722,14 @@ export const aiService = {
           );
           kept = [...kept, ...filler].slice(0, safeCount);
         }
+        data = { ...data, questions: kept };
+      }
+      // Oxirgi himoya: zaxiradan qaytgan savollar ham takrorga tekshiriladi.
+      // Lekin takror filtri testni yo'q qilmasin: savol yetmasa, tashlangan
+      // takrorlar qaytariladi — o'qituvchiga xato ko'rsatishdan yaxshiroq.
+      {
+        const dedup = dropDuplicateQuestions(data.questions || []);
+        const kept = [...dedup.kept, ...dedup.dropped].slice(0, Math.max(dedup.kept.length, safeCount));
         data = { ...data, questions: kept };
       }
       // Sifat filtri hammasini tashlasa ham bo'sh test qaytmaydi (2026-10-13).

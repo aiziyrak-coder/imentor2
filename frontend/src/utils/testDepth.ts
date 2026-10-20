@@ -42,6 +42,8 @@ export type DepthOptions = {
   /** `academic` da bemor ma'lumoti talab qilinmaydi. */
   domain?: 'clinical' | 'biomedical' | 'academic';
   difficulty?: 'easy' | 'medium' | 'hard';
+  /** Nurli tashxis: topilma raqam emas, nomlangan radiologik belgi. */
+  imaging?: boolean;
 };
 
 /**
@@ -119,7 +121,12 @@ export function depthFlaws(q: DepthInput, opts: DepthOptions = {}): DepthFlaw[] 
   //    shuning uchun u yerda faqat uzunlik talab qilinadi.
   const dataPoints =
     (stem.match(DATA_POINT) || []).length + (stem.match(NAMED_VALUE) || []).length;
-  const needData = domain !== 'academic' && difficulty !== 'easy';
+  // Raqam faqat KLINIK vignettada talab qilinadi (2026-10-19). Biomedical
+  // (gistologiya, anatomiya) va nurli tashxis savollarida bu talab modelni
+  // uydirma ko'rsatkich yozishga majburlardi: "1 cm² dagi mikrovorsinka
+  // soni", rentgenda "zichlik 15% oshgan". Ularda tayanch — preparat yoki
+  // tasvirdagi nomlangan belgi.
+  const needData = domain === 'clinical' && !opts.imaging && difficulty !== 'easy';
   // Klinik bo'lmagan fanda vazifa qisqaroq bo'lishi tabiiy (raqam ham shart
   // emas), lekin bir qatorlik ta'rif savoli bo'lib qolmasligi kerak.
   //
@@ -161,7 +168,7 @@ export function depthFlaws(q: DepthInput, opts: DepthOptions = {}): DepthFlaw[] 
 export function depthRetryNote(flaws: DepthFlaw[]): string {
   const WHY: Record<DepthFlaw, string> = {
     vignette_yuzaki:
-      'savol YUZAKI: vignette qisqa yoki ichida aniq ma\'lumot yo\'q — kamida IKKI aniq topilma (raqam+birlik) va vaqt bo\'lsin',
+      'savol YUZAKI: vignette qisqa yoki ichida aniq ma\'lumot yo\'q — kamida IKKI aniq topilma va vaqt bo\'lsin (klinikada raqam+birlik; morfologiya va radiologiyada nomlangan belgi, uydirma raqam EMAS)',
     eslash_savoli:
       'savol ESLASHNI tekshiradi ("quyidagilardan qaysi biri...", "X nima?") — o\'rniga QAROR so\'rang: keyingi eng to\'g\'ri qadam, eng ehtimoliy holat, qaysi mexanizm, nima mumkin emas',
     inkor_savol:

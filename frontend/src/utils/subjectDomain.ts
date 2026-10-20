@@ -98,7 +98,7 @@ const ACADEMIC_CODE_RE =
  * kelmagan joylar uchun (eski localStorage konteksti, tashqi API).
  */
 const CLINICAL_DEPT_RE =
-  /jarroh|jarrox|xirurg|gospital\s*terapi|fakultet\s*terapi|(^|\s)terapiya|terapevt|\buash\b|ichki\s*kasall|propedevt|neonatolog|reabilitolog|reabilitatsi|yuz[-\s]?jag|nevrolog|psixiatr|narkolog|pediatr|urolog|onkolog|akusher|ginekolog|stomat|otorino|otolaring|travmat|ortoped|dermat|venerolog|allergolog|endokrin|gematolog|gemotolog|ftiziatr|epidemiolog|yuqumli\s*kasall|infeksion|hamshiralik\s*ish|umumiy\s*amaliyot|oilaviy\s*shifokor|kardiolog|pulmonolog|gastroenter|nefrolog|anestezi|reanimat|oftalmolog|revmatolog/i;
+  /jarroh|jarrox|xirurg|gospital\s*terapi|fakultet\s*terapi|(^|\s)terapiya|terapevt|\buash\b|ichki\s*kasall|propedevt|neonatolog|reabilitolog|reabilitatsi|yuz[-\s]?jag|nevrolog|psixiatr|narkolog|pediatr|urolog|onkolog|akusher|ginekolog|stomat|otorino|otolaring|travmat|ortoped|dermat|venerolog|allergolog|endokrin|gematolog|gemotolog|ftiziatr|epidemiolog|yuqumli\s*kasall|infeksion|hamshiralik\s*ish|umumiy\s*amaliyot|oilaviy\s*shifokor|kardiolog|pulmonolog|radiolog|rentgenolog|nurli\s*tashxis|nur\s*diagnost|tibbiy\s*radiolog|gastroenter|nefrolog|anestezi|reanimat|oftalmolog|revmatolog/i;
 
 /**
  * Nomida klinik so'z bo'lsa ham bemor yonida EMAS: "Normal anatomiya, operativ
@@ -110,7 +110,7 @@ const BASIC_SCIENCE_DEPT_RE =
 
 /** Tibbiy, lekin bemor yonida emas — nazariy-tajriba fanlari. */
 const BIOMEDICAL_RE =
-  /anatom|morfolog|fiziolog|patofiziolog|patologik\s*anatom|gistolog|sitolog|embriolog|mikrobiolog|virusolog|parazitolog|immunolog|biokimyo|bioxim|tibbiy\s*kimyo|farmakolog|farmatsi|farmakognoz|gigiyen|gigien|sanitari|toksikolog|genetik|tibbiy\s*biolog|biolog|sud\s*tibbiy|tibbiy\s*statistika|normal\s*anatom|latin\s*tili\s*va\s*tibbiy|radiolog|rentgen|nurli\s*tashxis|laboratoriya\s*ish|sogliqni\s*saqlash|preventiv|davolash\s*ish|tibbiy\s*profilaktika|jamoat\s*salomatlig/i;
+  /anatom|morfolog|fiziolog|patofiziolog|patologik\s*anatom|gistolog|sitolog|embriolog|mikrobiolog|virusolog|parazitolog|immunolog|biokimyo|bioxim|tibbiy\s*kimyo|farmakolog|farmatsi|farmakognoz|gigiyen|gigien|sanitari|toksikolog|genetik|tibbiy\s*biolog|biolog|sud\s*tibbiy|tibbiy\s*statistika|normal\s*anatom|latin\s*tili\s*va\s*tibbiy|laboratoriya\s*ish|sogliqni\s*saqlash|preventiv|davolash\s*ish|tibbiy\s*profilaktika|jamoat\s*salomatlig/i;
 
 /**
  * Mavzu bemor yonidagi QARORNI talab qiladimi. Shunday bo'lsa — fan qanday

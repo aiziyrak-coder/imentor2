@@ -18,6 +18,12 @@ QL_BOUNDS = {"min": cc.TEST_QUESTION_LIMIT_MIN, "max": cc.TEST_QUESTION_LIMIT_MA
 KEYS_QL_BOUNDS = {"min": cc.CASE_QUESTION_LIMIT_MIN, "max": cc.CASE_QUESTION_LIMIT_MAX}
 
 
+#: nginx `/api/` 300 s da uzadi; javob undan oldin chiqishi kerak.
+EXAM_RESPONSE_BUDGET_SEC = 280
+#: Bundan kam vaqt qolsa gpt-5.4 tekshiruvi ulgurmaydi — o'tkazib yuboriladi.
+EXAM_REVIEW_MIN_SEC = 45
+
+
 def _params(request: Request) -> dict:
     return dict(request.query_params)
 
@@ -325,6 +331,14 @@ async def external_generate_mcq(request: Request, db: Session = Depends(get_db))
     Body JSON: department_name | department_code, subject (fan), count (default 20), language (uz|ru|en).
     """
     import json as _json
+    import logging
+    import random as _random
+    import time as _time
+
+    from fastapi.concurrency import run_in_threadpool
+
+    from app.services.exam_review import review_exam_questions
+    from app.services.question_quality import ungradable_flaws
 
     from app.core.config import get_settings
     from app.services import book_retrieval as rag
@@ -471,11 +485,15 @@ async def external_generate_mcq(request: Request, db: Session = Depends(get_db))
     except Exception:
         pass
 
+    started = _time.monotonic()
     try:
-        content = oai.generate_openai_chat(
+        # Bloklovchi so'rov — threadpool'da: aks holda worker daqiqalab band bo'lardi.
+        content = await run_in_threadpool(
+            oai.generate_openai_chat,
             api_key,
             messages=messages,
-            model=settings.openai_chat_model,
+            # Imtihon savoli — yozish modeli test bilan bir xil, tekshiruvchi kuchliroq (pastda).
+            model=oai.model_for("exam_generate"),
             # Ko'p modellarda completion limi 16k — 20×1100=22k yiqilardi.
             max_tokens=min(16000, max(4000, count * 750 + 600)),
             temperature=0.45,
@@ -495,8 +513,8 @@ async def external_generate_mcq(request: Request, db: Session = Depends(get_db))
     if not isinstance(raw_qs, list) or not raw_qs:
         raise HTTPException(status_code=502, detail="AI savollar qaytarmadi")
 
-    out = []
-    for i, q in enumerate(raw_qs[:count]):
+    candidates = []
+    for q in raw_qs[:count]:
         if not isinstance(q, dict):
             continue
         opts = q.get("options") or q.get("choices") or []
@@ -513,13 +531,44 @@ async def external_generate_mcq(request: Request, db: Session = Depends(get_db))
         text = str(q.get("text") or q.get("question") or "").strip()
         if not text:
             continue
+        # Bir xil / bo'sh variantli savol imtihonga berilmaydi.
+        if ungradable_flaws(opts):
+            continue
+        candidates.append(
+            {"text": text, "options": opts, "correctIndex": ci, "explanation": str(q.get("explanation") or "").strip()}
+        )
+
+    # Yakuniy imtihon — kuchli tekshiruvchi (`exam_review`, standart gpt-5.4).
+    # nginx 300 s da uzadi: vaqt qolmagan bo'lsa tekshiruvsiz beriladi.
+    review_budget = int(EXAM_RESPONSE_BUDGET_SEC - (_time.monotonic() - started))
+    if review_budget >= EXAM_REVIEW_MIN_SEC:
+        candidates = await run_in_threadpool(
+            review_exam_questions,
+            api_key,
+            candidates,
+            subject=topic,
+            department=dept.name,
+            lang_name=lang_name,
+            timeout_sec=review_budget,
+        )
+    else:
+        logging.getLogger(__name__).warning("EXAM_REVIEW_SKIPPED: generatsiyadan keyin %ss qoldi", review_budget)
+
+    out = []
+    for i, q in enumerate(candidates):
+        opts, ci = q["options"], q["correctIndex"]
+        # Model to'g'ri javobni ko'pincha A ga qo'yadi — aralashtiramiz.
+        order = list(range(len(opts)))
+        _random.shuffle(order)
+        opts = [opts[k] for k in order]
+        ci = order.index(ci)
         out.append(
             {
                 "id": i + 1,
-                "text": text,
+                "text": q["text"],
                 "options": opts,
                 "correctIndex": ci,
-                "explanation": str(q.get("explanation") or "").strip(),
+                "explanation": q["explanation"],
                 "source": "imentor_faculty_ai_books",
                 "department_code": dept.code,
                 "department_name": dept.name,

@@ -921,6 +921,7 @@ export function BankSection({ filters, onUnauthorized }: SectionProps) {
 export const AI_KIND_LABEL: Record<string, string> = {
   test_generate: 'Test yaratish',
   test_generate_brief: 'Test yaratish (qisqa izoh)',
+  test_repair: 'Test: ekspert tekshiruvi',
   test_option_explanations: 'Test tahlili va variant izohlari',
   test_translate: 'Test tarjimasi',
   case_generate: 'Vaziyatli masala yaratish',
@@ -932,6 +933,7 @@ export const AI_KIND_LABEL: Record<string, string> = {
   syllabus_extract_retry: 'Sillabusni o‘qish (kuchli model)',
   handout_infographic: 'Tarqatma infografikasi',
   external_mcq: 'Tashqi API (fermi.uz) testlari',
+  exam_review: 'Yakuniy imtihon: ekspert tekshiruvi',
   online_case_review: 'Talaba keysini AI tekshirishi',
   malaka_test_import: 'Malaka: fayldan test o‘qish',
   embedding: 'Darslikdan qidiruv (embedding)',

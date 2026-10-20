@@ -26,23 +26,105 @@ class OpenAiClientError(Exception):
 #: USMLE vignette emas. Faqat test yaratish va tuzatish `gpt-4.1-mini` da;
 #: tarjima, izoh, keys, ma'ruza — avvalgidek eng arzon modelda. Narxi:
 #: haftasiga taxminan $7 o'rniga $27 (2026-10-16 o'lchovi).
-QUALITY_MODEL = "gpt-4.1-mini"
-QUALITY_PURPOSES = frozenset({
-    "test_generate", "test_generate_brief", "test_repair",
-    # Taqdimot mazmuni (2026-10-20, "kuchliroq taqdimot"): ~1200 ta/hafta,
-    # nano'da ~$2.7, mini'da ~$11 haftasiga. Tarjima va til tuzatish — nano.
+#:
+#: 2026-10-19: `gpt-5.4-mini` ga o'tildi. Lokal o'lchovda (6 mavzu x 10 savol,
+#: hakam `gpt-5.5`) imtihonga yaroqli savollar: eski prompt + 4.1-mini — 28%,
+#: yangi prompt + 4.1-mini — 40%, yangi prompt + gpt-4.1 — 45%,
+#: yangi prompt + gpt-5.4-mini — 78%; xato kalit 35 tadan 4 taga tushdi.
+#: Radiologiya testlari 0/20 dan 16/20 ga chiqdi.
+#:
+#: Gibrid (2026-10-19): savolni yozish va tekshirish alohida modelda.
+#: Yozish — eng ko'p output token (savol + izoh), shuning uchun arzonroq
+#: modelda; tekshiruv — qisqa javob, lekin xato kalitni faqat kuchli model
+#: ushlaydi (`gpt-4.1-mini` o'zini tekshirganda deyarli hammasiga "ok" dedi).
+#: Ikkalasi ham `.env` dan almashtiriladi: OPENAI_TEST_GENERATE_MODEL,
+#: OPENAI_TEST_REVIEW_MODEL.
+#:
+#: Yakuniy imtihon (2026-10-20): savol bir xil modelda yoziladi, lekin
+#: tekshiruvchi kuchliroq — `gpt-5.4`. Zaif 14 fanda imtihonga yaroqli
+#: savollar 5.4-mini tekshiruvchi bilan 64%, gpt-5.4 bilan 78% bo'ldi.
+#: Narxi testga ~3 barobar qimmat, shuning uchun faqat imtihon yo'lida
+#: (`exam_*` purpose). `.env`: OPENAI_EXAM_REVIEW_MODEL.
+DEFAULT_TEST_GENERATE_MODEL = "gpt-5.4-mini"
+DEFAULT_TEST_REVIEW_MODEL = "gpt-5.4-mini"
+DEFAULT_EXAM_REVIEW_MODEL = "gpt-5.4"
+#: Reasoning modellar uchun fikrlash darajasi: "low" sifat va tezlik o'rtasi.
+QUALITY_REASONING_EFFORT = "low"
+GENERATE_PURPOSES = frozenset({"test_generate", "test_generate_brief", "exam_generate"})
+REVIEW_PURPOSES = frozenset({"test_repair"})
+EXAM_REVIEW_PURPOSES = frozenset({"exam_review"})
+#: Taqdimot mazmuni (2026-10-20, "kuchliroq taqdimot"): ~1200 ta/hafta,
+#: nano'da ~$2.7, mini'da ~$11 haftasiga. Tarjima va til tuzatish — nano.
+PRESENTATION_MODEL = "gpt-4.1-mini"
+PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
 })
+QUALITY_PURPOSES = GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+#: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
+#: o'tib ketmasin (masalan "gpt-5.5-pro").
+ALLOWED_QUALITY_MODELS = frozenset({"gpt-4.1-mini", "gpt-4.1", "gpt-5.4-mini", "gpt-5.4", "gpt-5-mini"})
+
+
+def _env_model(name: str, default: str) -> str:
+    import os
+
+    value = (os.environ.get(name) or "").strip()
+    return value if value in ALLOWED_QUALITY_MODELS else default
+
+
+def test_generate_model() -> str:
+    return _env_model("OPENAI_TEST_GENERATE_MODEL", DEFAULT_TEST_GENERATE_MODEL)
+
+
+def test_review_model() -> str:
+    return _env_model("OPENAI_TEST_REVIEW_MODEL", DEFAULT_TEST_REVIEW_MODEL)
+
+
+def exam_review_model() -> str:
+    return _env_model("OPENAI_EXAM_REVIEW_MODEL", DEFAULT_EXAM_REVIEW_MODEL)
+
+
+#: Eski nom: tashqi MCQ (OnlineTest) shu bilan yaratadi.
+QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 
 
 def model_for(purpose: str | None) -> str:
-    """Vazifaga qarab model: test — `QUALITY_MODEL`, qolgani — eng arzoni."""
-    return QUALITY_MODEL if (purpose or "") in QUALITY_PURPOSES else "gpt-4.1-nano"
+    """Vazifaga qarab model: test, imtihon tekshiruvi va taqdimot — sifat modeli, qolgani — eng arzoni."""
+    p = purpose or ""
+    if p in GENERATE_PURPOSES:
+        return test_generate_model()
+    if p in REVIEW_PURPOSES:
+        return test_review_model()
+    if p in EXAM_REVIEW_PURPOSES:
+        return exam_review_model()
+    if p in PRESENTATION_PURPOSES:
+        return PRESENTATION_MODEL
+    return "gpt-4.1-nano"
 
 
 def _economy_model_name(model: str) -> str:
-    # Faqat sifat modeli o'tkaziladi; qolgan har qanday so'rov eng arzoniga.
-    return QUALITY_MODEL if model == QUALITY_MODEL else "gpt-4.1-nano"
+    # Faqat sifat modellari o'tkaziladi; qolgan har qanday so'rov eng arzoniga.
+    return model if model in ALLOWED_QUALITY_MODELS else "gpt-4.1-nano"
+
+
+def _is_reasoning_model(model: str) -> bool:
+    return bool(re.match(r"^(gpt-5|o\d)", model or ""))
+
+
+def _adapt_body_for_model(body: dict[str, Any]) -> dict[str, Any]:
+    """GPT-5 / o-seriya: `max_tokens` va `temperature` qabul qilinmaydi.
+
+    Fikrlash tokenlari ham `max_completion_tokens` ga kiradi, shuning uchun
+    javob uchun so'ralgan hajm ustiga zaxira qo'shiladi — aks holda uzun test
+    JSON o'rtasida kesilib qoladi.
+    """
+    if not _is_reasoning_model(str(body.get("model") or "")):
+        return body
+    out = dict(body)
+    out["max_completion_tokens"] = int(out.pop("max_tokens", 4096) or 4096) + 8000
+    out.pop("temperature", None)
+    out.setdefault("reasoning_effort", QUALITY_REASONING_EFFORT)
+    return out
 
 
 # Arzon model qoladi, lekin javob uzunligi so'ralganicha beriladi. Ilgari 1200
@@ -231,6 +313,7 @@ def generate_openai_chat(
         "temperature": temperature,
         "stream": False,
     }
+    body = _adapt_body_for_model(body)
     if response_format:
         body["response_format"] = response_format
     return _complete_cached(api_key, body, timeout_sec, usage_kind)
@@ -259,6 +342,7 @@ def stream_openai_chat(
         # Oqimda `usage` faqat so'ralsa keladi — oxirgi, `choices` bo'sh bo'lakda.
         "stream_options": {"include_usage": True},
     }
+    body = _adapt_body_for_model(body)
     try:
         resp = requests.post(
             OPENAI_CHAT_URL,
@@ -341,6 +425,7 @@ def generate_openai_text(
         "temperature": temperature,
         "stream": False,
     }
+    body = _adapt_body_for_model(body)
 
     last_err: str | None = None
     for attempt in range(max(1, max_429_retries)):

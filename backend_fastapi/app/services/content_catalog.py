@@ -16,6 +16,7 @@ from app.models.content import AcademicDepartment, CourseSyllabus
 from app.models.prepared_content import CATALOG_KINDS, KIND_CASE, PreparedContent
 from app.services import case_i18n
 from app.services.syllabus_access import exclude_restricted_prepared, like_prefix
+from app.services.question_quality import ungradable_flaws
 
 PUBLISH_DELAY = timedelta(0)
 _TOPIC_NORM_RE = re.compile(r"^(\d+)::([^:]+)::(.+)$")
@@ -353,6 +354,11 @@ def collect_unique_questions_from_tests(
             # Kalitsiz savol tashqi tizimga BERILMAYDI: ilgari u jimgina A (0)
             # deb yuborilardi va to'g'ri javob bergan talaba xato olardi.
             if isinstance(correct, bool) or not isinstance(correct, int) or not 0 <= correct < len(options):
+                continue
+            # Bir xil / tartibi almashgan / bo'sh variantli savol tashqi
+            # imtihonga BERILMAYDI: talaba to'g'ri javobni bilib ham xato
+            # olishi mumkin (2026-10-19, radiologiya yakuniy testi shikoyati).
+            if ungradable_flaws(options):
                 continue
             refs = q.get("references")
             if not (isinstance(refs, list) and refs):

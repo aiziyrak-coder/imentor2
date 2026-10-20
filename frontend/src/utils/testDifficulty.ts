@@ -192,8 +192,12 @@ export function testStemInstruction(level: TestDifficulty, domain: SubjectDomain
     return (
       (level === 'hard'
         ? 'HAR savol 45–90 so\'z, 3–4 zich jumla: preparat/namuna/tajriba sharti; KAMIDA UCHTA ' +
-          'raqam+birlik bilan topilma (biri chalg\'ituvchi); oxirida qaror savoli. '
-        : 'HAR savol 2–3 zich jumla: preparat/namuna/o\'lchov sharti; raqam+birlik bilan topilma; qaror savoli ') +
+          'aniq topilma (biri chalg\'ituvchi); oxirida qaror savoli. '
+        : 'HAR savol 2–3 zich jumla: preparat/namuna/o\'lchov sharti; aniq topilma; qaror savoli ') +
+      // Topilma raqam bo'lishi SHART EMAS (2026-10-19): "raqam+birlik" talabi
+      // gistologiyada "1 cm² dagi mikrovorsinka soni" kabi uydirma chiqardi.
+      'Topilma — tuzilma belgisi, bo\'yash natijasi, joylashuv, mexanizm bosqichi yoki REAL o\'lchanadigan ko\'rsatkich. ' +
+      'Raqam ishlatilsa — darslikdagi haqiqiy qiymat, o\'zaro mos va to\'g\'ri hisoblangan bo\'lsin. ' +
       '(qaysi mexanizm, qaysi tuzilma, ko\'rsatkich qayerga siljiydi). 5 ta yaqin variant. ' +
       'Individual bemor kartasi YARATILMASIN. ' +
       // Jonli natijada savol ichida "(Source: Robbins..., p. 108)" turardi —

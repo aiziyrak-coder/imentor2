@@ -38,7 +38,7 @@ describe('testDifficulty', () => {
     expect(buildTestDifficultyPrompt('easy')).toMatch(/TA'RIF EMAS|TA'RIF/);
     expect(testStemInstruction('easy')).toMatch(/2 qatorlik/);
     expect(testStemInstruction('medium')).toMatch(/2–3 qatorlik/);
-    expect(testStemInstruction('hard')).toMatch(/3 zich jumla/);
+    expect(testStemInstruction('hard')).toMatch(/USMLE Step 2 CK uslubidagi klinik vignette, 4–6 jumla/);
     expect(testStemInstruction('hard')).toMatch(/ABG=tashxis/);
     expect(testStemInstruction('hard', 'academic')).toMatch(/Klinik bemor/i);
     expect(buildTestDifficultyPrompt('hard', 'academic')).toMatch(/klinik vignette EMAS/i);

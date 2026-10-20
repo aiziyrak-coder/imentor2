@@ -54,6 +54,11 @@ x-backend-env: &backend-env
   CAM_STUDENT_API_URL: ${CAM_STUDENT_API_URL:-}
   CAM_STUDENT_API_KEY: ${CAM_STUDENT_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  # Test: yozish va tekshirish modeli (gibrid, openai_client.py).
+  OPENAI_TEST_GENERATE_MODEL: ${OPENAI_TEST_GENERATE_MODEL:-gpt-5.4-mini}
+  OPENAI_TEST_REVIEW_MODEL: ${OPENAI_TEST_REVIEW_MODEL:-gpt-5.4-mini}
+  # Yakuniy imtihon (OnlineTest generate-mcq) tekshiruvchisi.
+  OPENAI_EXAM_REVIEW_MODEL: ${OPENAI_EXAM_REVIEW_MODEL:-gpt-5.4}
   # HEMIS — dars jadvalining haqiqiy manbasi, faqat o'qiladi.
   HEMIS_API_URL: ${HEMIS_API_URL:-}
   HEMIS_API_TOKEN: ${HEMIS_API_TOKEN:-}

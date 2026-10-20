@@ -23,7 +23,7 @@
  * xunuk qiladi, lekin baho to'g'ri qo'yiladi — shuning uchun boshqa savol
  * qolmasa, ular oxirgi chora sifatida ishlatiladi (2026-10-15).
  */
-export const UNGRADABLE = new Set(['javob_yoq', 'variant_takror', 'hammasi_togri']);
+export const UNGRADABLE = new Set(['javob_yoq', 'variant_takror', 'variant_tartib_takror', 'hammasi_togri']);
 
 export type QuestionFlaw =
   | 'ikki_savol'
@@ -31,6 +31,7 @@ export type QuestionFlaw =
   | 'javob_savolda'
   | 'javob_eng_uzun'
   | 'variant_takror'
+  | 'variant_tartib_takror'
   | 'hammasi_togri'
   | 'javob_yoq';
 
@@ -104,6 +105,16 @@ export function questionFlaws(q: TestQuestionLike): QuestionFlaw[] {
   // 2. Javob savolning o'zida aytilgan.
   const needle = core(correct);
   if (needle.length >= 8 && fold(stem).includes(needle)) out.push('javob_savolda');
+  else {
+    // So'z boshi bo'yicha (o'zbekcha qo'shimchalar: "ishqalanish" ~ "ishqalanishi").
+    // Stem "ishqalanish shovqini bor" deb, javob "Plevral ishqalanish shovqini"
+    // bo'lgan savollar ushlanmasdi (2026-10-19, 370 savolda 22 ta).
+    const answerStems = stemsOf(correct);
+    const stemStems = new Set(stemsOf(stem));
+    if (answerStems.length >= 2 && answerStems.filter((w) => stemStems.has(w)).length / answerStems.length >= 0.6) {
+      out.push('javob_savolda');
+    }
+  }
 
   // 3. To'g'ri javob variantlar ichida ANIQ eng uzuni.
   //    Chegara qo'yilgan: har qanday farq emas, faqat ko'zga tashlanadigani —
@@ -117,11 +128,112 @@ export function questionFlaws(q: TestQuestionLike): QuestionFlaw[] {
   // 4. Takrorlangan variant: talaba ikki bir xil javobni ko'radi.
   const flat = opts.map((o) => fold(o)).filter(Boolean);
   if (new Set(flat).size !== flat.length) out.push('variant_takror');
+  else {
+    // Bir xil so'zlar, faqat tartibi boshqa: "Sil, emfizem, sarkoidoz" va
+    // "Emfizem, sil, sarkoidoz" — talaba uchun bu ikki teng javob (2026-10-19,
+    // radiologiya yakuniy testi). Qisqa nomlar (<3 so'z) tasodifan mos kelmasin.
+    const bags = opts
+      .map((o) => fold(o).split(/[^\p{L}\p{N}]+/u).filter(Boolean).sort())
+      .filter((words) => words.length >= 3)
+      .map((words) => words.join(' '));
+    if (new Set(bags).size !== bags.length) out.push('variant_tartib_takror');
+  }
 
   // 5. "Hammasi to'g'ri" — bitta to'g'ri javob qoidasini buzadi.
   if (opts.some((o) => ALL_OF_THE_ABOVE.test(o))) out.push('hammasi_togri');
 
   return out;
+}
+
+/** 4+ harfli so'zlarning 6 harfli boshi — o'zbekcha qo'shimchalarni tenglashtiradi. */
+function stemsOf(value: string): string[] {
+  return fold(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 4)
+    .map((w) => w.slice(0, 6));
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter += 1;
+  const union = a.size + b.size - inter;
+  return union ? inter / union : 0;
+}
+
+/**
+ * Test ichidagi takror savollarni olib tashlaydi (2026-10-19).
+ *
+ * 37 klinik fanda 370 savol tekshirilganda deyarli har testda 1–3 juft savol
+ * bir xil narsani so'radi: yetishmagan savollar qayta so'ralganda (`topUp`)
+ * model mavjud ro'yxatni ko'rsa ham shu tushunchani boshqa bemor bilan
+ * qaytarardi. Ikki belgi:
+ *   * to'g'ri javob bir xil (so'z boshi bo'yicha) — 32 juft;
+ *   * stem so'zlarining 40% dan ko'pi umumiy — 7 juft.
+ * Birinchisi qoladi, keyingisi tashlanadi.
+ */
+export function dropDuplicateQuestions<T extends TestQuestionLike>(
+  questions: T[],
+): { kept: T[]; dropped: T[] } {
+  const kept: T[] = [];
+  const dropped: T[] = [];
+  const keys: Set<string>[] = [];
+  const stemSets: Set<string>[] = [];
+  for (const q of questions || []) {
+    const opts = q.options || [];
+    const idx = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
+    // Kalit: BARCHA so'zlar (rim raqami, son, qisqa so'z ham) — "Blek I sinf" va
+    // "Blek II sinf" takror emas (2026-10-19: tor mavzuda test chiqmay qolgan).
+    const key = new Set(
+      idx >= 0 && idx < opts.length
+        ? fold(String(opts[idx] || '')).split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((w) => w.slice(0, 4))
+        : [],
+    );
+    const stemSet = new Set(stemsOf(String(q.question || '')));
+    // Kalit so'zlari 60% mos — takror ("Past doza aspirin boshlash" ~ "Past dozali aspirin").
+    const dup =
+      (key.size > 0 && keys.some((other) => jaccard(other, key) >= 0.6)) ||
+      stemSets.some((other) => jaccard(other, stemSet) >= 0.5);
+    if (dup) {
+      dropped.push(q);
+      continue;
+    }
+    kept.push(q);
+    keys.push(key);
+    stemSets.push(stemSet);
+  }
+  return { kept, dropped };
+}
+
+/**
+ * Bir variant butun testda ko'p marta takrorlanadimi (2026-10-19).
+ *
+ * Model bir testda bir xil 6–8 ta variant iborasini aylantirib ishlatardi
+ * ("Temir preparatlari", "Parietal hujayra antitanalari" — 10 savolning
+ * 6 tasida). Talaba variantlarni yodlab, savolni o'qimay yechadi. Biror
+ * variant 3-marta uchragan savoldan boshlab savol "zaif" hisoblanadi.
+ */
+export function overusedOptionQuestions<T extends TestQuestionLike>(questions: T[], limit = 2): Set<T> {
+  const seen = new Map<string, number>();
+  const flagged = new Set<T>();
+  for (const q of questions || []) {
+    let over = false;
+    for (const o of q.options || []) {
+      const key = fold(String(o || ''));
+      if (!key) continue;
+      const n = (seen.get(key) || 0) + 1;
+      seen.set(key, n);
+      if (n > limit) over = true;
+    }
+    if (over) flagged.add(q);
+  }
+  return flagged;
+}
+
+/** Testda allaqachon ishlatilgan to'g'ri javoblar — qayta so'rovda taqiqlanadi. */
+export function usedAnswers(questions: TestQuestionLike[]): string[] {
+  return (questions || [])
+    .map((q) => (q.options || [])[q.correctOptionIndex ?? -1])
+    .filter((a): a is string => Boolean(a && String(a).trim()));
 }
 
 /** Nuqsoni bor savollarni ajratadi. */
@@ -150,6 +262,8 @@ export function flawRetryNote(flaws: QuestionFlaw[]): string {
     javob_eng_uzun:
       'to\'g\'ri javob variantlar ichida eng uzuni bo\'lgan — 5 variant uzunligi va tuzilishi bir-biriga yaqin bo\'lsin',
     variant_takror: 'bir xil variant ikki marta yozilgan',
+    variant_tartib_takror:
+      'ikki variant bir xil so\'zlardan iborat, faqat tartibi boshqa — har variant MAZMUNAN boshqa javob bo\'lsin',
     hammasi_togri: '"hammasi to\'g\'ri" turidagi variant ishlatilgan — TAQIQLANADI',
     javob_yoq: 'to\'g\'ri javob raqami yo\'q yoki variantlar sonidan tashqarida',
   };

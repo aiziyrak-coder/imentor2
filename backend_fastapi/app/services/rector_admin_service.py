@@ -468,6 +468,9 @@ def content_bank(db: Session) -> dict:
 AI_PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-4.1-nano": (0.10, 0.025, 0.40),
     "gpt-4.1-mini": (0.40, 0.10, 1.60),
+    # 2026-10-19, developers.openai.com/api/docs/pricing (standard).
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-5.4": (2.50, 0.25, 15.00),
     "gpt-5-nano": (0.05, 0.005, 0.40),
     "gpt-4o-mini": (0.15, 0.075, 0.60),
     "gpt-4o": (2.50, 1.25, 10.00),
