@@ -54,10 +54,18 @@ GENERATE_PURPOSES = frozenset({"test_generate", "test_generate_brief", "exam_gen
 REVIEW_PURPOSES = frozenset({"test_repair"})
 EXAM_REVIEW_PURPOSES = frozenset({"exam_review"})
 #: Taqdimot mazmuni (2026-10-20, "kuchliroq taqdimot"): ~1200 ta/hafta,
-#: nano'da ~$2.7, mini'da ~$11 haftasiga. Tarjima va til tuzatish — nano.
-PRESENTATION_MODEL = "gpt-4.1-mini"
+#: nano'da ~$2.7, mini'da ~$11 haftasiga.
+#:
+#: 2026-10-20 (kech): test bilan bir xil model — `gpt-5.4-mini`. 4.1-mini
+#: dagi 400 ta prod taqdimotda: punktlarning 98% i 12 so'zdan qisqa (prompt
+#: 15–30 so'z so'raydi), 67% i 20 slayddan kam, ma'ruzadagi fan xatosi
+#: (masalan "Brucella gram-musbat") slaydga ko'chadi. Taxminiy narx:
+#: ~$0.08/taqdimot, ~$90 haftasiga. `.env`: OPENAI_PRESENTATION_MODEL.
+#: Til tuzatish ham shu modelda — nano tarjimasi yana tekshiruvdan o'tmay
+#: butun taqdimotni xato bilan yiqitardi.
 PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
+    "presentation_language_repair",
 })
 QUALITY_PURPOSES = GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
@@ -84,6 +92,10 @@ def exam_review_model() -> str:
     return _env_model("OPENAI_EXAM_REVIEW_MODEL", DEFAULT_EXAM_REVIEW_MODEL)
 
 
+def presentation_model() -> str:
+    return _env_model("OPENAI_PRESENTATION_MODEL", DEFAULT_TEST_GENERATE_MODEL)
+
+
 #: Eski nom: tashqi MCQ (OnlineTest) shu bilan yaratadi.
 QUALITY_MODEL = DEFAULT_TEST_GENERATE_MODEL
 
@@ -98,7 +110,7 @@ def model_for(purpose: str | None) -> str:
     if p in EXAM_REVIEW_PURPOSES:
         return exam_review_model()
     if p in PRESENTATION_PURPOSES:
-        return PRESENTATION_MODEL
+        return presentation_model()
     return "gpt-4.1-nano"
 
 

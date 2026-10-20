@@ -55,9 +55,14 @@ def test_review_failure_returns_questions_unchanged():
         assert exam_review.review_exam_questions("k", qs, subject="s", department="d", lang_name="o'zbek") == qs
 
 
-def test_presentation_purposes_keep_their_model():
+def test_presentation_uses_the_test_model(monkeypatch):
+    monkeypatch.delenv("OPENAI_PRESENTATION_MODEL", raising=False)
+    for purpose in ("presentation_generate", "presentation_continue", "presentation_language_repair"):
+        assert oai.model_for(purpose) == "gpt-5.4-mini"
+    monkeypatch.setenv("OPENAI_PRESENTATION_MODEL", "gpt-4.1-mini")
     assert oai.model_for("presentation_generate") == "gpt-4.1-mini"
-    assert oai.model_for("presentation_language_repair") == "gpt-4.1-nano"
+    monkeypatch.setenv("OPENAI_PRESENTATION_MODEL", "gpt-5.5-pro")
+    assert oai.model_for("presentation_generate") == "gpt-5.4-mini"
 
 
 def test_review_chunks_map_back_to_the_right_questions():
