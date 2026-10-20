@@ -59,6 +59,8 @@ x-backend-env: &backend-env
   OPENAI_TEST_REVIEW_MODEL: ${OPENAI_TEST_REVIEW_MODEL:-gpt-5.4-mini}
   # Yakuniy imtihon (OnlineTest generate-mcq) tekshiruvchisi.
   OPENAI_EXAM_REVIEW_MODEL: ${OPENAI_EXAM_REVIEW_MODEL:-gpt-5.4}
+  # Test tarjimasi (ru/uz/en) — imtihonga beriladi, nano kalitni buzardi.
+  OPENAI_TEST_TRANSLATE_MODEL: ${OPENAI_TEST_TRANSLATE_MODEL:-gpt-4.1-mini}
   # HEMIS — dars jadvalining haqiqiy manbasi, faqat o'qiladi.
   HEMIS_API_URL: ${HEMIS_API_URL:-}
   HEMIS_API_TOKEN: ${HEMIS_API_TOKEN:-}
