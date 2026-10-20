@@ -19,6 +19,7 @@ import {
   outputLanguageLooksWrong,
   strictLanguageDirective,
 } from '../utils/outputLanguage';
+import { AI_RETRY_DELAYS_MS, withAiRetry } from '../utils/aiRetry';
 import { resolvePresentationImages } from '../utils/presentationImages';
 import {
   extractTopicsByRegex,
@@ -1881,6 +1882,10 @@ async function attachOptionExplanations(
   return { ...session, questions: merged };
 }
 
+/** Taqdimot so'rovining brauzerdagi vaqt chegarasi: server OpenAI'ni 540 s kutadi,
+ *  nginx 600 s da uzadi (`openai_client.PRESENTATION_TIMEOUT_SEC`). */
+const PRESENTATION_TIMEOUT_MS = 590_000;
+
 /** Taqdimot uchun domen qoidasi — slaydlar mavzuning o'zidan kelib chiqsin. */
 function presentationDomainRule(domain: SubjectDomain): string {
   if (domain === 'clinical') {
@@ -1977,19 +1982,30 @@ Limits: title 90 characters, subtitle 120; stats at most 4; columns at most 3; c
     json_schema: PRESENTATION_JSON_SCHEMA,
   };
 
+  // Vaqtinchalik xatoda (vaqt tugashi, tarmoq, 5xx) 3 marta qayta urinamiz;
+  // oxirgi urinish tezkor modelda (`*_fast`, ~30 s) — gpt-5.4 ketma-ket
+  // uzilganda ham o'qituvchi taqdimotsiz qolmasin.
+  const retryLast = (attempt: number) => attempt === AI_RETRY_DELAYS_MS.length;
+  const onRetry = () => params.onProgress?.(translate(params.language, 'ai.progress.content'));
+
   let raw: Partial<PresentationContent> | null = null;
   try {
-    raw = await openaiJson<Partial<PresentationContent>>({
-      model: OPENAI_CHAT,
-      purpose: 'presentation_generate',
-      system,
-      user,
-      maxTokens: 16000,
-      temperature: 0.35,
-      bookContext,
-      responseFormat,
-      parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
-    });
+    raw = await withAiRetry(
+      (attempt) =>
+        openaiJson<Partial<PresentationContent>>({
+          model: OPENAI_CHAT,
+          purpose: retryLast(attempt) ? 'presentation_generate_fast' : 'presentation_generate',
+          system,
+          user,
+          maxTokens: 16000,
+          temperature: 0.35,
+          bookContext,
+          responseFormat,
+          timeoutMs: PRESENTATION_TIMEOUT_MS,
+          parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
+        }),
+      { onRetry },
+    );
   } catch (err) {
     // Retry only an unsupported response format, not quota/network/timeout errors.
     if (!/json_schema|response_format|unsupported.*schema/i.test(String(err))) throw err;
@@ -2002,6 +2018,7 @@ Limits: title 90 characters, subtitle 120; stats at most 4; columns at most 3; c
       maxTokens: 16000,
       temperature: 0.3,
       bookContext,
+      timeoutMs: PRESENTATION_TIMEOUT_MS,
       parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
     });
   }
@@ -2019,9 +2036,10 @@ Limits: title 90 characters, subtitle 120; stats at most 4; columns at most 3; c
       .filter(Boolean);
     try {
       params.onProgress?.(translate(params.language, 'ai.progress.content'));
-      const more = await openaiJson<Partial<PresentationContent>>({
+      const more = await withAiRetry((attempt) => openaiJson<Partial<PresentationContent>>({
         model: OPENAI_CHAT,
-        purpose: 'presentation_continue',
+        purpose: retryLast(attempt) ? 'presentation_continue_fast' : 'presentation_continue',
+        timeoutMs: PRESENTATION_TIMEOUT_MS,
         // `system` AYNAN birinchi chaqiruvdagidek qoladi — davom ettirish
         // ko\'rsatmasi `user` oxiriga qo\'shiladi. Shunda promptning boshi
         // birinchi chaqiruv bilan bir xil bo\'lib, OpenAI uni keshdan oladi.
@@ -2057,7 +2075,7 @@ Limits: title 90 characters, subtitle 120; stats at most 4; columns at most 3; c
           },
         },
         parse: (t) => parseJSONSafe<Partial<PresentationContent>>(t),
-      });
+      }), { onRetry });
       const extra = Array.isArray(more?.slides) ? more.slides : [];
       if (extra.length > 0) {
         raw = { ...raw, slides: [...firstSlides, ...extra] };
@@ -2090,13 +2108,13 @@ Limits: title 90 characters, subtitle 120; stats at most 4; columns at most 3; c
     slideLanguageWrong(slide, params.language),
   );
   if (wrongSlides.length) {
-    const fixed = await openaiJson<{ slides: PresentationContent['slides'] }>({
-      model: OPENAI_CHAT, purpose: 'presentation_language_repair',
+    const fixed = await withAiRetry(() => openaiJson<{ slides: PresentationContent['slides'] }>({
+      model: OPENAI_CHAT, purpose: 'presentation_language_repair', timeoutMs: PRESENTATION_TIMEOUT_MS,
       system: `${strictLanguageDirective(params.language)} Translate ALL visible text and notes in each supplied slide. Preserve slide order, slide_type, numbers, facts, JSON structure and English image_query. Return JSON {slides:[...]}. Do not add slides.`,
       user: JSON.stringify({ slides: wrongSlides.map(({ slide }) => slide) }),
       maxTokens: 16000, temperature: 0.1,
       parse: (text) => parseJSONSafe<{ slides: PresentationContent['slides'] }>(text),
-    });
+    }), { onRetry });
     if (fixed.slides?.length !== wrongSlides.length || fixed.slides.some((slide) =>
       slideLanguageWrong(slide, params.language))) {
       throw new Error(params.language === 'ru' ? 'Не удалось получить все слайды на русском языке. Повторите попытку.' : params.language === 'en' ? 'Some slides could not be translated. Please retry.' : "Ayrim slaydlar tanlangan tilga mos emas. Qayta urining.");

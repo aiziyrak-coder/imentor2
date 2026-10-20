@@ -95,6 +95,7 @@ async function chatViaBackend(params: {
   purpose?: string;
   /** Server RAG uchun ISHLATGAN darsliklar (AI o'ylab topgani emas). */
   onBookReferences?: (refs: MedicalReference[]) => void;
+  timeoutMs?: number;
 }): Promise<string> {
   const call = async (token: string) =>
     httpJson<{ content?: string; detail?: string; book_references?: MedicalReference[] }>(`${apiBaseUrl()}/v1/education-ai/completion/`, {
@@ -111,7 +112,7 @@ async function chatViaBackend(params: {
         ...(params.responseFormat ? { response_format: params.responseFormat } : {}),
         ...(params.purpose ? { purpose: params.purpose } : {}),
       },
-      timeoutMs: 290_000,
+      timeoutMs: params.timeoutMs ?? 290_000,
     });
 
   let token = await ensureBackendAccessToken().catch(async () => {
@@ -299,6 +300,8 @@ async function chatCompletion(params: {
   responseFormat?: Record<string, unknown>;
   purpose?: string;
   onBookReferences?: (refs: MedicalReference[]) => void;
+  /** Server proxy so'rovining vaqt chegarasi (standart 290 s). */
+  timeoutMs?: number;
 }): Promise<string> {
   const msgs: ChatMessage[] = [];
   const sys = params.system.trim();
@@ -316,6 +319,7 @@ async function chatCompletion(params: {
       responseFormat: params.responseFormat,
       purpose: params.purpose,
       onBookReferences: params.onBookReferences,
+      timeoutMs: params.timeoutMs,
     });
   }
   return chatViaDirectApi({
@@ -402,6 +406,7 @@ export async function openaiJson<T>(opts: {
   responseFormat?: Record<string, unknown>;
   purpose?: string;
   onBookReferences?: (refs: MedicalReference[]) => void;
+  timeoutMs?: number;
 }): Promise<T> {
   const text = await chatCompletion({
     model: opts.model ?? OPENAI_CHAT,
@@ -413,6 +418,7 @@ export async function openaiJson<T>(opts: {
     responseFormat: opts.responseFormat,
     purpose: opts.purpose,
     onBookReferences: opts.onBookReferences,
+    timeoutMs: opts.timeoutMs,
   });
   return opts.parse(text);
 }

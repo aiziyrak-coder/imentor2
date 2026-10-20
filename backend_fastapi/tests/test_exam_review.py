@@ -75,3 +75,13 @@ def test_review_chunks_map_back_to_the_right_questions():
         out = exam_review.review_exam_questions("k", qs, subject="s", department="d", lang_name="o'zbek")
     assert call.call_count == 2
     assert [q["text"] for q in out] == ["q1", "q3", "q4", "q5", "q6"]
+
+
+def test_presentation_timeout_and_fast_retry_model(monkeypatch):
+    monkeypatch.delenv("OPENAI_TEST_GENERATE_MODEL", raising=False)
+    assert oai.timeout_for("presentation_generate") == 540
+    assert oai.timeout_for("presentation_continue_fast") == 540
+    assert oai.timeout_for("test_generate") == 280
+    assert oai.timeout_for(None) == 280
+    assert oai.model_for("presentation_generate_fast") == "gpt-5.4-mini"
+    assert oai.model_for("presentation_continue_fast") == "gpt-5.4-mini"

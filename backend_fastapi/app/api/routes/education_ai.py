@@ -178,7 +178,7 @@ def education_ai_completion(
             model=model,
             max_tokens=_clamped_tokens(payload.max_tokens),
             temperature=min(float(payload.temperature or 0.35), 0.7),
-            timeout_sec=280,
+            timeout_sec=oai.timeout_for(payload.purpose),
             response_format=payload.response_format,
             usage_kind=payload.purpose or "chat",
         )

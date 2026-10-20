@@ -76,7 +76,17 @@ PRESENTATION_PURPOSES = frozenset({
     "presentation_generate", "presentation_generate_fallback", "presentation_continue",
     "presentation_language_repair",
 })
-QUALITY_PURPOSES = GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES
+#: Brauzerdagi oxirgi (3-) qayta urinish: gpt-5.4 ketma-ket uzilgan bo'lsa,
+#: tezkor modelda (~30 s) yakunlanadi — o'qituvchi bo'sh qo'l qaytmasin.
+PRESENTATION_FAST_PURPOSES = frozenset({"presentation_generate_fast", "presentation_continue_fast"})
+#: gpt-5.4 bitta taqdimotga 119–157 s sarflaydi (harness). 280 s zaxirasi
+#: OpenAI sekinlashganda yetmasdi. Zanjir: OpenAI 540 s < brauzer 590 s <
+#: nginx 600 s (konteyner va host nginx ikkalasida ham).
+PRESENTATION_TIMEOUT_SEC = 540
+DEFAULT_TIMEOUT_SEC = 280
+QUALITY_PURPOSES = (
+    GENERATE_PURPOSES | REVIEW_PURPOSES | EXAM_REVIEW_PURPOSES | PRESENTATION_PURPOSES | PRESENTATION_FAST_PURPOSES
+)
 #: Ruxsat etilgan sifat modellari — `.env` dagi xato nom qimmat modelga
 #: o'tib ketmasin (masalan "gpt-5.5-pro").
 ALLOWED_QUALITY_MODELS = frozenset({"gpt-4.1-mini", "gpt-4.1", "gpt-5.4-mini", "gpt-5.4", "gpt-5-mini"})
@@ -120,7 +130,17 @@ def model_for(purpose: str | None) -> str:
         return exam_review_model()
     if p in PRESENTATION_PURPOSES:
         return presentation_model()
+    if p in PRESENTATION_FAST_PURPOSES:
+        return test_generate_model()
     return "gpt-4.1-nano"
+
+
+def timeout_for(purpose: str | None) -> int:
+    """OpenAI so'rovi uchun vaqt chegarasi (soniya): taqdimot uzoqroq kutadi."""
+    p = purpose or ""
+    if p in PRESENTATION_PURPOSES or p in PRESENTATION_FAST_PURPOSES:
+        return PRESENTATION_TIMEOUT_SEC
+    return DEFAULT_TIMEOUT_SEC
 
 
 def _economy_model_name(model: str) -> str:
